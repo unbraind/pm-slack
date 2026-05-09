@@ -1,0 +1,22 @@
+{
+  "name": "pm-ext-slack",
+  "version": "0.1.0",
+  "description": "Slack notifications for pm item lifecycle events",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "@unbrained/pm-cli": ">=2026.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["pm-cli", "extension", "slack", "notifications"],
+  "license": "MIT"
+}

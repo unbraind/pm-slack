@@ -1,0 +1,9 @@
+{
+  "name": "pm-ext-slack",
+  "version": "0.1.0",
+  "description": "Slack notifications for pm item lifecycle events",
+  "author": "@unbraind",
+  "entry": "index.js",
+  "priority": 50,
+  "capabilities": ["hooks", "services"]
+}
