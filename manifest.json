@@ -6,7 +6,6 @@
   "entry": "./dist/index.js",
   "priority": 50,
   "capabilities": [
-    "hooks",
-    "services"
+    "hooks"
   ]
 }
