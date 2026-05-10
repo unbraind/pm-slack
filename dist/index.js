@@ -182,12 +182,6 @@ export default defineExtension({
         // Register a service slot so future versions of pm-cli can inject config
         // (e.g. webhook URL stored in pm's own config store). For now it's a no-op
         // stub; the real config comes from env vars loaded in the hook.
-        if (typeof api.registerService === "function") {
-            api.registerService("config-provider", async (_context) => {
-                // Return null to signal that env-var config should be used
-                return null;
-            });
-        }
         // ---------------------------------------------------------------------------
         // afterCommand hook — fires after every pm-cli command completes
         // ---------------------------------------------------------------------------
