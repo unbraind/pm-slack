@@ -9,7 +9,11 @@
  */
 
 import https from "node:https";
-import { defineExtension } from "@unbrained/pm-cli/sdk";
+import {
+  defineExtension,
+  type AfterCommandHookContext,
+  type BeforeCommandHookContext,
+} from "@unbrained/pm-cli/sdk";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,17 +32,6 @@ interface PmItem {
   author?: string;
 }
 
-interface CommandContext {
-  command: string;
-  args: Record<string, unknown>;
-  log: (msg: string) => void;
-  result?: {
-    item?: PmItem;
-    items?: PmItem[];
-    [key: string]: unknown;
-  };
-}
-
 type EventKind = "create" | "close" | "block";
 
 // ---------------------------------------------------------------------------
@@ -52,10 +45,10 @@ interface SlackConfig {
   events: Set<EventKind>;
 }
 
-function loadConfig(log: (msg: string) => void): SlackConfig | null {
+function loadConfig(): SlackConfig | null {
   const webhookUrl = process.env.PM_SLACK_WEBHOOK ?? "";
   if (!webhookUrl) {
-    log("[pm-ext-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
+    console.error("[pm-ext-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
     return null;
   }
 
@@ -63,7 +56,7 @@ function loadConfig(log: (msg: string) => void): SlackConfig | null {
   try {
     new URL(webhookUrl);
   } catch {
-    log("[pm-ext-slack] PM_SLACK_WEBHOOK is not a valid URL — notifications disabled");
+    console.error("[pm-ext-slack] PM_SLACK_WEBHOOK is not a valid URL — notifications disabled");
     return null;
   }
 
@@ -224,33 +217,38 @@ const CLOSE_COMMANDS = new Set(["close", "done", "complete", "finish", "resolve"
 /** Commands that update an item's status or attributes */
 const UPDATE_COMMANDS = new Set(["update", "edit", "set", "status"]);
 
-function detectEvent(ctx: CommandContext): EventKind | null {
+function detectEvent(ctx: AfterCommandHookContext): EventKind | null {
   const cmd = ctx.command?.toLowerCase() ?? "";
 
   if (CREATE_COMMANDS.has(cmd)) return "create";
   if (CLOSE_COMMANDS.has(cmd)) return "close";
 
   if (UPDATE_COMMANDS.has(cmd)) {
-    // Detect a block status being set via args or result
+    // Detect a block status being set via options or result
     const newStatus =
-      (ctx.args?.status as string | undefined) ??
-      (ctx.result?.item?.status as string | undefined) ??
+      (ctx.options?.["status"] as string | undefined) ??
+      ((ctx as any).result as { item?: { status?: string } } | undefined)?.item?.status ??
       "";
     if (newStatus.toLowerCase() === "blocked") return "block";
 
     // Also check result item for blocked status transition
-    if (ctx.result?.item?.status?.toLowerCase() === "blocked") return "block";
+    const resultItem = ((ctx as any).result as { item?: { status?: string } } | undefined)?.item;
+    if (resultItem?.status?.toLowerCase() === "blocked") return "block";
   }
 
   return null;
 }
 
-function extractItem(ctx: CommandContext): PmItem | null {
-  const item = ctx.result?.item;
+function extractItem(ctx: AfterCommandHookContext): PmItem | null {
+  const result = (ctx as unknown as Record<string, unknown>).result as
+    | { item?: PmItem; items?: PmItem[] }
+    | undefined;
+
+  const item = result?.item;
   if (item && item.id) return item;
 
   // Some commands return a list (e.g. bulk add) — take the first
-  const items = ctx.result?.items;
+  const items = result?.items;
   if (Array.isArray(items) && items.length > 0 && items[0].id) {
     return items[0];
   }
@@ -267,40 +265,30 @@ export default defineExtension({
   version: "0.1.0",
 
   activate(api) {
-    // Register a service slot so future versions of pm-cli can inject config
-    // (e.g. webhook URL stored in pm's own config store). For now it's a no-op
-    // stub; the real config comes from env vars loaded in the hook.
-    if (typeof api.registerService === "function") {
-      api.registerService("config-provider", async (_context: unknown) => {
-        // Return null to signal that env-var config should be used
-        return null;
-      });
-    }
-
     // ---------------------------------------------------------------------------
     // afterCommand hook — fires after every pm-cli command completes
     // ---------------------------------------------------------------------------
     if (typeof api.hooks?.afterCommand === "function") {
-      api.hooks.afterCommand(async (ctx: CommandContext) => {
-        const config = loadConfig(ctx.log);
+      api.hooks.afterCommand(async (ctx: AfterCommandHookContext) => {
+        const config = loadConfig();
         if (!config) return;
 
         const event = detectEvent(ctx);
         if (!event) return;
 
         if (!config.events.has(event)) {
-          ctx.log(`[pm-ext-slack] Event "${event}" filtered by PM_SLACK_EVENTS`);
+          console.error(`[pm-ext-slack] Event "${event}" filtered by PM_SLACK_EVENTS`);
           return;
         }
 
         const item = extractItem(ctx);
         if (!item) {
-          ctx.log("[pm-ext-slack] Could not extract item from result — skipping");
+          console.error("[pm-ext-slack] Could not extract item from result — skipping");
           return;
         }
 
         if (!meetsMinPriority(item, config.minPriority)) {
-          ctx.log(
+          console.error(
             `[pm-ext-slack] Item priority ${item.priority} below minimum ${config.minPriority} — skipping`
           );
           return;
@@ -321,36 +309,38 @@ export default defineExtension({
 
         try {
           await postToSlack(config.webhookUrl, text);
-          ctx.log(`[pm-ext-slack] Notification sent for event "${event}" on item ${item.id}`);
+          console.error(`[pm-ext-slack] Notification sent for event "${event}" on item ${item.id}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          ctx.log(`[pm-ext-slack] Failed to send Slack notification: ${message}`);
+          console.error(`[pm-ext-slack] Failed to send Slack notification: ${message}`);
         }
       });
     } else {
       // Fallback: use beforeCommand if afterCommand is unavailable
       // (result data will be unavailable, so we can only notify on command name)
-      api.hooks.beforeCommand(async (ctx: CommandContext) => {
-        ctx.log(
+      api.hooks.beforeCommand(async (ctx: BeforeCommandHookContext) => {
+        console.error(
           "[pm-ext-slack] afterCommand not available — limited event detection active"
         );
-        const config = loadConfig(ctx.log);
+        const config = loadConfig();
         if (!config) return;
 
-        const event = detectEvent(ctx);
+        const cmd = ctx.command?.toLowerCase() ?? "";
+        let event: EventKind | null = null;
+        if (CREATE_COMMANDS.has(cmd)) event = "create";
+        else if (CLOSE_COMMANDS.has(cmd)) event = "close";
+
         if (!event || !config.events.has(event)) return;
 
         // Without result we can only build a generic message
-        const cmdArgs = Object.entries(ctx.args ?? {})
-          .map(([k, v]) => `${k}=${String(v)}`)
-          .join(", ");
+        const cmdArgs = (ctx.args ?? []).join(" ");
         const text = `pm command \`${ctx.command}\` triggered event *${event}*\n${cmdArgs}`;
 
         try {
           await postToSlack(config.webhookUrl, text);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          ctx.log(`[pm-ext-slack] Failed to send Slack notification: ${message}`);
+          console.error(`[pm-ext-slack] Failed to send Slack notification: ${message}`);
         }
       });
     }
