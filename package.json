@@ -12,11 +12,17 @@
     "@unbrained/pm-cli": ">=2026.5.0"
   },
   "devDependencies": {
+    "@unbrained/pm-cli": "^2026.5.10",
     "typescript": "^5.4.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["pm-cli", "extension", "slack", "notifications"],
+  "keywords": [
+    "pm-cli",
+    "extension",
+    "slack",
+    "notifications"
+  ],
   "license": "MIT"
 }
