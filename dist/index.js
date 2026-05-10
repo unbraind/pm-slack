@@ -8,7 +8,7 @@
  *   PM_SLACK_EVENTS       (optional) Comma-separated subset: create,close,block  (default: all)
  */
 import https from "node:https";
-import { defineExtension } from "@unbrained/pm-cli/sdk";
+function defineExtension(m){return m}
 function loadConfig(log) {
     const webhookUrl = process.env.PM_SLACK_WEBHOOK ?? "";
     if (!webhookUrl) {
