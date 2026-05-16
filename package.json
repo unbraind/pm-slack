@@ -2,6 +2,14 @@
   "name": "pm-ext-slack",
   "version": "0.1.0",
   "description": "Slack notifications for pm item lifecycle events",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unbraind/pm-cli-ext-slack.git"
+  },
+  "bugs": {
+    "url": "https://github.com/unbraind/pm-cli-ext-slack/issues"
+  },
+  "homepage": "https://github.com/unbraind/pm-cli-ext-slack#readme",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
