@@ -9,11 +9,9 @@
  */
 
 import https from "node:https";
-import {
-  defineExtension,
-  type AfterCommandHookContext,
-  type BeforeCommandHookContext,
-} from "@unbrained/pm-cli/sdk";
+import type { defineExtension as defineExtensionType, AfterCommandHookContext, BeforeCommandHookContext  } from "@unbrained/pm-cli/sdk";
+
+const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
 
 // ---------------------------------------------------------------------------
 // Types
