@@ -3,10 +3,17 @@
   "version": "0.1.0",
   "description": "Slack notifications for pm item lifecycle events",
   "type": "module",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "manifest.json",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepack": "npm run build"
   },
   "peerDependencies": {
     "@unbrained/pm-cli": ">=2026.5.0"

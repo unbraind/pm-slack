@@ -31,7 +31,7 @@ pm ext link .
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new app (or use an existing one).
 2. Under **Features → Incoming Webhooks**, activate incoming webhooks.
 3. Click **Add New Webhook to Workspace** and choose a channel.
-4. Copy the webhook URL — it looks like `https://hooks.slack.com/services/T.../B.../...`.
+4. Copy the webhook URL into your shell environment.
 
 ### 2. Set environment variables
 
@@ -45,7 +45,7 @@ pm ext link .
 Export them in your shell profile or `.env`:
 
 ```bash
-export PM_SLACK_WEBHOOK="https://hooks.slack.com/services/T.../B.../..."
+export PM_SLACK_WEBHOOK="<slack-webhook-url>"
 export PM_SLACK_CHANNEL="#pm-alerts"
 export PM_SLACK_MIN_PRIORITY=2   # only critical + high
 export PM_SLACK_EVENTS="create,close"  # skip block notifications
