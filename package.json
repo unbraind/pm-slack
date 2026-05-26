@@ -1,43 +1,88 @@
 {
-  "name": "pm-ext-slack",
+  "name": "pm-slack",
   "version": "0.1.0",
   "description": "Slack notifications for pm item lifecycle events",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/unbraind/pm-cli-ext-slack.git"
+    "url": "git+https://github.com/unbraind/pm-slack.git"
   },
   "bugs": {
-    "url": "https://github.com/unbraind/pm-cli-ext-slack/issues"
+    "url": "https://github.com/unbraind/pm-slack/issues"
   },
-  "homepage": "https://github.com/unbraind/pm-cli-ext-slack#readme",
+  "homepage": "https://github.com/unbraind/pm-slack#readme",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
     "manifest.json",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
+    "audit:prod": "npm audit --omit=dev",
+    "pack:dry-run": "npm pack --dry-run",
+    "changelog": "pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --release-version-from-package --since-previous-tag --until-release-tag --item-url-base https://github.com/unbraind/pm-slack/blob/main/.agents/pm",
+    "changelog:full": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-slack/blob/main/.agents/pm",
+    "changelog:check": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-slack/blob/main/.agents/pm --check",
+    "release:check": "npm run typecheck && npm run build && npm run audit:prod && npm run pack:dry-run && npm run changelog:check"
   },
   "peerDependencies": {
-    "@unbrained/pm-cli": ">=2026.5.0"
+    "@unbrained/pm-cli": ">=2026.5.24"
   },
   "devDependencies": {
-    "@unbrained/pm-cli": "^2026.5.10",
-    "typescript": "^5.4.0"
+    "@unbrained/pm-cli": "^2026.5.24",
+    "typescript": "^6.0.3",
+    "pm-changelog": "^2026.5.25",
+    "@types/node": "^25.9.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "keywords": [
-    "pm-cli",
     "extension",
-    "slack",
-    "notifications"
+    "notifications",
+    "pm-cli",
+    "pm-extension",
+    "pm-package",
+    "slack"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "@unbraind",
+  "pm": {
+    "aliases": [
+      "slack"
+    ],
+    "extensions": [
+      "."
+    ],
+    "catalog": {
+      "display_name": "Slack Notifications",
+      "category": "notifications",
+      "summary": "Slack notifications for pm item lifecycle events",
+      "tags": [
+        "slack",
+        "notifications",
+        "hooks"
+      ],
+      "links": {
+        "docs": "https://github.com/unbraind/pm-slack#readme",
+        "npm": "https://www.npmjs.com/package/pm-slack",
+        "repository": "https://github.com/unbraind/pm-slack",
+        "report": "https://github.com/unbraind/pm-slack/issues"
+      }
+    },
+    "docs": [
+      "README.md",
+      "CHANGELOG.md"
+    ],
+    "examples": [
+      "README.md"
+    ]
+  }
 }

@@ -1,5 +1,5 @@
 /**
- * pm-ext-slack — Slack notifications for pm-cli item lifecycle events
+ * pm-slack — Slack notifications for pm-cli item lifecycle events
  *
  * Env vars:
  *   PM_SLACK_WEBHOOK      (required) Slack incoming webhook URL

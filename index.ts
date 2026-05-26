@@ -1,5 +1,5 @@
 /**
- * pm-ext-slack — Slack notifications for pm-cli item lifecycle events
+ * pm-slack — Slack notifications for pm-cli item lifecycle events
  *
  * Env vars:
  *   PM_SLACK_WEBHOOK      (required) Slack incoming webhook URL
@@ -46,7 +46,7 @@ interface SlackConfig {
 function loadConfig(): SlackConfig | null {
   const webhookUrl = process.env.PM_SLACK_WEBHOOK ?? "";
   if (!webhookUrl) {
-    console.error("[pm-ext-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
+    console.error("[pm-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
     return null;
   }
 
@@ -54,7 +54,7 @@ function loadConfig(): SlackConfig | null {
   try {
     new URL(webhookUrl);
   } catch {
-    console.error("[pm-ext-slack] PM_SLACK_WEBHOOK is not a valid URL — notifications disabled");
+    console.error("[pm-slack] PM_SLACK_WEBHOOK is not a valid URL — notifications disabled");
     return null;
   }
 
@@ -259,7 +259,7 @@ function extractItem(ctx: AfterCommandHookContext): PmItem | null {
 // ---------------------------------------------------------------------------
 
 export default defineExtension({
-  name: "pm-ext-slack",
+  name: "pm-slack",
   version: "0.1.0",
 
   activate(api) {
@@ -275,19 +275,19 @@ export default defineExtension({
         if (!event) return;
 
         if (!config.events.has(event)) {
-          console.error(`[pm-ext-slack] Event "${event}" filtered by PM_SLACK_EVENTS`);
+          console.error(`[pm-slack] Event "${event}" filtered by PM_SLACK_EVENTS`);
           return;
         }
 
         const item = extractItem(ctx);
         if (!item) {
-          console.error("[pm-ext-slack] Could not extract item from result — skipping");
+          console.error("[pm-slack] Could not extract item from result — skipping");
           return;
         }
 
         if (!meetsMinPriority(item, config.minPriority)) {
           console.error(
-            `[pm-ext-slack] Item priority ${item.priority} below minimum ${config.minPriority} — skipping`
+            `[pm-slack] Item priority ${item.priority} below minimum ${config.minPriority} — skipping`
           );
           return;
         }
@@ -307,10 +307,10 @@ export default defineExtension({
 
         try {
           await postToSlack(config.webhookUrl, text);
-          console.error(`[pm-ext-slack] Notification sent for event "${event}" on item ${item.id}`);
+          console.error(`[pm-slack] Notification sent for event "${event}" on item ${item.id}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          console.error(`[pm-ext-slack] Failed to send Slack notification: ${message}`);
+          console.error(`[pm-slack] Failed to send Slack notification: ${message}`);
         }
       });
     } else {
@@ -318,7 +318,7 @@ export default defineExtension({
       // (result data will be unavailable, so we can only notify on command name)
       api.hooks.beforeCommand(async (ctx: BeforeCommandHookContext) => {
         console.error(
-          "[pm-ext-slack] afterCommand not available — limited event detection active"
+          "[pm-slack] afterCommand not available — limited event detection active"
         );
         const config = loadConfig();
         if (!config) return;
@@ -338,7 +338,7 @@ export default defineExtension({
           await postToSlack(config.webhookUrl, text);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          console.error(`[pm-ext-slack] Failed to send Slack notification: ${message}`);
+          console.error(`[pm-slack] Failed to send Slack notification: ${message}`);
         }
       });
     }
