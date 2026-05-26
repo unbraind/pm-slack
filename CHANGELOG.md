@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add bun-install verification to release workflow ([pm-slack-s716](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-s716.toon))
+
 ## 2026.05.26 - 2026-05-26
 
 ### Fixed
