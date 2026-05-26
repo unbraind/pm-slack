@@ -1,4 +1,4 @@
-# pm-ext-slack
+# pm-slack
 
 Slack notifications for [pm-cli](https://github.com/unbraind/pm-cli) item lifecycle events.
 
@@ -9,13 +9,13 @@ Fires after `create`, `close`, and `block` operations and posts a formatted mess
 ## Installation
 
 ```bash
-pm ext install pm-ext-slack
+pm ext install pm-slack
 ```
 
 Or clone and link for local development:
 
 ```bash
-git clone https://github.com/unbraind/pm-cli-ext-slack.git
+git clone https://github.com/unbraind/pm-slack.git
 cd pm-cli-ext-slack
 npm install
 npm run build
@@ -144,7 +144,7 @@ The extension uses only Node.js built-ins (`node:https`) — no external runtime
 
 ```json
 {
-  "name": "pm-ext-slack",
+  "name": "pm-slack",
   "version": "0.1.0",
   "description": "Slack notifications for pm item lifecycle events",
   "author": "@unbraind",
@@ -159,3 +159,7 @@ The extension uses only Node.js built-ins (`node:https`) — no external runtime
 ## License
 
 MIT
+
+## Release Automation
+
+This package is release-ready for GitHub, npm, and Bun-compatible installs. CI runs type checking, build, production dependency audit, package packing, Bun install verification, and pm-changelog validation. The daily release workflow publishes only when commits exist after the latest release tag and uses pm-changelog to generate CHANGELOG.md and GitHub release notes.
