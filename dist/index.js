@@ -227,7 +227,7 @@ export default defineExtension({
                 }
             });
         }
-        else {
+        else if (typeof api.hooks?.beforeCommand === "function") {
             // Fallback: use beforeCommand if afterCommand is unavailable
             // (result data will be unavailable, so we can only notify on command name)
             api.hooks.beforeCommand(async (ctx) => {
