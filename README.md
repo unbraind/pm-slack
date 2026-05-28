@@ -9,17 +9,13 @@ Fires after `create`, `close`, and `block` operations and posts a formatted mess
 ## Installation
 
 ```bash
-pm ext install pm-slack
+pm install github.com/unbraind/pm-slack --global
 ```
 
-Or clone and link for local development:
+Or install per-project:
 
 ```bash
-git clone https://github.com/unbraind/pm-slack.git
-cd pm-cli-ext-slack
-npm install
-npm run build
-pm ext link .
+pm install github.com/unbraind/pm-slack --project
 ```
 
 ---
