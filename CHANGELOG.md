@@ -2,7 +2,7 @@
 
 ## 2026.05.29 - 2026-05-29
 
-### Other
+### Fixed
 
 - Close/block Slack reasons always show 'no reason given' \(data-shape mismatch\) ([pm-slack-ssby](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-ssby.toon))
 
