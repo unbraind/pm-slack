@@ -4,7 +4,7 @@
  * Env vars:
  *   PM_SLACK_WEBHOOK      (required) Slack incoming webhook URL
  *   PM_SLACK_CHANNEL      (optional) Override channel, e.g. #pm-alerts
- *   PM_SLACK_MIN_PRIORITY (optional) Minimum priority to notify (1=critical … 4=low), default 1 (all)
+ *   PM_SLACK_MIN_PRIORITY (optional) Minimum priority to notify (1=critical … 4=low), default 1 (critical only; set 4 for all)
  *   PM_SLACK_EVENTS       (optional) Comma-separated subset: create,close,block  (default: all)
  */
 import https from "node:https";
@@ -77,7 +77,7 @@ function buildCreateMessage(item, channel) {
 }
 function buildCloseMessage(item, channel) {
     const type = itemTypeLabel(item);
-    const reason = item.closedReason?.trim() || "no reason given";
+    const reason = item.close_reason?.trim() || item.closedReason?.trim() || "no reason given";
     let msg = `*[${type}]* ${item.title} closed ✅\n` + `Reason: ${reason}`;
     if (channel)
         msg += `\n_Channel: ${channel}_`;
@@ -85,7 +85,7 @@ function buildCloseMessage(item, channel) {
 }
 function buildBlockMessage(item, channel) {
     const type = itemTypeLabel(item);
-    const reason = item.blockedReason?.trim() || "no reason given";
+    const reason = item.blocked_reason?.trim() || item.blockedReason?.trim() || "no reason given";
     let msg = `*[${type}]* ${item.title} is blocked 🚫\n` + `Reason: ${reason}`;
     if (channel)
         msg += `\n_Channel: ${channel}_`;
@@ -179,7 +179,7 @@ function extractItem(ctx) {
 // ---------------------------------------------------------------------------
 export default defineExtension({
     name: "pm-slack",
-    version: "2026.5.28",
+    version: "2026.5.29",
     activate(api) {
         // ---------------------------------------------------------------------------
         // afterCommand hook — fires after every pm-cli command completes
