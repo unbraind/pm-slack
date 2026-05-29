@@ -1,0 +1,11 @@
+id: pm-slack-96i1
+title: Hands-on functional test pass 2026-05-29 (real data)
+description: "Functional testing with real pm data + production hardening. Verified afterCommand hook fires on create/close/block, fails safe when webhook unset, attempts and gracefully handles unreachable webhook without breaking the underlying mutation."
+type: Feature
+status: open
+priority: 2
+tags: []
+created_at: "2026-05-29T15:43:24.621Z"
+updated_at: "2026-05-29T15:43:24.621Z"
+author: codex
+body: ""

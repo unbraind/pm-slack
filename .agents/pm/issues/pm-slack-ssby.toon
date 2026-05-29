@@ -1,0 +1,13 @@
+id: pm-slack-ssby
+title: Close/block Slack reasons always show 'no reason given' (data-shape mismatch)
+description: "Symptom: Slack close/block notifications always read 'Reason: no reason given' even when a reason was provided. Repro: PM_SLACK_WEBHOOK set; pm close <id> --reason 'x' (or pm update <id> --status blocked --blocked-reason 'y'); inspect built message. Observed: 'Reason: no reason given'. Expected: 'Reason: x' / 'Reason: y'. Root cause: hook read camelCase item.closedReason/blockedReason but pm emits snake_case close_reason/blocked_reason. Fix: PmItem now includes close_reason/blocked_reason; buildCloseMessage/buildBlockMessage prefer snake_case then fall back to camelCase. Proven via runtime probe: CLOSE now shows real reason, BLOCK shows real reason, minimal item still null-safe."
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-05-29T15:43:26.149Z"
+updated_at: "2026-05-29T15:43:28.911Z"
+author: codex
+parent: pm-slack-96i1
+close_reason: "Fixed: read snake_case close_reason/blocked_reason (with camelCase fallback); verified via runtime probe with real result shapes."
+body: ""
