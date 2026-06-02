@@ -6,7 +6,9 @@
   "entry": "./dist/index.js",
   "priority": 50,
   "capabilities": [
-    "hooks"
+    "commands",
+    "hooks",
+    "schema"
   ],
   "pm": {
     "compatibility": "v2"

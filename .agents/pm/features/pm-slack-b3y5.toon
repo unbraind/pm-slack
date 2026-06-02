@@ -1,0 +1,14 @@
+id: pm-slack-b3y5
+title: Add afterCommand notification hook + slack notify command with Block Kit
+description: ""
+type: Feature
+status: closed
+priority: 2
+tags[2]: enhancement,sdk-capabilities
+created_at: "2026-06-02T07:04:12.196Z"
+updated_at: "2026-06-02T07:04:12.655Z"
+author: codex
+notes[1]{created_at,author,text}:
+  "2026-06-02T07:04:12.447Z",codex,"Added hooks.afterCommand (posts on item create/close when PM_SLACK_WEBHOOK set; silent no-op + never throws/blocks otherwise) and 'pm slack notify' command with rich Slack Block Kit (header+fields+context) and plain-text fallback. Flags --channel/--thread/--on/--text/--title/--dry-run. Manifest capabilities -> commands,hooks,schema. Verified build+tsc+2/2 tests+functional: extension active 0 failures; notify --dry-run emits well-formed Block Kit; afterCommand graceful 'webhook not set — disabled' on close. Backward compatible."
+close_reason: Implemented + verified (build/tsc/test/functional green); backward compatible.
+body: ""
