@@ -1,0 +1,12 @@
+id: pm-slack-l3ux
+title: Deep feature enhancement 2026-06-03
+description: "Drastically deepen pm-slack: format toggle (text|blockkit) for hook and commands, event/type routing to multiple webhooks/channels, offline 'slack test' preview command, 'slack digest' activity summary, strict missing-creds CommandError for real posts while keeping best-effort lifecycle hook. Backward compatible."
+type: Feature
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:11.500Z"
+updated_at: "2026-06-02T22:31:11.794Z"
+author: codex
+close_reason: "All enhancements shipped: format toggle, routing, slack test, slack digest, strict creds + best-effort hook. 16 unit tests pass, functionally tested vs real workspace, release:check green, backward compatible."
+body: ""

@@ -14,9 +14,18 @@
  *   PM_SLACK_CHANNEL      (optional) Override channel, e.g. #pm-alerts
  *   PM_SLACK_MIN_PRIORITY (optional) Minimum priority to notify (1=critical … 4=low), default 1 (critical only; set 4 for all)
  *   PM_SLACK_EVENTS       (optional) Comma-separated subset of hook events: create,close,block (default: all)
+ *   PM_SLACK_FORMAT       (optional) Default notification format: "blockkit" (default) or "text"
+ *   PM_SLACK_ROUTES       (optional) JSON array of routing rules to send specific
+ *                                    events/types/statuses to different webhooks/channels.
+ *                                    Each rule: { "match": "<selector>", "webhook"?: "...", "channel"?: "..." }
+ *                                    Selector forms: an event ("create"|"close"|"block"),
+ *                                    "type:<itemType>" (case-insensitive), or "status:<status>".
+ *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 
 import https from "node:https";
+import fs from "node:fs";
+import path from "node:path";
 import type {
   defineExtension as defineExtensionType,
   AfterCommandHookContext,
@@ -73,6 +82,22 @@ interface PmItem {
 }
 
 type EventKind = "create" | "close" | "block";
+
+type MessageFormat = "blockkit" | "text";
+
+/** A single routing rule parsed from PM_SLACK_ROUTES. */
+interface RouteRule {
+  /** Raw selector string, e.g. "block", "type:Bug", "status:blocked". */
+  match: string;
+  webhook?: string;
+  channel?: string;
+}
+
+/** Resolved destination for a notification after applying routing rules. */
+interface RouteTarget {
+  webhookUrl: string;
+  channel?: string;
+}
 
 interface SlackBlock {
   type: string;
@@ -138,6 +163,103 @@ function parseEvents(spec: string | undefined): Set<EventKind> {
 }
 
 // ---------------------------------------------------------------------------
+// Format parsing
+// ---------------------------------------------------------------------------
+
+const ALL_FORMATS: MessageFormat[] = ["blockkit", "text"];
+
+/**
+ * Normalize a format spec to a known MessageFormat. Accepts a few friendly
+ * aliases ("block"/"blocks" → blockkit, "plain"/"txt" → text). Falls back to
+ * the supplied default when the spec is empty or unrecognized.
+ */
+function parseFormat(spec: string | undefined, fallback: MessageFormat = "blockkit"): MessageFormat {
+  if (!spec) return fallback;
+  const v = spec.trim().toLowerCase();
+  if (v === "blockkit" || v === "block" || v === "blocks" || v === "rich") return "blockkit";
+  if (v === "text" || v === "plain" || v === "txt") return "text";
+  return fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Routing
+//
+// PM_SLACK_ROUTES is an optional JSON array of rules that send specific events,
+// item types, or statuses to a different webhook/channel. Routing is purely
+// additive: with no rules configured, behavior is identical to before.
+// ---------------------------------------------------------------------------
+
+function parseRoutes(spec: string | undefined): RouteRule[] {
+  if (!spec || !spec.trim()) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(spec);
+  } catch {
+    console.error("[pm-slack] PM_SLACK_ROUTES is not valid JSON — routing disabled");
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    console.error("[pm-slack] PM_SLACK_ROUTES must be a JSON array — routing disabled");
+    return [];
+  }
+  const rules: RouteRule[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const match = typeof e.match === "string" ? e.match.trim() : "";
+    if (!match) continue;
+    const webhook = typeof e.webhook === "string" && e.webhook.trim() ? e.webhook.trim() : undefined;
+    const channel = typeof e.channel === "string" && e.channel.trim() ? e.channel.trim() : undefined;
+    if (!webhook && !channel) continue; // a rule with no override is meaningless
+    rules.push({ match, webhook, channel });
+  }
+  return rules;
+}
+
+/**
+ * Does a single route rule match this event/item? Selector forms:
+ *   - bare event name: "create" | "close" | "block"
+ *   - "type:<itemType>"   (case-insensitive on item.type)
+ *   - "status:<status>"   (case-insensitive on item.status)
+ *   - "*" / "all"         (matches everything — useful as a catch-all)
+ */
+function ruleMatches(rule: RouteRule, event: EventKind, item: PmItem): boolean {
+  const sel = rule.match.toLowerCase();
+  if (sel === "*" || sel === "all") return true;
+  if (sel.startsWith("type:")) {
+    return (item.type ?? "").toLowerCase() === sel.slice("type:".length).trim();
+  }
+  if (sel.startsWith("status:")) {
+    return (item.status ?? "").toLowerCase() === sel.slice("status:".length).trim();
+  }
+  return sel === event;
+}
+
+/**
+ * Resolve the destination (webhook + channel) for an event/item given the
+ * configured routes and the default webhook/channel. First matching rule wins;
+ * any field a rule omits falls back to the default. Returns null only when no
+ * webhook can be resolved at all.
+ */
+function selectRoute(
+  event: EventKind,
+  item: PmItem,
+  routes: RouteRule[],
+  defaultWebhook: string,
+  defaultChannel?: string
+): RouteTarget | null {
+  for (const rule of routes) {
+    if (ruleMatches(rule, event, item)) {
+      const webhookUrl = rule.webhook ?? defaultWebhook;
+      if (!webhookUrl) return null;
+      return { webhookUrl, channel: rule.channel ?? defaultChannel };
+    }
+  }
+  if (!defaultWebhook) return null;
+  return { webhookUrl: defaultWebhook, channel: defaultChannel };
+}
+
+// ---------------------------------------------------------------------------
 // Config helpers
 // ---------------------------------------------------------------------------
 
@@ -146,21 +268,30 @@ interface SlackConfig {
   channel?: string;
   minPriority: Priority;
   events: Set<EventKind>;
+  format: MessageFormat;
+  routes: RouteRule[];
 }
 
 function loadConfig(): SlackConfig | null {
   const webhookUrl = process.env.PM_SLACK_WEBHOOK ?? "";
-  if (!webhookUrl) {
+  const routes = parseRoutes(process.env.PM_SLACK_ROUTES);
+
+  // A default webhook is not strictly required if routing rules carry their own
+  // webhook(s); only bail out when there is no webhook source at all.
+  const routesHaveWebhook = routes.some((r) => r.webhook);
+  if (!webhookUrl && !routesHaveWebhook) {
     console.error("[pm-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
     return null;
   }
 
-  // Validate URL
-  try {
-    new URL(webhookUrl);
-  } catch {
-    console.error("[pm-slack] PM_SLACK_WEBHOOK is not a valid URL — notifications disabled");
-    return null;
+  // Validate the default URL when present (route webhooks are validated lazily).
+  if (webhookUrl) {
+    try {
+      new URL(webhookUrl);
+    } catch {
+      console.error("[pm-slack] PM_SLACK_WEBHOOK is not a valid URL — notifications disabled");
+      return null;
+    }
   }
 
   const channel = process.env.PM_SLACK_CHANNEL?.trim() || undefined;
@@ -170,8 +301,9 @@ function loadConfig(): SlackConfig | null {
     rawPriority >= 1 && rawPriority <= 4 ? (rawPriority as Priority) : 1;
 
   const events = parseEvents(process.env.PM_SLACK_EVENTS);
+  const format = parseFormat(process.env.PM_SLACK_FORMAT);
 
-  return { webhookUrl, channel, minPriority, events };
+  return { webhookUrl, channel, minPriority, events, format, routes };
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +433,35 @@ function buildItemBlockKit(
   return { blocks, fallback };
 }
 
+/**
+ * Build a ready-to-post SlackPayload for an item event in the requested format.
+ * - "blockkit": rich Block Kit blocks + plain-text fallback in `text`.
+ * - "text":     plain mrkdwn only (no `blocks`), for minimal/legacy channels.
+ */
+function buildItemPayload(
+  item: PmItem,
+  event: EventKind,
+  format: MessageFormat,
+  opts: BlockKitOptions = {}
+): SlackPayload {
+  if (format === "text") {
+    const text = buildTextMessage(item, event, opts.channel);
+    const body = opts.note && opts.note.trim() ? `${text}\n${opts.note.trim()}` : text;
+    return {
+      text: body,
+      mrkdwn: true,
+      ...(opts.channel ? { channel: opts.channel } : {}),
+    };
+  }
+  const { blocks, fallback } = buildItemBlockKit(item, event, opts);
+  return {
+    text: fallback,
+    blocks,
+    mrkdwn: true,
+    ...(opts.channel ? { channel: opts.channel } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Slack HTTP POST
 // ---------------------------------------------------------------------------
@@ -347,6 +508,275 @@ function postToSlack(webhookUrl: string, payload: SlackPayload): Promise<void> {
     req.write(body);
     req.end();
   });
+}
+
+// ---------------------------------------------------------------------------
+// Digest: reading the pm store + activity aggregation
+//
+// The digest reads items directly from the pm store (`<pm_root>/<dir>/*.toon`
+// and `*.json`) using a tiny scalar parser — we only need a handful of
+// top-level fields (id/title/type/status/priority/timestamps/reasons). This
+// avoids a runtime dependency on the pm SDK service layer (registerService is
+// limited and corrupts output, #96) and keeps the package dependency-free.
+// ---------------------------------------------------------------------------
+
+/** Directories under a pm root that hold items, by convention. */
+const ITEM_DIRS = ["tasks", "features", "issues", "epics", "stories", "bugs", "decisions", "items"];
+
+/** Fields we read off each stored item for digest purposes. */
+interface DigestItem extends PmItem {
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Minimal parser for a stored pm item file. Handles the toon scalar form
+ * (`key: value`, optionally quoted) and JSON. Only top-level scalar fields are
+ * extracted; nested/array sections are ignored. Returns null when no id found.
+ */
+function parseStoredItem(content: string, ext: string): DigestItem | null {
+  if (ext === ".json") {
+    try {
+      const obj = JSON.parse(content) as Record<string, unknown>;
+      const node = (obj.item ?? obj) as Record<string, unknown>;
+      if (typeof node.id !== "string") return null;
+      return node as unknown as DigestItem;
+    } catch {
+      return null;
+    }
+  }
+  // toon: line-oriented `key: value`. Stop reading a key when it introduces a
+  // block/array (e.g. `notes[1]{...}:`); we only want flat scalars.
+  const out: Record<string, unknown> = {};
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine;
+    if (!line || /^\s/.test(line)) continue; // skip indented (nested) lines
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const key = m[1];
+    let value = m[2].trim();
+    if (value === "" || value === '""') {
+      out[key] = "";
+      continue;
+    }
+    // Strip surrounding double quotes (toon quotes strings with embedded chars).
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      value = value.slice(1, -1).replace(/\\"/g, '"');
+    }
+    out[key] = value;
+  }
+  if (typeof out.id !== "string") return null;
+  if (typeof out.priority === "string" && /^\d+$/.test(out.priority)) {
+    out.priority = parseInt(out.priority, 10);
+  }
+  return out as unknown as DigestItem;
+}
+
+/** Read all items from a pm root. Best-effort: unreadable files are skipped. */
+function readStoreItems(pmRoot: string): DigestItem[] {
+  const items: DigestItem[] = [];
+  for (const dir of ITEM_DIRS) {
+    const full = path.join(pmRoot, dir);
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(full);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const ext = path.extname(name);
+      if (ext !== ".toon" && ext !== ".json") continue;
+      try {
+        const content = fs.readFileSync(path.join(full, name), "utf8");
+        const item = parseStoredItem(content, ext);
+        if (item) items.push(item);
+      } catch {
+        // skip unreadable item
+      }
+    }
+  }
+  return items;
+}
+
+/**
+ * Resolve a `--since <date>` / `--days <n>` window into an epoch-ms cutoff.
+ * `since` (ISO date or datetime) wins when both are given; otherwise `days`
+ * back from `now`. Defaults to 7 days. Returns the cutoff in ms.
+ */
+function resolveWindow(
+  since: string | undefined,
+  days: number | undefined,
+  now: number = Date.now()
+): { cutoffMs: number; label: string } {
+  if (since) {
+    const t = Date.parse(since);
+    if (!Number.isNaN(t)) {
+      return { cutoffMs: t, label: `since ${since}` };
+    }
+  }
+  const d = days !== undefined && Number.isFinite(days) && days > 0 ? Math.floor(days) : 7;
+  return { cutoffMs: now - d * 24 * 60 * 60 * 1000, label: `last ${d} day${d === 1 ? "" : "s"}` };
+}
+
+type DigestBucket = "created" | "closed" | "blocked" | "in_progress";
+
+interface DigestSummary {
+  windowLabel: string;
+  cutoffMs: number;
+  counts: Record<DigestBucket, number>;
+  buckets: Record<DigestBucket, DigestItem[]>;
+  total: number;
+}
+
+function statusIsClosed(status: string | undefined): boolean {
+  const s = (status ?? "").toLowerCase();
+  return s === "closed" || s === "done" || s === "resolved" || s === "complete" || s === "completed";
+}
+
+/**
+ * Aggregate store items into digest buckets for the window. An item counts as:
+ *   - created     if created_at >= cutoff
+ *   - closed      if it is in a closed/done status AND updated_at >= cutoff
+ *   - blocked     if status === blocked AND updated_at >= cutoff
+ *   - in_progress if status === in_progress AND updated_at >= cutoff
+ * An item may appear in multiple buckets (e.g. created and blocked).
+ */
+function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string): DigestSummary {
+  const buckets: Record<DigestBucket, DigestItem[]> = {
+    created: [],
+    closed: [],
+    blocked: [],
+    in_progress: [],
+  };
+  for (const item of items) {
+    const created = item.created_at ? Date.parse(item.created_at) : NaN;
+    const updated = item.updated_at ? Date.parse(item.updated_at) : created;
+    const status = (item.status ?? "").toLowerCase();
+
+    if (!Number.isNaN(created) && created >= cutoffMs) buckets.created.push(item);
+    if (statusIsClosed(status) && !Number.isNaN(updated) && updated >= cutoffMs) buckets.closed.push(item);
+    if (status === "blocked" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.blocked.push(item);
+    if (status === "in_progress" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.in_progress.push(item);
+  }
+  const counts: Record<DigestBucket, number> = {
+    created: buckets.created.length,
+    closed: buckets.closed.length,
+    blocked: buckets.blocked.length,
+    in_progress: buckets.in_progress.length,
+  };
+  const total = counts.created + counts.closed + counts.blocked + counts.in_progress;
+  return { windowLabel, cutoffMs, counts, buckets, total };
+}
+
+const DIGEST_BUCKET_META: Record<DigestBucket, { label: string; emoji: string }> = {
+  created: { label: "Created", emoji: "🆕" },
+  closed: { label: "Closed", emoji: "✅" },
+  blocked: { label: "Blocked", emoji: "🚫" },
+  in_progress: { label: "In progress", emoji: "🔄" },
+};
+
+const DIGEST_ORDER: DigestBucket[] = ["created", "closed", "in_progress", "blocked"];
+
+/** A short "id title" line per item, capped so the digest stays readable. */
+function digestItemLines(items: DigestItem[], max = 5): string[] {
+  const lines = items.slice(0, max).map((i) => `• ${i.id} — ${i.title ?? "(untitled)"}`);
+  if (items.length > max) lines.push(`• …and ${items.length - max} more`);
+  return lines;
+}
+
+function buildDigestText(summary: DigestSummary, channel?: string): string {
+  const head = `*pm activity digest* (${summary.windowLabel}) — ${summary.total} update${summary.total === 1 ? "" : "s"}`;
+  const parts: string[] = [head];
+  for (const bucket of DIGEST_ORDER) {
+    const items = summary.buckets[bucket];
+    if (items.length === 0) continue;
+    const meta = DIGEST_BUCKET_META[bucket];
+    parts.push(`\n${meta.emoji} *${meta.label}* (${items.length})`);
+    parts.push(digestItemLines(items).join("\n"));
+  }
+  if (summary.total === 0) parts.push("\n_No activity in this window._");
+  if (channel) parts.push(`\n_Channel: ${channel}_`);
+  return parts.join("\n");
+}
+
+function buildDigestBlockKit(
+  summary: DigestSummary,
+  channel?: string
+): { blocks: SlackBlock[]; fallback: string } {
+  const blocks: SlackBlock[] = [];
+  blocks.push({
+    type: "header",
+    text: { type: "plain_text", text: `📊 pm activity digest`, emoji: true },
+  });
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text: `${summary.windowLabel} · ${summary.total} update${summary.total === 1 ? "" : "s"}`,
+      },
+    ],
+  });
+
+  // Counts grid.
+  const fields = DIGEST_ORDER.map((bucket) => {
+    const meta = DIGEST_BUCKET_META[bucket];
+    return { type: "mrkdwn" as const, text: `${meta.emoji} *${meta.label}:*\n${summary.counts[bucket]}` };
+  });
+  blocks.push({ type: "section", fields });
+
+  for (const bucket of DIGEST_ORDER) {
+    const items = summary.buckets[bucket];
+    if (items.length === 0) continue;
+    const meta = DIGEST_BUCKET_META[bucket];
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${meta.emoji} *${meta.label}* (${items.length})\n${digestItemLines(items).join("\n")}`,
+      },
+    });
+  }
+
+  if (summary.total === 0) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: "_No activity in this window._" },
+    });
+  }
+
+  const footerBits = [`pm digest · ${summary.windowLabel}`, channel ? `channel ${channel}` : null].filter(
+    Boolean
+  );
+  blocks.push({
+    type: "context",
+    elements: [{ type: "mrkdwn", text: `🤖 pm-slack · ${footerBits.join(" · ")}` }],
+  });
+
+  const fallback = buildDigestText(summary, channel);
+  return { blocks, fallback };
+}
+
+function buildDigestPayload(
+  summary: DigestSummary,
+  format: MessageFormat,
+  channel?: string
+): SlackPayload {
+  if (format === "text") {
+    return {
+      text: buildDigestText(summary, channel),
+      mrkdwn: true,
+      ...(channel ? { channel } : {}),
+    };
+  }
+  const { blocks, fallback } = buildDigestBlockKit(summary, channel);
+  return {
+    text: fallback,
+    blocks,
+    mrkdwn: true,
+    ...(channel ? { channel } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +835,7 @@ function extractItem(ctx: AfterCommandHookContext): PmItem | null {
 
 export default defineExtension({
   name: "pm-slack",
-  version: "2026.6.2",
+  version: "2026.6.3",
 
   activate(api) {
     // -----------------------------------------------------------------------
@@ -444,16 +874,24 @@ export default defineExtension({
             return;
           }
 
-          const { blocks, fallback } = buildItemBlockKit(item, event, {
-            channel: config.channel,
+          // Resolve destination via routing rules (falls back to defaults).
+          const target = selectRoute(
+            event,
+            item,
+            config.routes,
+            config.webhookUrl,
+            config.channel
+          );
+          if (!target) {
+            console.error(`[pm-slack] No webhook resolved for event "${event}" — skipping`);
+            return;
+          }
+
+          const payload = buildItemPayload(item, event, config.format, {
+            channel: target.channel,
           });
 
-          await postToSlack(config.webhookUrl, {
-            text: fallback,
-            blocks,
-            mrkdwn: true,
-            channel: config.channel,
-          });
+          await postToSlack(target.webhookUrl, payload);
           console.error(`[pm-slack] Notification sent for event "${event}" on item ${item.id}`);
         } catch (err) {
           // Hooks must never throw or block the command — swallow everything.
@@ -508,17 +946,22 @@ export default defineExtension({
           { long: "--channel", value_name: "name", description: "Channel name shown in the message (e.g. #pm-alerts). Overrides PM_SLACK_CHANNEL." },
           { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
           { long: "--on", value_name: "events", description: "Comma list of lifecycle events for the message template (create,close,block). Default: create" },
+          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
           { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK env var)" },
-          { long: "--dry-run", description: "Print the message and Block Kit payload without posting to Slack" },
+          { long: "--dry-run", description: "Print the message and payload without posting to Slack" },
+          { long: "--json", description: "Emit the result/payload as JSON (machine-readable)" },
         ],
 
-        async run(ctx: { args?: string[]; options?: Record<string, unknown>; pm_root?: string }) {
+        async run(ctx: { args?: string[]; options?: Record<string, unknown>; pm_root?: string; global?: { json?: boolean } }) {
           const options = ctx.options ?? {};
           const dryRun = readBoolOption(options, "dry-run");
           const webhookUrl =
             readStrOption(options, "webhook") ?? process.env.PM_SLACK_WEBHOOK ?? "";
           const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
           const threadTs = readStrOption(options, "thread");
+
+          const asJson = ctx.global?.json === true || readBoolOption(options, "json");
+          const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
 
           // `--on` selects the message template. First event wins for the header verb.
           const events = parseEvents(readStrOption(options, "on") ?? "create");
@@ -534,29 +977,26 @@ export default defineExtension({
             );
           }
 
-          // Synthesize a minimal item from the flags so we can reuse the Block
-          // Kit builder. This command is for ad-hoc posts, not item lookups.
+          // Synthesize a minimal item from the flags so we can reuse the
+          // message builder. This command is for ad-hoc posts, not item lookups.
           const item: PmItem = { id: "manual", title, type: "Note" };
-          const { blocks, fallback } = buildItemBlockKit(item, event, {
-            channel,
-            note: text && text !== title ? text : undefined,
-          });
-
           const payload: SlackPayload = {
-            text: fallback,
-            blocks,
-            mrkdwn: true,
-            ...(channel ? { channel } : {}),
+            ...buildItemPayload(item, event, format, {
+              channel,
+              note: text && text !== title ? text : undefined,
+            }),
             ...(threadTs ? { thread_ts: threadTs } : {}),
           };
 
           if (dryRun) {
-            console.error("--- DRY RUN (message not posted) ---");
-            process.stdout.write(fallback + "\n");
-            console.error("--- Block Kit payload ---");
-            process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
-            console.error("--- END ---");
-            return { dryRun: true, event, channel, thread_ts: threadTs, blocks, fallback };
+            if (!asJson) {
+              console.error("--- DRY RUN (message not posted) ---");
+              process.stdout.write(payload.text + "\n");
+              console.error(`--- ${format} payload ---`);
+              process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+              console.error("--- END ---");
+            }
+            return { dryRun: true, event, format, channel, thread_ts: threadTs, payload };
           }
 
           if (!webhookUrl) {
@@ -581,6 +1021,139 @@ export default defineExtension({
           return { posted: true, event, channel, thread_ts: threadTs };
         },
       });
+
+      // ---------------------------------------------------------------------
+      // command — `pm slack test` : build and PRINT a sample notification in
+      // the chosen format WITHOUT posting. Fully offline; the package is
+      // testable with no Slack credentials. Honors --json for machine reads.
+      // ---------------------------------------------------------------------
+      api.registerCommand({
+        name: "slack test",
+        description: "Preview a sample pm-slack notification in the chosen format without posting (offline)",
+        intent: "Preview Slack notification formatting offline (no webhook, no network)",
+        examples: [
+          "pm slack test --format blockkit",
+          "pm slack test --format text --on close",
+          "pm slack test --on block --json",
+        ],
+        flags: [
+          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
+          { long: "--on", value_name: "event", description: "Lifecycle event to preview (create,close,block). Default: create" },
+          { long: "--title", value_name: "title", description: "Sample item title (default: a representative example)" },
+          { long: "--channel", value_name: "name", description: "Channel hint to show in the preview (overrides PM_SLACK_CHANNEL)" },
+          { long: "--json", description: "Emit the preview payload as JSON" },
+          { long: "--dry-run", description: "Accepted for symmetry; this command never posts." },
+        ],
+
+        async run(ctx: { args?: string[]; options?: Record<string, unknown>; global?: { json?: boolean } }) {
+          const options = ctx.options ?? {};
+          // `--json` is consumed by pm as a global flag, so prefer global.json;
+          // also honor a local --json for robustness across runtimes.
+          const asJson = ctx.global?.json === true || readBoolOption(options, "json");
+          const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
+          const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
+
+          const events = parseEvents(readStrOption(options, "on") ?? "create");
+          const event: EventKind = (ALL_EVENTS.find((e) => events.has(e)) ?? "create") as EventKind;
+
+          // A representative sample item per event so the preview is realistic.
+          const sample: Record<EventKind, PmItem> = {
+            create: { id: "pm-1a2b", title: readStrOption(options, "title") ?? "Add OAuth login flow", type: "Feature", priority: 2, status: "open", author: "alice" },
+            close: { id: "pm-3c4d", title: readStrOption(options, "title") ?? "Fix login redirect bug", type: "Issue", priority: 1, status: "closed", author: "bob", close_reason: "Fixed in commit abc123" },
+            block: { id: "pm-5e6f", title: readStrOption(options, "title") ?? "Dashboard redesign", type: "Epic", priority: 2, status: "blocked", author: "carol", blocked_reason: "Waiting on design approval" },
+          };
+          const item = sample[event];
+          const payload = buildItemPayload(item, event, format, { channel });
+
+          // In JSON mode, pm renders the returned object — don't also write to
+          // stdout (that would corrupt the JSON stream). In human mode, print a
+          // readable preview to stdout/stderr.
+          if (!asJson) {
+            console.error(`--- PREVIEW (${format}, event=${event}) — nothing posted ---`);
+            process.stdout.write(payload.text + "\n");
+            console.error(`--- ${format} payload ---`);
+            process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+            console.error("--- END ---");
+          }
+          return { preview: true, event, format, channel, payload };
+        },
+      });
+
+      // ---------------------------------------------------------------------
+      // command — `pm slack digest` : summarize recent activity (created /
+      // closed / blocked / in-progress) over a --since/--days window into a
+      // single notification. Reads the pm store directly; --dry-run prints
+      // without posting.
+      // ---------------------------------------------------------------------
+      api.registerCommand({
+        name: "slack digest",
+        description: "Post (or preview) a single summary of recent pm activity over a time window",
+        intent: "Summarize recent pm activity (created/closed/blocked/in-progress) into one Slack message",
+        examples: [
+          "pm slack digest --days 7 --dry-run",
+          "pm slack digest --since 2026-06-01 --format text --dry-run",
+          "pm slack digest --days 1 --format blockkit --json --dry-run",
+        ],
+        flags: [
+          { long: "--since", value_name: "date", description: "Only include activity at/after this ISO date (e.g. 2026-06-01)" },
+          { long: "--days", value_name: "n", description: "Look back N days from now (default 7; ignored when --since is given)" },
+          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
+          { long: "--channel", value_name: "name", description: "Channel to post to (overrides PM_SLACK_CHANNEL)" },
+          { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK)" },
+          { long: "--dry-run", description: "Build and print the digest without posting to Slack" },
+          { long: "--json", description: "Emit the digest summary/payload as JSON" },
+        ],
+
+        async run(ctx: { args?: string[]; options?: Record<string, unknown>; pm_root?: string; global?: { json?: boolean } }) {
+          const options = ctx.options ?? {};
+          const dryRun = readBoolOption(options, "dry-run");
+          const asJson = ctx.global?.json === true || readBoolOption(options, "json");
+          const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
+          const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
+          const webhookUrl = readStrOption(options, "webhook") ?? process.env.PM_SLACK_WEBHOOK ?? "";
+
+          const since = readStrOption(options, "since");
+          const daysStr = readStrOption(options, "days");
+          const days = daysStr !== undefined ? parseInt(daysStr, 10) : undefined;
+          if (daysStr !== undefined && (days === undefined || Number.isNaN(days) || days <= 0)) {
+            throw new CommandError(`--days must be a positive integer (got "${daysStr}")`, EXIT_CODE.USAGE);
+          }
+
+          const pmRoot = ctx.pm_root ?? path.join(process.cwd(), ".agents", "pm");
+          const { cutoffMs, label } = resolveWindow(since, days);
+          const items = readStoreItems(pmRoot);
+          const summary = aggregateDigest(items, cutoffMs, label);
+          const payload = buildDigestPayload(summary, format, channel);
+
+          if (dryRun) {
+            if (!asJson) {
+              console.error(`--- DRY RUN digest (${format}, ${label}) — nothing posted ---`);
+              process.stdout.write(payload.text + "\n");
+              console.error(`--- ${format} payload ---`);
+              process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+              console.error("--- END ---");
+            }
+            return { dryRun: true, format, channel, counts: summary.counts, total: summary.total, window: label, payload };
+          }
+
+          // Real post requested: a webhook is mandatory. Fail cleanly (exit 1).
+          if (!webhookUrl) {
+            throw new CommandError(
+              "No Slack webhook configured: set PM_SLACK_WEBHOOK or pass --webhook (or use --dry-run to preview).",
+              EXIT_CODE.GENERIC_FAILURE
+            );
+          }
+
+          try {
+            await postToSlack(webhookUrl, payload);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new CommandError(`Failed to post digest to Slack: ${message}`, EXIT_CODE.GENERIC_FAILURE);
+          }
+
+          return { posted: true, format, channel, counts: summary.counts, total: summary.total, window: label };
+        },
+      });
     }
   },
 });
@@ -588,11 +1161,22 @@ export default defineExtension({
 // Exported for unit tests (Block Kit builder + helpers).
 export const __test__ = {
   buildItemBlockKit,
+  buildItemPayload,
   buildTextMessage,
   parseEvents,
+  parseFormat,
+  parseRoutes,
+  ruleMatches,
+  selectRoute,
   detectEvent,
   extractItem,
   meetsMinPriority,
+  parseStoredItem,
+  resolveWindow,
+  aggregateDigest,
+  buildDigestText,
+  buildDigestBlockKit,
+  buildDigestPayload,
   EXIT_CODE,
   CommandError,
 };

@@ -1,0 +1,13 @@
+id: pm-slack-b08f
+title: Best-effort hook policy unchanged; strict creds only in test/digest real-post
+description: "Lifecycle afterCommand hook keeps swallowing all errors (never breaks pm command). The NEW slack test/digest commands throw CommandError(exit 1) when a real (non-dry-run) post is attempted without a webhook, per brief. slack notify keeps its historical graceful exit-0 no-op for backward compat."
+type: Decision
+status: closed
+priority: 3
+tags: []
+created_at: "2026-06-02T22:21:31.813Z"
+updated_at: "2026-06-02T22:31:11.324Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: "Implemented as designed: lifecycle hook best-effort (errors swallowed); slack digest strict (CommandError exit1 on real post w/o webhook); slack notify keeps historical graceful exit-0 no-op for backward compat."
+body: ""

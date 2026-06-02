@@ -1,0 +1,13 @@
+id: pm-slack-nga4
+title: "slack digest command: activity summary over --since/--days"
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:20.191Z"
+updated_at: "2026-06-02T22:31:00.751Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: Added 'pm slack digest' summarizing created/closed/blocked/in_progress over --since/--days; reads pm store toon/json directly; text+blockkit; --dry-run/--json. Verified real-data aggregation (5/1/1/1) and window filtering.
+body: ""

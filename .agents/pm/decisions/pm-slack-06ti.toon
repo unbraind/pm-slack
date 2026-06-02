@@ -1,0 +1,13 @@
+id: pm-slack-06ti
+title: Digest reads pm store toon/json files directly (no new SDK service)
+description: "digest scans <pm_root>/{tasks,features,issues,...}/*.toon|*.json with a minimal scalar parser to aggregate created/closed/blocked/in_progress in a time window. Avoids registerService (corrupts output, #96) and keeps zero runtime deps."
+type: Decision
+status: closed
+priority: 3
+tags: []
+created_at: "2026-06-02T22:21:32.028Z"
+updated_at: "2026-06-02T22:31:11.546Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: "Implemented: digest reads <pm_root>/{tasks,features,issues,...}/*.toon|*.json via minimal scalar parser (parseStoredItem). No registerService (avoids #96), zero runtime deps. Verified on real store."
+body: ""

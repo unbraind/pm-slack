@@ -1,0 +1,13 @@
+id: pm-slack-1fbz
+title: "Format toggle: --format text|blockkit for hook + commands"
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:19.430Z"
+updated_at: "2026-06-02T22:30:59.926Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: "Added --format text|blockkit toggle + PM_SLACK_FORMAT env; buildItemPayload() unifies both formats for hook, notify, test, digest. Unit-tested parseFormat + payload shape. Functionally verified blockkit/text output."
+body: ""
