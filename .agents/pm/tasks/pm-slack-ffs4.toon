@@ -1,0 +1,13 @@
+id: pm-slack-ffs4
+title: Unit tests + README + functional test + release 2026.6.3
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:20.759Z"
+updated_at: "2026-06-02T22:31:01.195Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: "Added 16 unit tests (all pass), updated README (formats/routing/commands/env/error-handling, fixed stale manifest), functionally tested against real ws, release:check green."
+body: ""

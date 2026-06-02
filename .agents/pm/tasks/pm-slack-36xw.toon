@@ -1,0 +1,13 @@
+id: pm-slack-36xw
+title: "slack test command: offline preview, no network, --json"
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:19.922Z"
+updated_at: "2026-06-02T22:31:00.505Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: "Added 'pm slack test' offline preview command (representative sample per event, --format/--on/--channel/--json, never posts). Verified valid Block Kit JSON and text output; no network."
+body: ""

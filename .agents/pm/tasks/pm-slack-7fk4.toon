@@ -1,0 +1,13 @@
+id: pm-slack-7fk4
+title: Strict missing-creds CommandError for real posts; keep best-effort hook
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:20.479Z"
+updated_at: "2026-06-02T22:31:00.980Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: Hook stays best-effort (swallows missing-creds/unreachable/timeout — proven pm create exit 0 with ECONNREFUSED). slack digest real-post w/o webhook throws CommandError exit 1 (verified). No plain Error thrown from handlers.
+body: ""

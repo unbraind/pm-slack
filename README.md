@@ -33,10 +33,12 @@ pm install github.com/unbraind/pm-slack --project
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PM_SLACK_WEBHOOK` | **Yes** | — | Slack incoming webhook URL |
-| `PM_SLACK_CHANNEL` | No | — | Channel hint appended to messages (e.g. `#pm-alerts`) |
+| `PM_SLACK_WEBHOOK` | Usually | — | Slack incoming webhook URL (optional if every routing rule carries its own `webhook`) |
+| `PM_SLACK_CHANNEL` | No | — | Default channel hint appended to messages (e.g. `#pm-alerts`) |
 | `PM_SLACK_MIN_PRIORITY` | No | `1` | Minimum priority to notify (1=critical, 2=high, 3=medium, 4=low) |
 | `PM_SLACK_EVENTS` | No | `create,close,block` | Comma-separated list of events to notify on |
+| `PM_SLACK_FORMAT` | No | `blockkit` | Default message format: `blockkit` (rich) or `text` (plain mrkdwn) |
+| `PM_SLACK_ROUTES` | No | — | JSON array of routing rules (see [Routing](#routing-by-event-type-or-status)) |
 
 Export them in your shell profile or `.env`:
 
@@ -45,6 +47,7 @@ export PM_SLACK_WEBHOOK="<slack-webhook-url>"
 export PM_SLACK_CHANNEL="#pm-alerts"
 export PM_SLACK_MIN_PRIORITY=2   # only critical + high
 export PM_SLACK_EVENTS="create,close"  # skip block notifications
+export PM_SLACK_FORMAT="text"          # plain text instead of Block Kit
 ```
 
 ---
@@ -115,12 +118,107 @@ PM_SLACK_EVENTS="create,close"
 
 ---
 
+## Message Formats
+
+Notifications render as rich Slack **Block Kit** by default (header, a fields
+grid with item id / type / event / priority / status / author, an optional
+reason section, and a context footer). Set the format to plain `text` for
+minimal/legacy channels:
+
+```bash
+export PM_SLACK_FORMAT="text"     # plain mrkdwn, no blocks
+```
+
+Per-command, the `--format blockkit|text` flag overrides the env var for
+`slack notify`, `slack test`, and `slack digest`.
+
+---
+
+## Routing (by event, type, or status)
+
+`PM_SLACK_ROUTES` is an optional JSON array of rules that send specific events,
+item types, or statuses to a different webhook and/or channel. Routing is purely
+additive — with no rules configured, behavior is unchanged.
+
+Each rule is `{ "match": "<selector>", "webhook"?: "...", "channel"?: "..." }`.
+Selectors:
+
+| Selector | Matches |
+|---|---|
+| `create` / `close` / `block` | that lifecycle event |
+| `type:<itemType>` | items of that type (case-insensitive) |
+| `status:<status>` | items in that status (case-insensitive) |
+| `*` / `all` | everything (use as a catch-all) |
+
+The **first matching rule wins**; any field a rule omits falls back to the
+default `PM_SLACK_WEBHOOK` / `PM_SLACK_CHANNEL`.
+
+```bash
+export PM_SLACK_ROUTES='[
+  { "match": "block", "channel": "#urgent" },
+  { "match": "type:Bug", "webhook": "https://hooks.slack.com/services/AAA/BBB/CCC" }
+]'
+```
+
+---
+
+## Commands
+
+### `pm slack notify`
+
+Manually post a Block Kit (or text) message for an ad-hoc note.
+
+```bash
+pm slack notify --text 'Release shipped :rocket:' --dry-run
+pm slack notify --title 'Deploy done' --on close --format text --channel '#releases'
+```
+
+### `pm slack test`
+
+Build and **print** a sample notification in the chosen format **without
+posting** — fully offline, no webhook required. Great for previewing formatting.
+
+```bash
+pm slack test --format blockkit          # rich preview
+pm slack test --format text --on close   # plain-text preview of a close event
+pm slack test --on block --json          # machine-readable payload (with global --json)
+```
+
+Flags: `--format blockkit|text`, `--on create|close|block`, `--title`,
+`--channel`, `--json`.
+
+### `pm slack digest`
+
+Produce a single summary of recent activity (created / closed / blocked /
+in-progress) over a time window, as Block Kit or text. Reads the pm store
+directly. Use `--dry-run` to preview without posting.
+
+```bash
+pm slack digest --days 7 --dry-run
+pm slack digest --since 2026-06-01 --format text --dry-run
+pm slack digest --days 1 --format blockkit          # real post (needs a webhook)
+```
+
+Flags: `--since <date>`, `--days <n>` (default 7), `--format blockkit|text`,
+`--channel`, `--webhook`, `--dry-run`, `--json`.
+
+A real (non-`--dry-run`) `slack digest` post without a configured webhook fails
+with a clear error (exit 1) rather than crashing.
+
+---
+
 ## Error Handling
 
-- If `PM_SLACK_WEBHOOK` is not set, the extension silently skips all notifications and logs a debug message.
-- If the webhook URL is invalid, the extension logs an error and continues without crashing pm-cli.
-- HTTP errors from Slack (non-2xx responses) are logged but do not fail the pm-cli command.
-- Network timeouts are set to 10 seconds.
+The **lifecycle hook is best-effort** and never breaks your pm command:
+
+- If `PM_SLACK_WEBHOOK` is not set, the hook silently skips all notifications and logs a debug message.
+- If the webhook URL is invalid, the hook logs an error and continues without crashing pm-cli.
+- HTTP errors from Slack (non-2xx responses), network failures, and timeouts (10s) are logged but never fail the underlying `pm` command.
+
+The **`slack digest` command is strict** when actually posting:
+
+- A real (non-`--dry-run`) `slack digest` post without a webhook fails with a clear `CommandError` (exit 1).
+- Use `--dry-run` to build and preview a digest with no webhook and no network call.
 
 ---
 
@@ -141,12 +239,11 @@ The extension uses only Node.js built-ins (`node:https`) — no external runtime
 ```json
 {
   "name": "pm-slack",
-  "version": "0.1.0",
   "description": "Slack notifications for pm item lifecycle events",
   "author": "@unbraind",
-  "entry": "index.js",
+  "entry": "./dist/index.js",
   "priority": 50,
-  "capabilities": ["hooks", "services"]
+  "capabilities": ["commands", "hooks", "schema"]
 }
 ```
 

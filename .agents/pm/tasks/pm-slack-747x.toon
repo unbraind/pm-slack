@@ -1,0 +1,13 @@
+id: pm-slack-747x
+title: Event/type routing to multiple webhooks/channels (PM_SLACK_ROUTES)
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T22:21:19.665Z"
+updated_at: "2026-06-02T22:31:00.205Z"
+author: codex
+parent: pm-slack-l3ux
+close_reason: "Added PM_SLACK_ROUTES JSON routing (event/type:/status:/wildcard selectors) with first-match-wins fallback to defaults; per-event/type webhook+channel routing in the hook via selectRoute(). Unit-tested parseRoutes/ruleMatches/selectRoute."
+body: ""
