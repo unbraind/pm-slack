@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.6.2 - 2026-06-02
+
+### Added
+
+- Add afterCommand notification hook + slack notify command with Block Kit ([pm-slack-b3y5](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-b3y5.toon))
+
 ## 2026.05.29 - 2026-05-29
 
 ### Fixed
