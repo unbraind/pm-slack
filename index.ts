@@ -13,8 +13,14 @@
  *   PM_SLACK_WEBHOOK      (required) Slack incoming webhook URL
  *   PM_SLACK_CHANNEL      (optional) Override channel, e.g. #pm-alerts
  *   PM_SLACK_MIN_PRIORITY (optional) Minimum priority to notify (1=critical … 4=low), default 1 (critical only; set 4 for all)
- *   PM_SLACK_EVENTS       (optional) Comma-separated subset of hook events: create,close,block (default: all)
+ *   PM_SLACK_EVENTS       (optional) Comma-separated subset of hook events:
+ *                                    create,close,block,cancel,open,start,unblock,reopen (default: all).
+ *                                    Status-name aliases (e.g. "canceled","in_progress") are accepted.
  *   PM_SLACK_FORMAT       (optional) Default notification format: "blockkit" (default) or "text"
+ *   PM_SLACK_ASSIGNEE_MAP (optional) Comma list of "name=slackId" pairs mapping a pm item's
+ *                                    assignee to a Slack @mention, e.g. "alice=U123,bob=U456".
+ *   PM_SLACK_MENTION_ASSIGNEE (optional) Set to 0/false to disable assignee @mentions even when a map is set
+ *                                    (mentions auto-enable in the hook whenever PM_SLACK_ASSIGNEE_MAP is non-empty).
  *   PM_SLACK_ROUTES       (optional) JSON array of routing rules to send specific
  *                                    events/types/statuses to different webhooks/channels.
  *                                    Each rule: { "match": "<selector>", "webhook"?: "...", "channel"?: "..." }
@@ -78,10 +84,26 @@ interface PmItem {
   blocked_reason?: string;
   closedReason?: string;
   blockedReason?: string;
+  // pm stores cancel reasons in close_reason (no dedicated field); cancel_reason
+  // variants are read defensively in case a future pm version splits them out.
+  cancel_reason?: string;
+  cancelReason?: string;
   author?: string;
+  // Assignee mapping (Feature 2). pm stores the assignee as a scalar string.
+  assignee?: string;
+  // Optional URL the item links to (Feature 3). pm has no canonical URL field,
+  // so a defensive set of common field names is read; first non-empty wins.
+  url?: string;
+  github_url?: string;
+  githubUrl?: string;
+  html_url?: string;
+  htmlUrl?: string;
+  source_url?: string;
+  sourceUrl?: string;
+  link?: string;
 }
 
-type EventKind = "create" | "close" | "block";
+type EventKind = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
 
 type MessageFormat = "blockkit" | "text";
 
@@ -151,14 +173,52 @@ function readStrOption(options: Record<string, unknown>, key: string): string | 
 // Event parsing
 // ---------------------------------------------------------------------------
 
-const ALL_EVENTS: EventKind[] = ["create", "close", "block"];
+const ALL_EVENTS: EventKind[] = [
+  "create",
+  "close",
+  "block",
+  "cancel",
+  "open",
+  "start",
+  "unblock",
+  "reopen",
+];
+
+/**
+ * Friendly aliases accepted in PM_SLACK_EVENTS / `--on` so callers can write the
+ * status name they think in (e.g. "canceled"/"cancelled" → cancel,
+ * "in_progress" → start). Aliases normalize to a canonical EventKind.
+ */
+const EVENT_ALIASES: Record<string, EventKind> = {
+  created: "create",
+  closed: "close",
+  done: "close",
+  complete: "close",
+  completed: "close",
+  resolved: "close",
+  blocked: "block",
+  canceled: "cancel",
+  cancelled: "cancel",
+  opened: "open",
+  in_progress: "start",
+  "in-progress": "start",
+  started: "start",
+  unblocked: "unblock",
+  reopened: "reopen",
+};
+
+function normalizeEvent(token: string): EventKind | null {
+  const t = token.trim().toLowerCase();
+  if (ALL_EVENTS.includes(t as EventKind)) return t as EventKind;
+  return EVENT_ALIASES[t] ?? null;
+}
 
 function parseEvents(spec: string | undefined): Set<EventKind> {
   if (!spec) return new Set(ALL_EVENTS);
   const parsed = spec
     .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter((e): e is EventKind => ALL_EVENTS.includes(e as EventKind));
+    .map((e) => normalizeEvent(e))
+    .filter((e): e is EventKind => e !== null);
   return parsed.length > 0 ? new Set(parsed) : new Set(ALL_EVENTS);
 }
 
@@ -270,6 +330,9 @@ interface SlackConfig {
   events: Set<EventKind>;
   format: MessageFormat;
   routes: RouteRule[];
+  assigneeMap: Map<string, string>;
+  /** When true, include assignee @mentions in hook notifications by default. */
+  mentionAssignee: boolean;
 }
 
 function loadConfig(): SlackConfig | null {
@@ -302,8 +365,16 @@ function loadConfig(): SlackConfig | null {
 
   const events = parseEvents(process.env.PM_SLACK_EVENTS);
   const format = parseFormat(process.env.PM_SLACK_FORMAT);
+  const assigneeMap = parseAssigneeMap(process.env.PM_SLACK_ASSIGNEE_MAP);
+  // Mentions are auto-enabled in the hook whenever a non-empty map is present;
+  // PM_SLACK_MENTION_ASSIGNEE=0/false can force them off even with a map.
+  const mentionEnv = (process.env.PM_SLACK_MENTION_ASSIGNEE ?? "").trim().toLowerCase();
+  const mentionAssignee =
+    mentionEnv === "0" || mentionEnv === "false" || mentionEnv === "no" || mentionEnv === "off"
+      ? false
+      : assigneeMap.size > 0;
 
-  return { webhookUrl, channel, minPriority, events, format, routes };
+  return { webhookUrl, channel, minPriority, events, format, routes, assigneeMap, mentionAssignee };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +399,87 @@ function meetsMinPriority(item: PmItem, minPriority: Priority): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Assignee → Slack @mention mapping
+//
+// PM_SLACK_ASSIGNEE_MAP maps a pm item's assignee to a Slack user/group id so
+// notifications can @-mention the responsible person. Format is a comma-list of
+// `name=id` pairs, e.g. PM_SLACK_ASSIGNEE_MAP="alice=U123,bob=U456". Slack
+// renders <@U123> as a user mention and <!subteam^S123> for groups; we accept a
+// raw id (wrapped as <@id>) or a pre-wrapped token (kept verbatim). Mapping is
+// opt-in and additive — when unset, output is byte-identical to before.
+// ---------------------------------------------------------------------------
+
+/** Parse PM_SLACK_ASSIGNEE_MAP into a case-insensitive name→id lookup. */
+function parseAssigneeMap(spec: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!spec || !spec.trim()) return map;
+  for (const pair of spec.split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim().toLowerCase();
+    const id = pair.slice(eq + 1).trim();
+    if (name && id) map.set(name, id);
+  }
+  return map;
+}
+
+/**
+ * Resolve an item's assignee to a Slack mention token using the map. Returns a
+ * ready-to-embed mention string (e.g. `<@U123>`) or undefined when there's no
+ * assignee or no mapping. A raw id is wrapped as `<@id>`; a token already
+ * containing `<` is passed through unchanged (supports `<!subteam^S123>` etc).
+ */
+function resolveAssigneeMention(item: PmItem, map: Map<string, string>): string | undefined {
+  const assignee = item.assignee?.trim();
+  if (!assignee || map.size === 0) return undefined;
+  const id = map.get(assignee.toLowerCase());
+  if (!id) return undefined;
+  return id.startsWith("<") ? id : `<@${id}>`;
+}
+
+// ---------------------------------------------------------------------------
+// Item URL extraction (for Block Kit action buttons)
+//
+// pm has no canonical URL field, so read a defensive set of common field names
+// off the item; the first valid http(s) URL wins. Used to render an "Open item"
+// / "View on GitHub" action button in the Block Kit notification (Feature 3).
+// ---------------------------------------------------------------------------
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const v = value.trim();
+  if (!v) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a primary URL for the item, plus whether it points at GitHub. */
+function resolveItemUrl(item: PmItem, override?: string): { url: string; isGithub: boolean } | undefined {
+  const candidates = [
+    override,
+    item.github_url,
+    item.githubUrl,
+    item.html_url,
+    item.htmlUrl,
+    item.url,
+    item.source_url,
+    item.sourceUrl,
+    item.link,
+  ];
+  for (const c of candidates) {
+    if (isHttpUrl(c)) {
+      const url = c.trim();
+      return { url, isGithub: /(^|\.)github\.com$/i.test(new URL(url).hostname) };
+    }
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Plain-text message formatting (fallback)
 // ---------------------------------------------------------------------------
 
@@ -339,11 +491,27 @@ const EVENT_META: Record<EventKind, { verb: string; emoji: string }> = {
   create: { verb: "created", emoji: "🆕" },
   close: { verb: "closed", emoji: "✅" },
   block: { verb: "is blocked", emoji: "🚫" },
+  cancel: { verb: "canceled", emoji: "🛑" },
+  open: { verb: "opened", emoji: "📂" },
+  start: { verb: "started", emoji: "🔄" },
+  unblock: { verb: "unblocked", emoji: "🔓" },
+  reopen: { verb: "reopened", emoji: "♻️" },
 };
 
 function eventReason(item: PmItem, event: EventKind): string | undefined {
   if (event === "close") {
     return item.close_reason?.trim() || item.closedReason?.trim() || undefined;
+  }
+  if (event === "cancel") {
+    // pm persists the cancel reason in close_reason; honor a dedicated
+    // cancel_reason first if a future pm version introduces one.
+    return (
+      item.cancel_reason?.trim() ||
+      item.cancelReason?.trim() ||
+      item.close_reason?.trim() ||
+      item.closedReason?.trim() ||
+      undefined
+    );
   }
   if (event === "block") {
     return item.blocked_reason?.trim() || item.blockedReason?.trim() || undefined;
@@ -351,17 +519,22 @@ function eventReason(item: PmItem, event: EventKind): string | undefined {
   return undefined;
 }
 
-function buildTextMessage(item: PmItem, event: EventKind, channel?: string): string {
+function buildTextMessage(item: PmItem, event: EventKind, channel?: string, mention?: string): string {
   const type = itemTypeLabel(item);
   const meta = EVENT_META[event];
   let msg = `*[${type}]* ${item.title} ${meta.verb} ${meta.emoji}`;
 
   if (event === "create") {
     msg += `\nPriority: ${priorityLabel(item.priority)} • Type: ${type} • By: ${item.author ?? "unknown"}`;
-  } else {
+  } else if (event === "close" || event === "cancel" || event === "block") {
+    // Terminal/blocked transitions carry a reason field.
     msg += `\nReason: ${eventReason(item, event) ?? "no reason given"}`;
+  } else {
+    // Status transitions without a reason (open/start/unblock/reopen).
+    msg += `\nStatus: ${item.status ?? meta.verb}${item.assignee ? ` • Assignee: ${item.assignee}` : ""}`;
   }
 
+  if (mention) msg += `\nAssignee: ${mention}`;
   if (channel) msg += `\n_Channel: ${channel}_`;
   return msg;
 }
@@ -378,6 +551,10 @@ interface BlockKitOptions {
   channel?: string;
   /** Extra free-form body appended as a section (e.g. from `--text`). */
   note?: string;
+  /** Pre-resolved Slack mention token for the assignee (e.g. `<@U123>`). */
+  mention?: string;
+  /** Resolved item/GitHub URL for an action button. */
+  link?: { url: string; isGithub: boolean };
 }
 
 function buildItemBlockKit(
@@ -403,6 +580,10 @@ function buildItemBlockKit(
   ];
   if (item.status) fields.push({ type: "mrkdwn", text: `*Status:*\n${item.status}` });
   if (item.author) fields.push({ type: "mrkdwn", text: `*By:*\n${item.author}` });
+  // Assignee mention (Feature 2): show the @mention when mapped, else the raw
+  // assignee name so the field is still useful without a configured map.
+  if (opts.mention) fields.push({ type: "mrkdwn", text: `*Assignee:*\n${opts.mention}` });
+  else if (item.assignee) fields.push({ type: "mrkdwn", text: `*Assignee:*\n${item.assignee}` });
   blocks.push({ type: "section", fields });
 
   const reason = eventReason(item, event);
@@ -420,6 +601,25 @@ function buildItemBlockKit(
     });
   }
 
+  // Action buttons (Feature 3): a link button to the item / GitHub URL when one
+  // is present on the item. Block Kit "actions" with a url-bearing button needs
+  // no interactivity backend — it opens the URL directly. Plain-text path is
+  // unaffected (this only runs for the blockkit format).
+  if (opts.link) {
+    const label = opts.link.isGithub ? "View on GitHub" : "Open item";
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: label, emoji: true },
+          url: opts.link.url,
+          action_id: opts.link.isGithub ? "pm_slack_open_github" : "pm_slack_open_item",
+        },
+      ],
+    });
+  }
+
   const footerBits = [
     `pm item ${item.id} ${meta.verb}`,
     opts.channel ? `channel ${opts.channel}` : null,
@@ -429,7 +629,7 @@ function buildItemBlockKit(
     elements: [{ type: "mrkdwn", text: `🤖 pm-slack · ${footerBits.join(" · ")}` }],
   });
 
-  const fallback = buildTextMessage(item, event, opts.channel);
+  const fallback = buildTextMessage(item, event, opts.channel, opts.mention);
   return { blocks, fallback };
 }
 
@@ -445,7 +645,7 @@ function buildItemPayload(
   opts: BlockKitOptions = {}
 ): SlackPayload {
   if (format === "text") {
-    const text = buildTextMessage(item, event, opts.channel);
+    const text = buildTextMessage(item, event, opts.channel, opts.mention);
     const body = opts.note && opts.note.trim() ? `${text}\n${opts.note.trim()}` : text;
     return {
       text: body,
@@ -792,24 +992,79 @@ const CLOSE_COMMANDS = new Set(["close", "done", "complete", "finish", "resolve"
 /** Commands that update an item's status or attributes */
 const UPDATE_COMMANDS = new Set(["update", "edit", "set", "status"]);
 
+/** Lifecycle-alias commands that move an item to in_progress (start). */
+const START_COMMANDS = new Set(["claim", "start-task", "start", "begin"]);
+
+/** Lifecycle-alias commands that move an item back to open (e.g. pause). */
+const OPEN_COMMANDS = new Set(["pause-task", "release", "reopen", "publish"]);
+
+/** Map a (normalized) status string to the EventKind for a transition into it. */
+function statusToEvent(status: string | undefined): EventKind | null {
+  switch ((status ?? "").toLowerCase()) {
+    case "blocked":
+      return "block";
+    case "canceled":
+    case "cancelled":
+      return "cancel";
+    case "closed":
+    case "done":
+    case "resolved":
+    case "complete":
+    case "completed":
+      return "close";
+    case "in_progress":
+    case "in-progress":
+      return "start";
+    case "open":
+      return "open";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Detect the lifecycle event for a completed command. Strategy:
+ *   1. Create/close commands map directly.
+ *   2. Status-changing commands (update/set/lifecycle aliases) derive the event
+ *      from the *resulting* status (preferring the explicit --status option,
+ *      falling back to the result item's status).
+ *   3. When the result carries the prior status (`previousStatus`), refine
+ *      open→reopen (from a closed/canceled state) and open→unblock (from
+ *      blocked) so terminal-recovery transitions are distinguishable.
+ */
 function detectEvent(ctx: AfterCommandHookContext): EventKind | null {
   const cmd = ctx.command?.toLowerCase() ?? "";
 
   if (CREATE_COMMANDS.has(cmd)) return "create";
   if (CLOSE_COMMANDS.has(cmd)) return "close";
 
-  if (UPDATE_COMMANDS.has(cmd)) {
-    const newStatus =
-      (ctx.options?.["status"] as string | undefined) ??
-      ((ctx as any).result as { item?: { status?: string } } | undefined)?.item?.status ??
-      "";
-    if (newStatus.toLowerCase() === "blocked") return "block";
+  const result = (ctx as any).result as
+    | { item?: { status?: string }; previousStatus?: string; previous_status?: string }
+    | undefined;
+  const resultStatus = result?.item?.status;
+  const prevStatus = (result?.previousStatus ?? result?.previous_status ?? "").toLowerCase();
 
-    const resultItem = ((ctx as any).result as { item?: { status?: string } } | undefined)?.item;
-    if (resultItem?.status?.toLowerCase() === "blocked") return "block";
+  // Lifecycle aliases imply a target status even without --status.
+  let event: EventKind | null = null;
+  if (START_COMMANDS.has(cmd)) event = "start";
+  else if (OPEN_COMMANDS.has(cmd)) event = cmd === "reopen" ? "reopen" : "open";
+
+  if (!event && UPDATE_COMMANDS.has(cmd)) {
+    const optStatus = ctx.options?.["status"] as string | undefined;
+    event = statusToEvent(optStatus) ?? statusToEvent(resultStatus);
   }
 
-  return null;
+  if (!event) return null;
+
+  // Refine an "open" transition using the prior status when available:
+  //   blocked  -> open  => unblock
+  //   closed/canceled -> open => reopen
+  if (event === "open" && prevStatus) {
+    if (prevStatus === "blocked") return "unblock";
+    if (["closed", "canceled", "cancelled", "done", "resolved"].includes(prevStatus)) return "reopen";
+  }
+
+  return event;
 }
 
 function extractItem(ctx: AfterCommandHookContext): PmItem | null {
@@ -835,7 +1090,7 @@ function extractItem(ctx: AfterCommandHookContext): PmItem | null {
 
 export default defineExtension({
   name: "pm-slack",
-  version: "2026.6.3",
+  version: "2026.6.4",
 
   activate(api) {
     // -----------------------------------------------------------------------
@@ -887,8 +1142,15 @@ export default defineExtension({
             return;
           }
 
+          const mention = config.mentionAssignee
+            ? resolveAssigneeMention(item, config.assigneeMap)
+            : undefined;
+          const link = resolveItemUrl(item);
+
           const payload = buildItemPayload(item, event, config.format, {
             channel: target.channel,
+            mention,
+            link,
           });
 
           await postToSlack(target.webhookUrl, payload);
@@ -945,8 +1207,11 @@ export default defineExtension({
           { long: "--title", value_name: "title", description: "Title shown in the Block Kit header (defaults to the --text first line)" },
           { long: "--channel", value_name: "name", description: "Channel name shown in the message (e.g. #pm-alerts). Overrides PM_SLACK_CHANNEL." },
           { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
-          { long: "--on", value_name: "events", description: "Comma list of lifecycle events for the message template (create,close,block). Default: create" },
+          { long: "--on", value_name: "events", description: "Comma list of lifecycle events for the message template (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
           { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
+          { long: "--assignee", value_name: "name", description: "Assignee name shown on the message (mapped to a Slack @mention via PM_SLACK_ASSIGNEE_MAP)" },
+          { long: "--mention-assignee", description: "Resolve the assignee to a Slack @mention using PM_SLACK_ASSIGNEE_MAP" },
+          { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (e.g. a GitHub item)" },
           { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK env var)" },
           { long: "--dry-run", description: "Print the message and payload without posting to Slack" },
           { long: "--json", description: "Emit the result/payload as JSON (machine-readable)" },
@@ -979,11 +1244,23 @@ export default defineExtension({
 
           // Synthesize a minimal item from the flags so we can reuse the
           // message builder. This command is for ad-hoc posts, not item lookups.
-          const item: PmItem = { id: "manual", title, type: "Note" };
+          const assignee = readStrOption(options, "assignee");
+          const url = readStrOption(options, "url");
+          const item: PmItem = { id: "manual", title, type: "Note", ...(assignee ? { assignee } : {}) };
+
+          const assigneeMap = parseAssigneeMap(process.env.PM_SLACK_ASSIGNEE_MAP);
+          // Mention when explicitly requested, or implicitly when an assignee
+          // maps to a Slack id (so the @mention is opt-in but ergonomic).
+          const wantMention = readBoolOption(options, "mention-assignee") || assigneeMap.size > 0;
+          const mention = wantMention ? resolveAssigneeMention(item, assigneeMap) : undefined;
+          const link = resolveItemUrl(item, url);
+
           const payload: SlackPayload = {
             ...buildItemPayload(item, event, format, {
               channel,
               note: text && text !== title ? text : undefined,
+              mention,
+              link,
             }),
             ...(threadTs ? { thread_ts: threadTs } : {}),
           };
@@ -1035,12 +1312,16 @@ export default defineExtension({
           "pm slack test --format blockkit",
           "pm slack test --format text --on close",
           "pm slack test --on block --json",
+          "pm slack test --on cancel",
+          "PM_SLACK_ASSIGNEE_MAP='alice=U123' pm slack test --on start --mention-assignee",
         ],
         flags: [
           { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
-          { long: "--on", value_name: "event", description: "Lifecycle event to preview (create,close,block). Default: create" },
+          { long: "--on", value_name: "event", description: "Lifecycle event to preview (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
           { long: "--title", value_name: "title", description: "Sample item title (default: a representative example)" },
           { long: "--channel", value_name: "name", description: "Channel hint to show in the preview (overrides PM_SLACK_CHANNEL)" },
+          { long: "--mention-assignee", description: "Resolve the sample assignee to a Slack @mention via PM_SLACK_ASSIGNEE_MAP" },
+          { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (default: a sample GitHub URL)" },
           { long: "--json", description: "Emit the preview payload as JSON" },
           { long: "--dry-run", description: "Accepted for symmetry; this command never posts." },
         ],
@@ -1056,14 +1337,26 @@ export default defineExtension({
           const events = parseEvents(readStrOption(options, "on") ?? "create");
           const event: EventKind = (ALL_EVENTS.find((e) => events.has(e)) ?? "create") as EventKind;
 
+          const t = readStrOption(options, "title");
           // A representative sample item per event so the preview is realistic.
           const sample: Record<EventKind, PmItem> = {
-            create: { id: "pm-1a2b", title: readStrOption(options, "title") ?? "Add OAuth login flow", type: "Feature", priority: 2, status: "open", author: "alice" },
-            close: { id: "pm-3c4d", title: readStrOption(options, "title") ?? "Fix login redirect bug", type: "Issue", priority: 1, status: "closed", author: "bob", close_reason: "Fixed in commit abc123" },
-            block: { id: "pm-5e6f", title: readStrOption(options, "title") ?? "Dashboard redesign", type: "Epic", priority: 2, status: "blocked", author: "carol", blocked_reason: "Waiting on design approval" },
+            create: { id: "pm-1a2b", title: t ?? "Add OAuth login flow", type: "Feature", priority: 2, status: "open", author: "alice", assignee: "alice", github_url: "https://github.com/unbraind/pm-slack/issues/1" },
+            close: { id: "pm-3c4d", title: t ?? "Fix login redirect bug", type: "Issue", priority: 1, status: "closed", author: "bob", assignee: "bob", close_reason: "Fixed in commit abc123", github_url: "https://github.com/unbraind/pm-slack/issues/2" },
+            block: { id: "pm-5e6f", title: t ?? "Dashboard redesign", type: "Epic", priority: 2, status: "blocked", author: "carol", assignee: "carol", blocked_reason: "Waiting on design approval" },
+            cancel: { id: "pm-7g8h", title: t ?? "Legacy export pipeline", type: "Task", priority: 3, status: "canceled", author: "dave", assignee: "dave", close_reason: "Superseded by new pipeline" },
+            open: { id: "pm-9i0j", title: t ?? "Publish onboarding guide", type: "Task", priority: 3, status: "open", author: "erin", assignee: "erin" },
+            start: { id: "pm-1k2l", title: t ?? "Implement rate limiter", type: "Feature", priority: 2, status: "in_progress", author: "frank", assignee: "frank", github_url: "https://github.com/unbraind/pm-slack/pull/3" },
+            unblock: { id: "pm-3m4n", title: t ?? "Payment reconciliation", type: "Issue", priority: 1, status: "open", author: "grace", assignee: "grace" },
+            reopen: { id: "pm-5o6p", title: t ?? "Flaky integration test", type: "Bug", priority: 2, status: "open", author: "heidi", assignee: "heidi" },
           };
           const item = sample[event];
-          const payload = buildItemPayload(item, event, format, { channel });
+
+          const assigneeMap = parseAssigneeMap(process.env.PM_SLACK_ASSIGNEE_MAP);
+          const wantMention = readBoolOption(options, "mention-assignee") || assigneeMap.size > 0;
+          const mention = wantMention ? resolveAssigneeMention(item, assigneeMap) : undefined;
+          const link = resolveItemUrl(item, readStrOption(options, "url"));
+
+          const payload = buildItemPayload(item, event, format, { channel, mention, link });
 
           // In JSON mode, pm renders the returned object — don't also write to
           // stdout (that would corrupt the JSON stream). In human mode, print a
@@ -1164,13 +1457,20 @@ export const __test__ = {
   buildItemPayload,
   buildTextMessage,
   parseEvents,
+  normalizeEvent,
   parseFormat,
   parseRoutes,
   ruleMatches,
   selectRoute,
   detectEvent,
+  statusToEvent,
   extractItem,
   meetsMinPriority,
+  parseAssigneeMap,
+  resolveAssigneeMention,
+  resolveItemUrl,
+  isHttpUrl,
+  EVENT_META,
   parseStoredItem,
   resolveWindow,
   aggregateDigest,

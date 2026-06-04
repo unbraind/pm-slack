@@ -1,6 +1,12 @@
 # Changelog
 
-## 2026.6.3 - 2026-06-02
+## 2026.6.4 - 2026-06-04
+
+### Added
+
+- Lifecycle event taxonomy + assignee mentions + action buttons ([pm-slack-c3q7](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-c3q7.toon))
+
+## 2026.06.03 - 2026-06-02
 
 ### Added
 

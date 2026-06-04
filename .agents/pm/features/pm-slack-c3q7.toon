@@ -1,0 +1,17 @@
+id: pm-slack-c3q7
+title: Lifecycle event taxonomy + assignee mentions + action buttons
+description: "Expand afterCommand event detection to cover draft->open, start, block, unblock, reopen, and cancel (reason from close_reason) transitions, each routable like existing events. Add PM_SLACK_ASSIGNEE_MAP to map item assignees to Slack @mentions in notify/digest/hook output. Add Block Kit action buttons linking to the item/GitHub URL in blockkit notifications. All additive and backward-compatible; plain-text path unchanged."
+type: Feature
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-04T05:17:48.026Z"
+updated_at: "2026-06-04T05:18:07.608Z"
+author: codex
+comments[4]{created_at,author,text}:
+  "2026-06-04T05:18:02.080Z",codex,"Feature 1 (events): EventKind expanded to create/close/block/cancel/open/start/unblock/reopen with EVENT_ALIASES (canceled/in_progress/reopened/...); detectEvent derives event from --status option or result-item status via statusToEvent(); lifecycle aliases (claim/start-task=start, pause-task/release/reopen/publish=open) mapped; unblock/reopen refined from previousStatus when pm exposes it. EVENT_META + eventReason (cancel reads close_reason) extended."
+  "2026-06-04T05:18:02.389Z",codex,"Feature 2 (mentions): PM_SLACK_ASSIGNEE_MAP='name=id,...' parsed by parseAssigneeMap (case-insensitive); resolveAssigneeMention wraps raw id as <@id>, passes <!subteam^..> through; auto-enabled in hook when map non-empty, PM_SLACK_MENTION_ASSIGNEE=0 disables; --assignee/--mention-assignee flags on notify+test. Mention shown in text + blockkit fields."
+  "2026-06-04T05:18:02.688Z",codex,"Feature 3 (buttons): resolveItemUrl reads github_url/html_url/url/source_url/link (+camelCase), first valid http(s) wins; isGithub detection; buildItemBlockKit appends an actions block with a url-button ('View on GitHub'/'Open item'); plain-text path unchanged; --url flag on notify+test."
+  "2026-06-04T05:18:02.989Z",codex,"Functional test (real data, scratch /tmp/sltest, pm install --project): live hook via local HTTPS capture confirmed created/opened(draft->open)/started/blocked/canceled events detected+posted; create payload carried Assignee <@U0ALICE1> from PM_SLACK_ASSIGNEE_MAP; cancel reason 'Descoped for Q3' from close_reason; PM_SLACK_ROUTES routed cancel to #descoped. Known limitation: pm 2026.5.31 afterCommand result has no previousStatus, so unblock/reopen surface as 'open' live (refinement is forward-compatible + unit-tested)."
+close_reason: Implemented + tested (27 unit tests pass) + functionally verified via live hook; documented in README
+body: ""

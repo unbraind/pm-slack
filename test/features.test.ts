@@ -5,6 +5,8 @@ import extension, { __test__ } from "../dist/index.js";
 
 const {
   parseFormat,
+  parseEvents,
+  normalizeEvent,
   parseRoutes,
   ruleMatches,
   selectRoute,
@@ -16,6 +18,13 @@ const {
   buildDigestText,
   buildDigestBlockKit,
   buildDigestPayload,
+  detectEvent,
+  statusToEvent,
+  parseAssigneeMap,
+  resolveAssigneeMention,
+  resolveItemUrl,
+  isHttpUrl,
+  EVENT_META,
 } = __test__;
 
 // ---------------------------------------------------------------------------
@@ -254,6 +263,172 @@ test("buildDigestBlockKit: empty digest is still valid Block Kit", () => {
 // ---------------------------------------------------------------------------
 // command registration: new commands appear
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Feature 1: expanded event taxonomy (detection + parsing + meta + reason)
+// ---------------------------------------------------------------------------
+
+test("EVENT_META covers every event with verb + emoji", () => {
+  for (const e of ["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"]) {
+    const meta = (EVENT_META as Record<string, { verb: string; emoji: string }>)[e];
+    assert.ok(meta, `missing meta for ${e}`);
+    assert.equal(typeof meta.verb, "string");
+    assert.equal(typeof meta.emoji, "string");
+  }
+});
+
+test("parseEvents + normalizeEvent: status-name aliases normalize to EventKind", () => {
+  assert.equal(normalizeEvent("canceled"), "cancel");
+  assert.equal(normalizeEvent("cancelled"), "cancel");
+  assert.equal(normalizeEvent("in_progress"), "start");
+  assert.equal(normalizeEvent("in-progress"), "start");
+  assert.equal(normalizeEvent("reopened"), "reopen");
+  assert.equal(normalizeEvent("blocked"), "block");
+  assert.equal(normalizeEvent("nonsense"), null);
+  const set = parseEvents("create,canceled,in_progress");
+  assert.ok(set.has("create"));
+  assert.ok(set.has("cancel"));
+  assert.ok(set.has("start"));
+});
+
+test("statusToEvent: maps resulting status to the right transition", () => {
+  assert.equal(statusToEvent("canceled"), "cancel");
+  assert.equal(statusToEvent("blocked"), "block");
+  assert.equal(statusToEvent("closed"), "close");
+  assert.equal(statusToEvent("in_progress"), "start");
+  assert.equal(statusToEvent("open"), "open");
+  assert.equal(statusToEvent("draft"), null);
+  assert.equal(statusToEvent(undefined), null);
+});
+
+test("detectEvent: cancel, draft->open, start, unblock, reopen", () => {
+  // canceled via --status option
+  assert.equal(
+    detectEvent({ command: "update", options: { status: "canceled" }, result: { item: { id: "x", status: "canceled" } } } as any),
+    "cancel"
+  );
+  // draft -> open (no prior status known) => open
+  assert.equal(
+    detectEvent({ command: "update", options: { status: "open" }, result: { item: { id: "x", status: "open" } } } as any),
+    "open"
+  );
+  // lifecycle alias claim => start
+  assert.equal(detectEvent({ command: "claim", result: { item: { id: "x", status: "in_progress" } } } as any), "start");
+  // unblock: blocked -> open with previousStatus
+  assert.equal(
+    detectEvent({ command: "update", options: { status: "open" }, result: { item: { id: "x", status: "open" }, previousStatus: "blocked" } } as any),
+    "unblock"
+  );
+  // reopen: closed -> open with previousStatus
+  assert.equal(
+    detectEvent({ command: "update", options: { status: "open" }, result: { item: { id: "x", status: "open" }, previousStatus: "closed" } } as any),
+    "reopen"
+  );
+  // create/close still work
+  assert.equal(detectEvent({ command: "create", result: { item: { id: "x" } } } as any), "create");
+  assert.equal(detectEvent({ command: "close", result: { item: { id: "x" } } } as any), "close");
+  // unrelated command => null
+  assert.equal(detectEvent({ command: "list" } as any), null);
+});
+
+test("cancel event reason falls back to close_reason in store; output well-formed", () => {
+  const item = { id: "pm-c", title: "Canceled item", type: "Task", priority: 3 as const, status: "canceled", close_reason: "Duplicate" };
+  const text = buildItemPayload(item, "cancel", "text").text;
+  assert.ok(text.includes("canceled"));
+  assert.ok(text.includes("Duplicate"), "cancel reason should come from close_reason");
+  const { blocks } = buildItemBlockKit(item, "cancel");
+  assert.ok(JSON.stringify(blocks).includes("Duplicate"));
+});
+
+// ---------------------------------------------------------------------------
+// Feature 2: assignee → Slack @mention mapping
+// ---------------------------------------------------------------------------
+
+test("parseAssigneeMap: parses name=id pairs, case-insensitive keys", () => {
+  const m = parseAssigneeMap("alice=U123, Bob=U456 ,bad,=skip,name=");
+  assert.equal(m.get("alice"), "U123");
+  assert.equal(m.get("bob"), "U456"); // key lowercased
+  assert.equal(m.has("bad"), false);
+  assert.equal(m.size, 2);
+  assert.equal(parseAssigneeMap(undefined).size, 0);
+  assert.equal(parseAssigneeMap("").size, 0);
+});
+
+test("resolveAssigneeMention: wraps raw id, passes through prewrapped, undefined when unmapped", () => {
+  const map = parseAssigneeMap("alice=U123,team=<!subteam^S99>");
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "alice" }, map), "<@U123>");
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "Alice" }, map), "<@U123>"); // case-insensitive
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "team" }, map), "<!subteam^S99>");
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "nobody" }, map), undefined);
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t" }, map), undefined);
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "alice" }, new Map()), undefined);
+});
+
+test("mention appears in both text and blockkit output", () => {
+  const item = { id: "pm-a", title: "Auth", type: "Feature", priority: 2 as const, status: "open", assignee: "alice" };
+  const textPayload = buildItemPayload(item, "create", "text", { mention: "<@U123>" });
+  assert.ok(textPayload.text.includes("<@U123>"));
+  const blockPayload = buildItemPayload(item, "create", "blockkit", { mention: "<@U123>" });
+  assert.ok(JSON.stringify(blockPayload.blocks).includes("<@U123>"));
+  // without mention but with assignee, raw name still shown in blockkit fields
+  const noMention = buildItemBlockKit(item, "create", {});
+  assert.ok(JSON.stringify(noMention.blocks).includes("alice"));
+});
+
+// ---------------------------------------------------------------------------
+// Feature 3: action buttons / URL extraction
+// ---------------------------------------------------------------------------
+
+test("isHttpUrl: only http/https strings pass", () => {
+  assert.ok(isHttpUrl("https://github.com/x/y"));
+  assert.ok(isHttpUrl("http://example.com"));
+  assert.ok(!isHttpUrl("ftp://x"));
+  assert.ok(!isHttpUrl("not a url"));
+  assert.ok(!isHttpUrl(""));
+  assert.ok(!isHttpUrl(123));
+});
+
+test("resolveItemUrl: override wins, github detection, defensive field names", () => {
+  assert.deepEqual(
+    resolveItemUrl({ id: "1", title: "t" }, "https://github.com/unbraind/pm-slack/issues/1"),
+    { url: "https://github.com/unbraind/pm-slack/issues/1", isGithub: true }
+  );
+  assert.deepEqual(
+    resolveItemUrl({ id: "1", title: "t", html_url: "https://example.com/x" }),
+    { url: "https://example.com/x", isGithub: false }
+  );
+  // github_url preferred over generic url
+  assert.equal(
+    resolveItemUrl({ id: "1", title: "t", url: "https://a.com", github_url: "https://github.com/o/r" })!.url,
+    "https://github.com/o/r"
+  );
+  assert.equal(resolveItemUrl({ id: "1", title: "t" }), undefined);
+  assert.equal(resolveItemUrl({ id: "1", title: "t", url: "garbage" }), undefined);
+});
+
+test("blockkit: action button block present with correct url + label", () => {
+  const item = { id: "pm-1", title: "Auth", type: "Feature", priority: 2 as const, status: "open" };
+  const { blocks } = buildItemBlockKit(item, "create", { link: { url: "https://github.com/o/r/issues/1", isGithub: true } });
+  const actions = blocks.find((b) => b.type === "actions") as any;
+  assert.ok(actions, "actions block must be present");
+  assert.equal(actions.elements[0].type, "button");
+  assert.equal(actions.elements[0].url, "https://github.com/o/r/issues/1");
+  assert.equal(actions.elements[0].text.text, "View on GitHub");
+  assert.equal(actions.elements[0].action_id, "pm_slack_open_github");
+
+  // non-github => "Open item"
+  const { blocks: b2 } = buildItemBlockKit(item, "create", { link: { url: "https://x.com/i", isGithub: false } });
+  const a2 = b2.find((b) => b.type === "actions") as any;
+  assert.equal(a2.elements[0].text.text, "Open item");
+
+  // no link => no actions block (additive: unchanged when absent)
+  const { blocks: b3 } = buildItemBlockKit(item, "create", {});
+  assert.equal(b3.find((b) => b.type === "actions"), undefined);
+
+  // plain-text path never gets blocks/buttons
+  const textPayload = buildItemPayload(item, "create", "text", { link: { url: "https://github.com/o/r", isGithub: true } });
+  assert.equal(textPayload.blocks, undefined);
+});
 
 test("activate registers slack notify, test, and digest commands", () => {
   const commands: string[] = [];

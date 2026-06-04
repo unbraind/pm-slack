@@ -2,7 +2,7 @@
 
 Slack notifications for [pm-cli](https://github.com/unbraind/pm-cli) item lifecycle events.
 
-Fires after `create`, `close`, and `block` operations and posts a formatted message to a Slack incoming webhook.
+Fires after `create`, `close`, `block`, `cancel`, `open`, `start`, `unblock`, and `reopen` lifecycle transitions and posts a formatted message to a Slack incoming webhook. Optionally maps assignees to Slack `@mentions` and adds Block Kit action buttons linking to the item / GitHub URL.
 
 ---
 
@@ -36,9 +36,11 @@ pm install github.com/unbraind/pm-slack --project
 | `PM_SLACK_WEBHOOK` | Usually | — | Slack incoming webhook URL (optional if every routing rule carries its own `webhook`) |
 | `PM_SLACK_CHANNEL` | No | — | Default channel hint appended to messages (e.g. `#pm-alerts`) |
 | `PM_SLACK_MIN_PRIORITY` | No | `1` | Minimum priority to notify (1=critical, 2=high, 3=medium, 4=low) |
-| `PM_SLACK_EVENTS` | No | `create,close,block` | Comma-separated list of events to notify on |
+| `PM_SLACK_EVENTS` | No | all events | Comma-separated list of events to notify on. Status-name aliases (`canceled`, `in_progress`, …) accepted |
 | `PM_SLACK_FORMAT` | No | `blockkit` | Default message format: `blockkit` (rich) or `text` (plain mrkdwn) |
 | `PM_SLACK_ROUTES` | No | — | JSON array of routing rules (see [Routing](#routing-by-event-type-or-status)) |
+| `PM_SLACK_ASSIGNEE_MAP` | No | — | Comma list of `name=slackId` pairs mapping assignees to Slack `@mentions`, e.g. `alice=U123,bob=U456` |
+| `PM_SLACK_MENTION_ASSIGNEE` | No | auto | Set `0`/`false` to disable assignee mentions even when a map is set (auto-enabled when `PM_SLACK_ASSIGNEE_MAP` is non-empty) |
 
 Export them in your shell profile or `.env`:
 
@@ -58,7 +60,17 @@ export PM_SLACK_FORMAT="text"          # plain text instead of Block Kit
 |---|---|---|
 | `create` | `pm add`, `pm create`, `pm new` | Fires when a new item is created |
 | `close` | `pm close`, `pm done`, `pm complete` | Fires when an item is closed/resolved |
-| `block` | `pm update --status blocked`, `pm set status blocked` | Fires when an item's status changes to blocked |
+| `block` | `pm update --status blocked` | Fires when an item's status changes to blocked |
+| `cancel` | `pm update --status canceled` | Fires when an item is canceled (reason read from `close_reason`) |
+| `open` | `pm update --status open` (e.g. `draft → open`) | Fires when an item is published/opened |
+| `start` | `pm claim`, `pm start-task`, `pm update --status in_progress` | Fires when work begins on an item |
+| `unblock` | `pm update --status open` from a `blocked` state | Distinguished when the result carries the prior status |
+| `reopen` | `pm update --status open` from a `closed`/`canceled` state | Distinguished when the result carries the prior status |
+
+`unblock` / `reopen` are refinements of an `open` transition: when pm's hook
+result exposes the previous status, the more specific event is used; otherwise
+the transition surfaces as `open`. Status-name aliases (`canceled`,
+`in_progress`, `reopened`, …) are accepted anywhere an event name is.
 
 ---
 
@@ -158,6 +170,40 @@ export PM_SLACK_ROUTES='[
   { "match": "block", "channel": "#urgent" },
   { "match": "type:Bug", "webhook": "https://hooks.slack.com/services/AAA/BBB/CCC" }
 ]'
+```
+
+---
+
+## Assignee @mentions
+
+Map a pm item's `assignee` to a Slack user (or group) id so notifications
+@-mention the responsible person. Set `PM_SLACK_ASSIGNEE_MAP` to a comma list of
+`name=id` pairs:
+
+```bash
+export PM_SLACK_ASSIGNEE_MAP="alice=U0123ABC,bob=U0456DEF,team=<!subteam^S0789GHI>"
+```
+
+- A raw id (`U0123ABC`) is wrapped as `<@U0123ABC>`.
+- A pre-wrapped token (e.g. `<!subteam^S0789GHI>` for a group) is used verbatim.
+- Mentions auto-enable in the hook whenever the map is non-empty; set
+  `PM_SLACK_MENTION_ASSIGNEE=0` to force them off.
+- For ad-hoc posts, `pm slack notify --assignee alice --mention-assignee` resolves
+  the mention from the same map. When no mapping exists, the raw assignee name is
+  still shown (blockkit) — output is byte-identical to before when no map is set.
+
+---
+
+## Action buttons (item / GitHub links)
+
+When a pm item carries a URL, the Block Kit notification adds an action button
+linking to it (`View on GitHub` for github.com URLs, otherwise `Open item`). The
+URL is read from the first present of these item fields: `github_url`,
+`html_url`, `url`, `source_url`, `link` (camelCase variants accepted). The
+plain-`text` format is unchanged. For ad-hoc posts:
+
+```bash
+pm slack notify --title 'Deploy' --on close --url 'https://github.com/unbraind/pm-slack/pull/3' --dry-run
 ```
 
 ---
