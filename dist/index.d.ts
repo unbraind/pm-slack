@@ -13,8 +13,14 @@
  *   PM_SLACK_WEBHOOK      (required) Slack incoming webhook URL
  *   PM_SLACK_CHANNEL      (optional) Override channel, e.g. #pm-alerts
  *   PM_SLACK_MIN_PRIORITY (optional) Minimum priority to notify (1=critical … 4=low), default 1 (critical only; set 4 for all)
- *   PM_SLACK_EVENTS       (optional) Comma-separated subset of hook events: create,close,block (default: all)
+ *   PM_SLACK_EVENTS       (optional) Comma-separated subset of hook events:
+ *                                    create,close,block,cancel,open,start,unblock,reopen (default: all).
+ *                                    Status-name aliases (e.g. "canceled","in_progress") are accepted.
  *   PM_SLACK_FORMAT       (optional) Default notification format: "blockkit" (default) or "text"
+ *   PM_SLACK_ASSIGNEE_MAP (optional) Comma list of "name=slackId" pairs mapping a pm item's
+ *                                    assignee to a Slack @mention, e.g. "alice=U123,bob=U456".
+ *   PM_SLACK_MENTION_ASSIGNEE (optional) Set to 0/false to disable assignee @mentions even when a map is set
+ *                                    (mentions auto-enable in the hook whenever PM_SLACK_ASSIGNEE_MAP is non-empty).
  *   PM_SLACK_ROUTES       (optional) JSON array of routing rules to send specific
  *                                    events/types/statuses to different webhooks/channels.
  *                                    Each rule: { "match": "<selector>", "webhook"?: "...", "channel"?: "..." }
@@ -38,9 +44,20 @@ interface PmItem {
     blocked_reason?: string;
     closedReason?: string;
     blockedReason?: string;
+    cancel_reason?: string;
+    cancelReason?: string;
     author?: string;
+    assignee?: string;
+    url?: string;
+    github_url?: string;
+    githubUrl?: string;
+    html_url?: string;
+    htmlUrl?: string;
+    source_url?: string;
+    sourceUrl?: string;
+    link?: string;
 }
-type EventKind = "create" | "close" | "block";
+type EventKind = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
 type MessageFormat = "blockkit" | "text";
 /** A single routing rule parsed from PM_SLACK_ROUTES. */
 interface RouteRule {
@@ -65,6 +82,7 @@ interface SlackPayload {
     channel?: string;
     thread_ts?: string;
 }
+declare function normalizeEvent(token: string): EventKind | null;
 declare function parseEvents(spec: string | undefined): Set<EventKind>;
 /**
  * Normalize a format spec to a known MessageFormat. Accepts a few friendly
@@ -89,11 +107,33 @@ declare function ruleMatches(rule: RouteRule, event: EventKind, item: PmItem): b
  */
 declare function selectRoute(event: EventKind, item: PmItem, routes: RouteRule[], defaultWebhook: string, defaultChannel?: string): RouteTarget | null;
 declare function meetsMinPriority(item: PmItem, minPriority: Priority): boolean;
-declare function buildTextMessage(item: PmItem, event: EventKind, channel?: string): string;
+/** Parse PM_SLACK_ASSIGNEE_MAP into a case-insensitive name→id lookup. */
+declare function parseAssigneeMap(spec: string | undefined): Map<string, string>;
+/**
+ * Resolve an item's assignee to a Slack mention token using the map. Returns a
+ * ready-to-embed mention string (e.g. `<@U123>`) or undefined when there's no
+ * assignee or no mapping. A raw id is wrapped as `<@id>`; a token already
+ * containing `<` is passed through unchanged (supports `<!subteam^S123>` etc).
+ */
+declare function resolveAssigneeMention(item: PmItem, map: Map<string, string>): string | undefined;
+declare function isHttpUrl(value: unknown): value is string;
+/** Resolve a primary URL for the item, plus whether it points at GitHub. */
+declare function resolveItemUrl(item: PmItem, override?: string): {
+    url: string;
+    isGithub: boolean;
+} | undefined;
+declare function buildTextMessage(item: PmItem, event: EventKind, channel?: string, mention?: string): string;
 interface BlockKitOptions {
     channel?: string;
     /** Extra free-form body appended as a section (e.g. from `--text`). */
     note?: string;
+    /** Pre-resolved Slack mention token for the assignee (e.g. `<@U123>`). */
+    mention?: string;
+    /** Resolved item/GitHub URL for an action button. */
+    link?: {
+        url: string;
+        isGithub: boolean;
+    };
 }
 declare function buildItemBlockKit(item: PmItem, event: EventKind, opts?: BlockKitOptions): {
     blocks: SlackBlock[];
@@ -148,6 +188,18 @@ declare function buildDigestBlockKit(summary: DigestSummary, channel?: string): 
     fallback: string;
 };
 declare function buildDigestPayload(summary: DigestSummary, format: MessageFormat, channel?: string): SlackPayload;
+/** Map a (normalized) status string to the EventKind for a transition into it. */
+declare function statusToEvent(status: string | undefined): EventKind | null;
+/**
+ * Detect the lifecycle event for a completed command. Strategy:
+ *   1. Create/close commands map directly.
+ *   2. Status-changing commands (update/set/lifecycle aliases) derive the event
+ *      from the *resulting* status (preferring the explicit --status option,
+ *      falling back to the result item's status).
+ *   3. When the result carries the prior status (`previousStatus`), refine
+ *      open→reopen (from a closed/canceled state) and open→unblock (from
+ *      blocked) so terminal-recovery transitions are distinguishable.
+ */
 declare function detectEvent(ctx: AfterCommandHookContext): EventKind | null;
 declare function extractItem(ctx: AfterCommandHookContext): PmItem | null;
 declare const _default: {
@@ -161,13 +213,23 @@ export declare const __test__: {
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;
     parseEvents: typeof parseEvents;
+    normalizeEvent: typeof normalizeEvent;
     parseFormat: typeof parseFormat;
     parseRoutes: typeof parseRoutes;
     ruleMatches: typeof ruleMatches;
     selectRoute: typeof selectRoute;
     detectEvent: typeof detectEvent;
+    statusToEvent: typeof statusToEvent;
     extractItem: typeof extractItem;
     meetsMinPriority: typeof meetsMinPriority;
+    parseAssigneeMap: typeof parseAssigneeMap;
+    resolveAssigneeMention: typeof resolveAssigneeMention;
+    resolveItemUrl: typeof resolveItemUrl;
+    isHttpUrl: typeof isHttpUrl;
+    EVENT_META: Record<EventKind, {
+        verb: string;
+        emoji: string;
+    }>;
     parseStoredItem: typeof parseStoredItem;
     resolveWindow: typeof resolveWindow;
     aggregateDigest: typeof aggregateDigest;
