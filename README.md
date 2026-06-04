@@ -253,6 +253,43 @@ with a clear error (exit 1) rather than crashing.
 
 ---
 
+## Webhook preflight gate
+
+The Slack-posting commands (`slack notify`, `slack digest`) run a **fail-fast
+preflight** that validates webhook configuration **before** anything is posted:
+
+- The effective webhook is resolved with precedence `--webhook` flag →
+  `PM_SLACK_WEBHOOK` → a per-rule webhook in `PM_SLACK_ROUTES`.
+- If no webhook is configured, or the configured URL is not a valid `http(s)`
+  URL, the command **aborts immediately** with a clear, actionable error and a
+  **non-zero exit** (`2`, usage error) — nothing is posted, no network call is
+  made.
+- On a valid configuration the gate is a **silent pass-through**.
+
+Validation is **purely syntactic/environment-based — no network call**, so it is
+cheap and offline-safe. It does *not* verify the webhook actually works; a valid
+but dead webhook still passes the gate and surfaces at the network layer.
+
+What is **not** gated:
+
+- `slack test` — an offline preview that never posts and works with no webhook.
+- `--dry-run` on `slack notify` / `slack digest` — also an offline preview.
+
+The gate is registered both as a scoped `registerPreflight` override (for the
+documented `preflight` capability and a visible warning) and — because the pm
+runtime treats errors thrown from a preflight override as non-fatal — enforced in
+the command handlers themselves, which throw a `CommandError` that genuinely
+aborts the command.
+
+```bash
+# no webhook configured:
+pm slack notify --text 'hi'        # → error + exit 2, nothing posted
+pm slack notify --text 'hi' --dry-run   # → offline preview, exit 0
+pm slack test --on close           # → offline preview, exit 0
+```
+
+---
+
 ## Error Handling
 
 The **lifecycle hook is best-effort** and never breaks your pm command:
@@ -261,10 +298,16 @@ The **lifecycle hook is best-effort** and never breaks your pm command:
 - If the webhook URL is invalid, the hook logs an error and continues without crashing pm-cli.
 - HTTP errors from Slack (non-2xx responses), network failures, and timeouts (10s) are logged but never fail the underlying `pm` command.
 
-The **`slack digest` command is strict** when actually posting:
+The **`slack notify` and `slack digest` commands fail fast** on misconfiguration
+(see [Webhook preflight gate](#webhook-preflight-gate)):
 
-- A real (non-`--dry-run`) `slack digest` post without a webhook fails with a clear `CommandError` (exit 1).
-- Use `--dry-run` to build and preview a digest with no webhook and no network call.
+- A real (non-`--dry-run`) post without a configured webhook, or with an invalid
+  webhook URL, fails with a clear `CommandError` and a non-zero exit **before**
+  any post is attempted.
+- Use `--dry-run` to build and preview with no webhook and no network call.
+- Once past the gate, `slack notify` treats a *network/HTTP* failure as
+  best-effort (warns, exits 0); `slack digest` reports a post failure as an
+  error (exit 1).
 
 ---
 
@@ -289,7 +332,7 @@ The extension uses only Node.js built-ins (`node:https`) — no external runtime
   "author": "@unbraind",
   "entry": "./dist/index.js",
   "priority": 50,
-  "capabilities": ["commands", "hooks", "schema"]
+  "capabilities": ["commands", "hooks", "schema", "preflight"]
 }
 ```
 

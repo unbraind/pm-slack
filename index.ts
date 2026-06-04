@@ -320,6 +320,92 @@ function selectRoute(
 }
 
 // ---------------------------------------------------------------------------
+// Webhook preflight validation gate
+//
+// A misconfigured webhook used to fail silently (hook) or deep inside the post
+// path. This gate validates the webhook config *before* a posting command runs
+// and fails fast with a clear, actionable error. Validation is purely
+// syntactic/env-based — NO network calls — so it is cheap and offline-safe.
+//
+// The gate is shared by `slack notify` and `slack digest` (the Slack-posting
+// commands) and is invoked at the handler level so the thrown CommandError
+// actually aborts (the SDK swallows errors thrown from registerPreflight). It
+// is NOT applied to `slack test` (offline preview) nor to --dry-run previews.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the effective webhook for a posting command from an explicit
+ * `--webhook` flag (highest precedence) or PM_SLACK_WEBHOOK. PM_SLACK_ROUTES
+ * may also carry per-rule webhooks; a present route webhook is accepted as a
+ * valid source so route-only configurations are not falsely rejected.
+ */
+function resolveEffectiveWebhook(webhookFlag: string | undefined): {
+  webhookUrl: string;
+  source: "flag" | "env" | "route" | "none";
+} {
+  const flag = webhookFlag?.trim();
+  if (flag) return { webhookUrl: flag, source: "flag" };
+
+  const env = process.env.PM_SLACK_WEBHOOK?.trim();
+  if (env) return { webhookUrl: env, source: "env" };
+
+  // A route rule may supply its own webhook; accept that as a valid source so a
+  // routes-only setup passes the gate. The default webhook is then empty and
+  // per-event routing resolves the real destination at post time.
+  const routes = parseRoutes(process.env.PM_SLACK_ROUTES);
+  if (routes.some((r) => r.webhook)) return { webhookUrl: "", source: "route" };
+
+  return { webhookUrl: "", source: "none" };
+}
+
+/**
+ * Validate webhook configuration for a Slack-posting command. Throws a
+ * CommandError (exit 2 / USAGE) with an actionable message when no webhook is
+ * configured or the configured webhook URL is syntactically invalid. Returns
+ * silently (pass-through) on a valid config. Performs NO network I/O.
+ *
+ * `commandLabel` is woven into the message (e.g. "slack digest") so the user
+ * sees exactly which command was gated.
+ */
+function assertWebhookConfigured(webhookFlag: string | undefined, commandLabel: string): void {
+  const { webhookUrl, source } = resolveEffectiveWebhook(webhookFlag);
+
+  if (source === "none") {
+    throw new CommandError(
+      `No Slack webhook configured for \`${commandLabel}\`. ` +
+        "Set the PM_SLACK_WEBHOOK environment variable, pass --webhook <url>, " +
+        "or configure PM_SLACK_ROUTES with per-rule webhooks. " +
+        "Use --dry-run to preview the message without a webhook.",
+      EXIT_CODE.USAGE
+    );
+  }
+
+  // Route-sourced configs have no default URL to validate here (route webhooks
+  // are validated lazily at post time); a present URL must be well-formed.
+  if (webhookUrl) {
+    let parsed: URL;
+    try {
+      parsed = new URL(webhookUrl);
+    } catch {
+      throw new CommandError(
+        `Slack webhook for \`${commandLabel}\` is not a valid URL ` +
+          `(${source === "flag" ? "--webhook" : "PM_SLACK_WEBHOOK"}=\"${webhookUrl}\"). ` +
+          "Expected an https URL, e.g. https://hooks.slack.com/services/...",
+        EXIT_CODE.USAGE
+      );
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new CommandError(
+        `Slack webhook for \`${commandLabel}\` must be an http(s) URL ` +
+          `(got protocol "${parsed.protocol}" from ` +
+          `${source === "flag" ? "--webhook" : "PM_SLACK_WEBHOOK"}).`,
+        EXIT_CODE.USAGE
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Config helpers
 // ---------------------------------------------------------------------------
 
@@ -1189,6 +1275,42 @@ export default defineExtension({
     }
 
     // -----------------------------------------------------------------------
+    // preflight — fail-fast webhook validation gate for the Slack-posting
+    // commands. Scoped to `slack notify` / `slack digest` only (NOT `slack
+    // test`, which is an offline preview, and NOT --dry-run previews).
+    //
+    // NOTE: the pm runtime SWALLOWS errors thrown from a registerPreflight
+    // override (runPreflightOverride wraps it in try/catch → non-fatal
+    // warning), so a bare throw here would NOT abort the command. The real
+    // fail-fast enforcement therefore lives in the command HANDLERS (which
+    // throw CommandError and genuinely abort). This override exists to surface
+    // the documented "preflight" capability and to return a clean pass-through
+    // delta; it performs the same syntactic validation as a defense-in-depth
+    // signal and never makes a network call.
+    // -----------------------------------------------------------------------
+    if (typeof api.registerPreflight === "function") {
+      api.registerPreflight((pfCtx) => {
+        const command = (pfCtx.command ?? "").toLowerCase();
+        // Only gate the actual posting commands.
+        if (command !== "slack notify" && command !== "slack digest") return {};
+
+        const options = (pfCtx.options ?? {}) as Record<string, unknown>;
+        // Offline previews are never gated.
+        if (readBoolOption(options, "dry-run")) return {};
+
+        try {
+          assertWebhookConfigured(readStrOption(options, "webhook"), command);
+        } catch (err) {
+          // The runtime swallows throws here; emit a visible warning so the
+          // signal isn't lost. The handler-level gate provides the real abort.
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`[pm-slack] preflight: ${message}`);
+        }
+        return {};
+      });
+    }
+
+    // -----------------------------------------------------------------------
     // command — `pm slack notify` : manual rich Block Kit post.
     // -----------------------------------------------------------------------
     if (typeof api.registerCommand === "function") {
@@ -1227,6 +1349,13 @@ export default defineExtension({
 
           const asJson = ctx.global?.json === true || readBoolOption(options, "json");
           const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
+
+          // Preflight gate: a real (non-dry-run) post requires a valid webhook.
+          // Fail fast with a clear error BEFORE building/attempting any post.
+          // --dry-run is an offline preview and is intentionally NOT gated.
+          if (!dryRun) {
+            assertWebhookConfigured(readStrOption(options, "webhook"), "slack notify");
+          }
 
           // `--on` selects the message template. First event wins for the header verb.
           const events = parseEvents(readStrOption(options, "on") ?? "create");
@@ -1277,13 +1406,14 @@ export default defineExtension({
           }
 
           if (!webhookUrl) {
-            // Graceful no-op: warn and exit 0 so a missing webhook never blocks
-            // a workflow. Use --dry-run to preview without a webhook.
-            console.error(
-              "[pm-slack] PM_SLACK_WEBHOOK not set and no --webhook provided — posting disabled. " +
-                "Use --dry-run to preview the message."
+            // Unreachable in normal flow: the preflight gate above already
+            // aborts when no webhook is configured. Kept as a defensive guard
+            // so a missing webhook can never reach the network layer.
+            throw new CommandError(
+              "No Slack webhook configured for `slack notify`. " +
+                "Set PM_SLACK_WEBHOOK or pass --webhook <url> (or use --dry-run to preview).",
+              EXIT_CODE.USAGE
             );
-            return { posted: false, disabled: true, reason: "no-webhook" };
           }
 
           try {
@@ -1405,6 +1535,13 @@ export default defineExtension({
           const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
           const webhookUrl = readStrOption(options, "webhook") ?? process.env.PM_SLACK_WEBHOOK ?? "";
 
+          // Preflight gate: a real (non-dry-run) post requires a valid webhook.
+          // Fail fast BEFORE reading the store / building the digest. --dry-run
+          // is an offline preview and is intentionally NOT gated.
+          if (!dryRun) {
+            assertWebhookConfigured(readStrOption(options, "webhook"), "slack digest");
+          }
+
           const since = readStrOption(options, "since");
           const daysStr = readStrOption(options, "days");
           const days = daysStr !== undefined ? parseInt(daysStr, 10) : undefined;
@@ -1477,6 +1614,8 @@ export const __test__ = {
   buildDigestText,
   buildDigestBlockKit,
   buildDigestPayload,
+  resolveEffectiveWebhook,
+  assertWebhookConfigured,
   EXIT_CODE,
   CommandError,
 };
