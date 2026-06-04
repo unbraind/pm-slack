@@ -25,6 +25,10 @@ const {
   resolveItemUrl,
   isHttpUrl,
   EVENT_META,
+  resolveEffectiveWebhook,
+  assertWebhookConfigured,
+  CommandError,
+  EXIT_CODE,
 } = __test__;
 
 // ---------------------------------------------------------------------------
@@ -428,6 +432,95 @@ test("blockkit: action button block present with correct url + label", () => {
   // plain-text path never gets blocks/buttons
   const textPayload = buildItemPayload(item, "create", "text", { link: { url: "https://github.com/o/r", isGithub: true } });
   assert.equal(textPayload.blocks, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Webhook preflight validation gate
+// ---------------------------------------------------------------------------
+
+function withEnv(env: Record<string, string | undefined>, fn: () => void): void {
+  const keys = Object.keys(env);
+  const prev: Record<string, string | undefined> = {};
+  for (const k of keys) {
+    prev[k] = process.env[k];
+    if (env[k] === undefined) delete process.env[k];
+    else process.env[k] = env[k];
+  }
+  try {
+    fn();
+  } finally {
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  }
+}
+
+test("resolveEffectiveWebhook: flag > env > route > none", () => {
+  withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
+    assert.equal(resolveEffectiveWebhook("https://hooks.slack.com/x").source, "flag");
+    assert.equal(resolveEffectiveWebhook(undefined).source, "none");
+  });
+  withEnv({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/env", PM_SLACK_ROUTES: undefined }, () => {
+    const r = resolveEffectiveWebhook(undefined);
+    assert.equal(r.source, "env");
+    assert.equal(r.webhookUrl, "https://hooks.slack.com/env");
+  });
+  withEnv(
+    {
+      PM_SLACK_WEBHOOK: undefined,
+      PM_SLACK_ROUTES: JSON.stringify([{ match: "block", webhook: "https://hooks.slack.com/route" }]),
+    },
+    () => {
+      assert.equal(resolveEffectiveWebhook(undefined).source, "route");
+    }
+  );
+});
+
+test("assertWebhookConfigured: throws USAGE CommandError when no webhook", () => {
+  withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
+    assert.throws(
+      () => assertWebhookConfigured(undefined, "slack digest"),
+      (err: unknown) => {
+        assert.ok(err instanceof CommandError);
+        assert.equal((err as InstanceType<typeof CommandError>).exitCode, EXIT_CODE.USAGE);
+        assert.match((err as Error).message, /slack digest/);
+        return true;
+      }
+    );
+  });
+});
+
+test("assertWebhookConfigured: throws on invalid URL", () => {
+  withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
+    assert.throws(
+      () => assertWebhookConfigured("not a url", "slack notify"),
+      (err: unknown) => err instanceof CommandError && (err as InstanceType<typeof CommandError>).exitCode === EXIT_CODE.USAGE
+    );
+  });
+});
+
+test("assertWebhookConfigured: passes silently on valid env webhook", () => {
+  withEnv({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/services/A/B/C", PM_SLACK_ROUTES: undefined }, () => {
+    assert.doesNotThrow(() => assertWebhookConfigured(undefined, "slack digest"));
+  });
+});
+
+test("assertWebhookConfigured: passes on a valid --webhook flag override", () => {
+  withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
+    assert.doesNotThrow(() => assertWebhookConfigured("https://hooks.slack.com/services/A/B/C", "slack notify"));
+  });
+});
+
+test("activate registers a preflight override", () => {
+  let registered = false;
+  const api = {
+    registerCommand: () => {},
+    registerPreflight: () => { registered = true; },
+    hooks: { afterCommand: () => {} },
+  };
+  extension.activate(api as any);
+  assert.equal(registered, true);
 });
 
 test("activate registers slack notify, test, and digest commands", () => {

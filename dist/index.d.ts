@@ -106,6 +106,26 @@ declare function ruleMatches(rule: RouteRule, event: EventKind, item: PmItem): b
  * webhook can be resolved at all.
  */
 declare function selectRoute(event: EventKind, item: PmItem, routes: RouteRule[], defaultWebhook: string, defaultChannel?: string): RouteTarget | null;
+/**
+ * Resolve the effective webhook for a posting command from an explicit
+ * `--webhook` flag (highest precedence) or PM_SLACK_WEBHOOK. PM_SLACK_ROUTES
+ * may also carry per-rule webhooks; a present route webhook is accepted as a
+ * valid source so route-only configurations are not falsely rejected.
+ */
+declare function resolveEffectiveWebhook(webhookFlag: string | undefined): {
+    webhookUrl: string;
+    source: "flag" | "env" | "route" | "none";
+};
+/**
+ * Validate webhook configuration for a Slack-posting command. Throws a
+ * CommandError (exit 2 / USAGE) with an actionable message when no webhook is
+ * configured or the configured webhook URL is syntactically invalid. Returns
+ * silently (pass-through) on a valid config. Performs NO network I/O.
+ *
+ * `commandLabel` is woven into the message (e.g. "slack digest") so the user
+ * sees exactly which command was gated.
+ */
+declare function assertWebhookConfigured(webhookFlag: string | undefined, commandLabel: string): void;
 declare function meetsMinPriority(item: PmItem, minPriority: Priority): boolean;
 /** Parse PM_SLACK_ASSIGNEE_MAP into a case-insensitive name→id lookup. */
 declare function parseAssigneeMap(spec: string | undefined): Map<string, string>;
@@ -236,6 +256,8 @@ export declare const __test__: {
     buildDigestText: typeof buildDigestText;
     buildDigestBlockKit: typeof buildDigestBlockKit;
     buildDigestPayload: typeof buildDigestPayload;
+    resolveEffectiveWebhook: typeof resolveEffectiveWebhook;
+    assertWebhookConfigured: typeof assertWebhookConfigured;
     EXIT_CODE: {
         readonly GENERIC_FAILURE: 1;
         readonly USAGE: 2;

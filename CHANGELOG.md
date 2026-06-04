@@ -1,6 +1,12 @@
 # Changelog
 
-## 2026.6.4 - 2026-06-04
+## Unreleased
+
+### Added
+
+- preflight: fail-fast Slack webhook validation gate ([pm-slack-676l](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-676l.toon))
+
+## 2026.06.04 - 2026-06-04
 
 ### Added
 

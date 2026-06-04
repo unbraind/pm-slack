@@ -1,0 +1,22 @@
+id: pm-slack-676l
+title: "preflight: fail-fast Slack webhook validation gate"
+description: "Validate webhook config (env/--webhook/routes, syntactic only, no network) BEFORE slack notify/slack digest run; abort with a clear actionable error and non-zero exit. slack test (offline preview) and --dry-run are not gated. Adds the preflight manifest capability and a scoped registerPreflight override."
+type: Feature
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-04T06:57:20.567Z"
+updated_at: "2026-06-04T06:57:55.503Z"
+author: codex
+resolution: "Added a fail-fast webhook preflight gate: shared assertWebhookConfigured() enforced at the handler level (throws CommandError USAGE/2) for slack notify + slack digest when not --dry-run; scoped registerPreflight override for the documented capability; added 'preflight' to manifest capabilities (kept 'schema' — commands use flags). README/docs updated. 6 new unit tests, 33/33 pass."
+expected_result: A posting command with missing/invalid webhook config aborts immediately with a clear actionable error and non-zero exit before any post; slack test and --dry-run are unaffected; valid config passes silently.
+actual_result: "Confirmed in scratch install: unset webhook -> exit 2 clear error, nothing posted (both notify and digest); invalid URL -> exit 2; slack test -> exit 0 not blocked; --dry-run unset -> exit 0; valid dummy webhook -> passes gate and reaches network (HTTP 404)."
+notes[6]{created_at,author,text}:
+  "2026-06-04T06:57:38.650Z",codex,"DESIGN: Shared assertWebhookConfigured(webhookFlag, label) resolves the effective webhook (precedence: --webhook flag > PM_SLACK_WEBHOOK env > PM_SLACK_ROUTES per-rule webhook), then validates it is present and a syntactically valid http(s) URL. Throws CommandError(EXIT_CODE.USAGE=2) with an actionable message on failure; returns silently on success. NO network calls — env/syntactic only."
+  "2026-06-04T06:57:38.876Z",codex,"SCOPING: Gate fires ONLY for the posting commands 'slack notify' and 'slack digest', and ONLY when NOT --dry-run. 'slack test' (offline preview) is never gated. The afterCommand hook remains best-effort (never throws/blocks) and is unchanged. slack notify keeps exit-0-on-network-failure (best effort) but now fails fast (exit 2) on MISSING/INVALID config before any post."
+  "2026-06-04T06:57:39.096Z",codex,"SDK FINDING (verified): the pm runtime SWALLOWS errors thrown from a registerPreflight override (runPreflightOverride wraps in try/catch -> non-fatal warning), so a bare throw there does NOT abort. Real fail-fast enforcement therefore lives in the command HANDLERS, which throw CommandError and genuinely abort (proven: exit 2). A scoped registerPreflight override is still registered (returns pass-through {}) to surface the documented 'preflight' capability + emit a visible warning as defense-in-depth. Also confirmed: registerPreflight REQUIRES the 'preflight' manifest capability, and 'schema' must stay because commands declare flags[] (assertExtensionCapability)."
+  "2026-06-04T06:57:39.349Z",codex,"MANIFEST: added 'preflight' to capabilities (now commands, hooks, schema, preflight). 'schema' KEPT — all three commands declare flags[] which requires it."
+  "2026-06-04T06:57:47.337Z",codex,"FUNCTIONAL EVIDENCE (pm install /tmp/enh-pm-slack --project into /tmp/scratch-slack, pm 2026.5.31): (1) 'pm slack digest --days 30' with PM_SLACK_WEBHOOK unset -> immediate ABORT, clear 'No Slack webhook configured for slack digest' message, exit 2, nothing posted. (2) 'pm slack notify --text hello' unset -> same ABORT exit 2. (3) 'pm slack test --on close' unset -> NOT blocked, renders preview, exit 0. (4) valid dummy webhook -> passes gate and REACHES network (Slack HTTP 404 no_team) proving gate distinguishes present vs absent. (5) invalid URL PM_SLACK_WEBHOOK=not-a-valid-url -> ABORT exit 2 with URL-specific message. (6) unset + --dry-run -> NOT gated, exit 0."
+  "2026-06-04T06:57:47.544Z",codex,"TESTS: added 6 unit tests (resolveEffectiveWebhook precedence, assertWebhookConfigured throws USAGE on missing/invalid + passes on valid env/flag, activate registers a preflight override). Full suite 33/33 pass. build + tsc --noEmit clean."
+close_reason: Implemented and functionally verified end-to-end
+body: ""
