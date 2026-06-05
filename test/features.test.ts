@@ -409,6 +409,15 @@ test("buildMentionMap: layers env maps + --mention-map flag (flag wins)", () => 
   withEnv({ PM_SLACK_ASSIGNEE_MAP: undefined, PM_SLACK_MENTION_MAP: undefined }, () => {
     assert.equal(buildMentionMap(undefined).size, 0);
   });
+  // pure: explicit env params are honored without touching process.env
+  // (precedence assigneeMap < mentionMap < flag preserved).
+  withEnv({ PM_SLACK_ASSIGNEE_MAP: "alice=UENV", PM_SLACK_MENTION_MAP: undefined }, () => {
+    const m = buildMentionMap("carol=@c", { assigneeMap: "alice=U1,bob=U2", mentionMap: "alice=@a" });
+    assert.equal(m.get("alice"), "@a"); // explicit mentionMap param wins over explicit assigneeMap param
+    assert.equal(m.get("bob"), "U2"); // explicit assigneeMap param used (NOT process.env's UENV)
+    assert.equal(m.get("carol"), "@c"); // flag-added
+    assert.notEqual(m.get("alice"), "UENV"); // process.env was ignored when params supplied
+  });
 });
 
 test("buildMentionMap mention renders in fallback text + blockkit context", () => {

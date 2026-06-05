@@ -558,13 +558,21 @@ function resolveAssigneeMention(item: PmItem, map: Map<string, string>): string 
  * `--mention-map` (flag). Later sources override earlier ones for the same
  * name. With no map source set at all, the result is empty (output unchanged).
  */
-function buildMentionMap(flagSpec: string | undefined): Map<string, string> {
+/**
+ * Build the layered mention map. Sources merge in increasing precedence:
+ * `PM_SLACK_ASSIGNEE_MAP` < `PM_SLACK_MENTION_MAP` < `--mention-map` (flagSpec).
+ * The env values are taken as parameters (defaulting to `process.env`) so the
+ * function is pure and unit-testable without mutating global state.
+ */
+function buildMentionMap(
+  flagSpec: string | undefined,
+  env: { assigneeMap?: string; mentionMap?: string } = {
+    assigneeMap: process.env.PM_SLACK_ASSIGNEE_MAP,
+    mentionMap: process.env.PM_SLACK_MENTION_MAP,
+  },
+): Map<string, string> {
   const merged = new Map<string, string>();
-  for (const spec of [
-    process.env.PM_SLACK_ASSIGNEE_MAP,
-    process.env.PM_SLACK_MENTION_MAP,
-    flagSpec,
-  ]) {
+  for (const spec of [env.assigneeMap, env.mentionMap, flagSpec]) {
     for (const [name, id] of parseAssigneeMap(spec)) merged.set(name, id);
   }
   return merged;
