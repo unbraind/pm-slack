@@ -421,6 +421,18 @@ interface SlackConfig {
   mentionAssignee: boolean;
 }
 
+// Module-level guard so the "webhook not set" notice is emitted at most ONCE
+// per process. The afterCommand hook runs on EVERY pm command, so without this
+// guard a webhook-less install would spam stderr on every invocation. Exposed
+// via __test__ resets so the once-only behavior is unit-testable.
+let warnedWebhookUnset = false;
+
+function warnWebhookUnsetOnce(): void {
+  if (warnedWebhookUnset) return;
+  warnedWebhookUnset = true;
+  console.error("[pm-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
+}
+
 function loadConfig(): SlackConfig | null {
   const webhookUrl = process.env.PM_SLACK_WEBHOOK ?? "";
   const routes = parseRoutes(process.env.PM_SLACK_ROUTES);
@@ -429,7 +441,10 @@ function loadConfig(): SlackConfig | null {
   // webhook(s); only bail out when there is no webhook source at all.
   const routesHaveWebhook = routes.some((r) => r.webhook);
   if (!webhookUrl && !routesHaveWebhook) {
-    console.error("[pm-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
+    // Emit the "disabled" notice at most once per process (de-spam): the hook
+    // fires on every command, so repeating this on each one is noisy for any
+    // install without a webhook configured.
+    warnWebhookUnsetOnce();
     return null;
   }
 
@@ -451,7 +466,9 @@ function loadConfig(): SlackConfig | null {
 
   const events = parseEvents(process.env.PM_SLACK_EVENTS);
   const format = parseFormat(process.env.PM_SLACK_FORMAT);
-  const assigneeMap = parseAssigneeMap(process.env.PM_SLACK_ASSIGNEE_MAP);
+  // Hook map comes from env only (no per-command flag in the hook path).
+  // PM_SLACK_MENTION_MAP is an alias/overlay of PM_SLACK_ASSIGNEE_MAP.
+  const assigneeMap = buildMentionMap(undefined);
   // Mentions are auto-enabled in the hook whenever a non-empty map is present;
   // PM_SLACK_MENTION_ASSIGNEE=0/false can force them off even with a map.
   const mentionEnv = (process.env.PM_SLACK_MENTION_ASSIGNEE ?? "").trim().toLowerCase();
@@ -510,17 +527,47 @@ function parseAssigneeMap(spec: string | undefined): Map<string, string> {
 }
 
 /**
+ * Format a mapped value into a ready-to-embed Slack mention token. Accepts:
+ *   - a pre-wrapped token (`<@U123>`, `<!subteam^S123>`) — used verbatim,
+ *   - a plain `@handle` (e.g. `@alice`) — kept verbatim (Slack resolves the
+ *     human-readable handle in mrkdwn),
+ *   - a raw Slack user/group id (`U123`) — wrapped as `<@U123>`.
+ */
+function formatMention(value: string): string {
+  const v = value.trim();
+  if (v.startsWith("<") || v.startsWith("@")) return v;
+  return `<@${v}>`;
+}
+
+/**
  * Resolve an item's assignee to a Slack mention token using the map. Returns a
  * ready-to-embed mention string (e.g. `<@U123>`) or undefined when there's no
- * assignee or no mapping. A raw id is wrapped as `<@id>`; a token already
- * containing `<` is passed through unchanged (supports `<!subteam^S123>` etc).
+ * assignee or no mapping. See {@link formatMention} for accepted value forms.
  */
 function resolveAssigneeMention(item: PmItem, map: Map<string, string>): string | undefined {
   const assignee = item.assignee?.trim();
   if (!assignee || map.size === 0) return undefined;
   const id = map.get(assignee.toLowerCase());
   if (!id) return undefined;
-  return id.startsWith("<") ? id : `<@${id}>`;
+  return formatMention(id);
+}
+
+/**
+ * Build the effective mention map for a command by layering, in increasing
+ * precedence: PM_SLACK_ASSIGNEE_MAP (env) < PM_SLACK_MENTION_MAP (env) <
+ * `--mention-map` (flag). Later sources override earlier ones for the same
+ * name. With no map source set at all, the result is empty (output unchanged).
+ */
+function buildMentionMap(flagSpec: string | undefined): Map<string, string> {
+  const merged = new Map<string, string>();
+  for (const spec of [
+    process.env.PM_SLACK_ASSIGNEE_MAP,
+    process.env.PM_SLACK_MENTION_MAP,
+    flagSpec,
+  ]) {
+    for (const [name, id] of parseAssigneeMap(spec)) merged.set(name, id);
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,8 +1378,9 @@ export default defineExtension({
           { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
           { long: "--on", value_name: "events", description: "Comma list of lifecycle events for the message template (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
           { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
-          { long: "--assignee", value_name: "name", description: "Assignee name shown on the message (mapped to a Slack @mention via PM_SLACK_ASSIGNEE_MAP)" },
-          { long: "--mention-assignee", description: "Resolve the assignee to a Slack @mention using PM_SLACK_ASSIGNEE_MAP" },
+          { long: "--assignee", value_name: "name", description: "Assignee name shown on the message (mapped to a Slack @mention via the mention map)" },
+          { long: "--mention-assignee", description: "Resolve the assignee to a Slack @mention using the mention map" },
+          { long: "--mention-map", value_name: "pairs", description: "Inline mention map, comma list of name=@handle|name=Uxxxx pairs (overrides PM_SLACK_ASSIGNEE_MAP / PM_SLACK_MENTION_MAP for this post)" },
           { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (e.g. a GitHub item)" },
           { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK env var)" },
           { long: "--dry-run", description: "Print the message and payload without posting to Slack" },
@@ -1377,7 +1425,8 @@ export default defineExtension({
           const url = readStrOption(options, "url");
           const item: PmItem = { id: "manual", title, type: "Note", ...(assignee ? { assignee } : {}) };
 
-          const assigneeMap = parseAssigneeMap(process.env.PM_SLACK_ASSIGNEE_MAP);
+          // Layer env maps with the inline --mention-map flag (flag wins).
+          const assigneeMap = buildMentionMap(readStrOption(options, "mention-map"));
           // Mention when explicitly requested, or implicitly when an assignee
           // maps to a Slack id (so the @mention is opt-in but ergonomic).
           const wantMention = readBoolOption(options, "mention-assignee") || assigneeMap.size > 0;
@@ -1450,7 +1499,8 @@ export default defineExtension({
           { long: "--on", value_name: "event", description: "Lifecycle event to preview (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
           { long: "--title", value_name: "title", description: "Sample item title (default: a representative example)" },
           { long: "--channel", value_name: "name", description: "Channel hint to show in the preview (overrides PM_SLACK_CHANNEL)" },
-          { long: "--mention-assignee", description: "Resolve the sample assignee to a Slack @mention via PM_SLACK_ASSIGNEE_MAP" },
+          { long: "--mention-assignee", description: "Resolve the sample assignee to a Slack @mention via the mention map" },
+          { long: "--mention-map", value_name: "pairs", description: "Inline mention map, comma list of name=@handle|name=Uxxxx pairs (overrides PM_SLACK_ASSIGNEE_MAP / PM_SLACK_MENTION_MAP for this preview)" },
           { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (default: a sample GitHub URL)" },
           { long: "--json", description: "Emit the preview payload as JSON" },
           { long: "--dry-run", description: "Accepted for symmetry; this command never posts." },
@@ -1481,7 +1531,7 @@ export default defineExtension({
           };
           const item = sample[event];
 
-          const assigneeMap = parseAssigneeMap(process.env.PM_SLACK_ASSIGNEE_MAP);
+          const assigneeMap = buildMentionMap(readStrOption(options, "mention-map"));
           const wantMention = readBoolOption(options, "mention-assignee") || assigneeMap.size > 0;
           const mention = wantMention ? resolveAssigneeMention(item, assigneeMap) : undefined;
           const link = resolveItemUrl(item, readStrOption(options, "url"));
@@ -1605,6 +1655,13 @@ export const __test__ = {
   meetsMinPriority,
   parseAssigneeMap,
   resolveAssigneeMention,
+  formatMention,
+  buildMentionMap,
+  loadConfig,
+  warnWebhookUnsetOnce,
+  __resetWarnState: () => {
+    warnedWebhookUnset = false;
+  },
   resolveItemUrl,
   isHttpUrl,
   EVENT_META,

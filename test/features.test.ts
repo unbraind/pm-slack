@@ -22,6 +22,11 @@ const {
   statusToEvent,
   parseAssigneeMap,
   resolveAssigneeMention,
+  formatMention,
+  buildMentionMap,
+  loadConfig,
+  warnWebhookUnsetOnce,
+  __resetWarnState,
   resolveItemUrl,
   isHttpUrl,
   EVENT_META,
@@ -368,6 +373,57 @@ test("resolveAssigneeMention: wraps raw id, passes through prewrapped, undefined
   assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "alice" }, new Map()), undefined);
 });
 
+test("formatMention: raw id wrapped, @handle and prewrapped kept verbatim", () => {
+  assert.equal(formatMention("U123"), "<@U123>");
+  assert.equal(formatMention("  U123  "), "<@U123>"); // trims
+  assert.equal(formatMention("@alice"), "@alice"); // human handle kept as-is (no <@@…>)
+  assert.equal(formatMention("<@U123>"), "<@U123>"); // already wrapped
+  assert.equal(formatMention("<!subteam^S99>"), "<!subteam^S99>");
+});
+
+test("resolveAssigneeMention: @handle value renders without double-wrapping", () => {
+  const map = parseAssigneeMap("alice=@alice,bob=U456");
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "alice" }, map), "@alice");
+  assert.equal(resolveAssigneeMention({ id: "1", title: "t", assignee: "bob" }, map), "<@U456>");
+});
+
+test("buildMentionMap: layers env maps + --mention-map flag (flag wins)", () => {
+  withEnv({ PM_SLACK_ASSIGNEE_MAP: "alice=U1,bob=U2", PM_SLACK_MENTION_MAP: undefined }, () => {
+    // env-only
+    const m1 = buildMentionMap(undefined);
+    assert.equal(m1.get("alice"), "U1");
+    assert.equal(m1.get("bob"), "U2");
+    // flag overrides one name, adds a new one
+    const m2 = buildMentionMap("alice=@alice-handle,carol=U3");
+    assert.equal(m2.get("alice"), "@alice-handle"); // flag wins
+    assert.equal(m2.get("bob"), "U2"); // env preserved
+    assert.equal(m2.get("carol"), "U3"); // flag-added
+  });
+  // PM_SLACK_MENTION_MAP overlays PM_SLACK_ASSIGNEE_MAP
+  withEnv({ PM_SLACK_ASSIGNEE_MAP: "alice=U1", PM_SLACK_MENTION_MAP: "alice=@a,dan=U9" }, () => {
+    const m = buildMentionMap(undefined);
+    assert.equal(m.get("alice"), "@a"); // MENTION_MAP wins over ASSIGNEE_MAP
+    assert.equal(m.get("dan"), "U9");
+  });
+  // no source at all → empty (unchanged default behavior)
+  withEnv({ PM_SLACK_ASSIGNEE_MAP: undefined, PM_SLACK_MENTION_MAP: undefined }, () => {
+    assert.equal(buildMentionMap(undefined).size, 0);
+  });
+});
+
+test("buildMentionMap mention renders in fallback text + blockkit context", () => {
+  withEnv({ PM_SLACK_ASSIGNEE_MAP: undefined, PM_SLACK_MENTION_MAP: undefined }, () => {
+    const map = buildMentionMap("alice=@alice");
+    const item = { id: "pm-z", title: "Ship it", type: "Feature", priority: 2 as const, status: "open", assignee: "alice" };
+    const mention = resolveAssigneeMention(item, map);
+    assert.equal(mention, "@alice");
+    const textPayload = buildItemPayload(item, "create", "text", { mention });
+    assert.ok(textPayload.text.includes("@alice"), "fallback text must carry the @mention");
+    const blockPayload = buildItemPayload(item, "create", "blockkit", { mention });
+    assert.ok(JSON.stringify(blockPayload.blocks).includes("@alice"), "blockkit must carry the @mention");
+  });
+});
+
 test("mention appears in both text and blockkit output", () => {
   const item = { id: "pm-a", title: "Auth", type: "Feature", priority: 2 as const, status: "open", assignee: "alice" };
   const textPayload = buildItemPayload(item, "create", "text", { mention: "<@U123>" });
@@ -510,6 +566,45 @@ test("assertWebhookConfigured: passes on a valid --webhook flag override", () =>
   withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
     assert.doesNotThrow(() => assertWebhookConfigured("https://hooks.slack.com/services/A/B/C", "slack notify"));
   });
+});
+
+// ---------------------------------------------------------------------------
+// Stderr de-spam: "webhook not set" notice emitted at most once per process
+// ---------------------------------------------------------------------------
+
+test("loadConfig: 'webhook not set' notice is emitted at most once per process", () => {
+  withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
+    __resetWarnState();
+    const lines: string[] = [];
+    const orig = console.error;
+    console.error = (...args: unknown[]) => { lines.push(args.join(" ")); };
+    try {
+      // Simulate the hook firing on many commands without a webhook configured.
+      for (let i = 0; i < 5; i++) {
+        assert.equal(loadConfig(), null, "no webhook → null config");
+      }
+    } finally {
+      console.error = orig;
+    }
+    const notices = lines.filter((l) => l.includes("PM_SLACK_WEBHOOK not set"));
+    assert.equal(notices.length, 1, `expected exactly one notice across 5 calls, got ${notices.length}`);
+  });
+});
+
+test("warnWebhookUnsetOnce: only the first call writes to stderr", () => {
+  __resetWarnState();
+  const lines: string[] = [];
+  const orig = console.error;
+  console.error = (...args: unknown[]) => { lines.push(args.join(" ")); };
+  try {
+    warnWebhookUnsetOnce();
+    warnWebhookUnsetOnce();
+    warnWebhookUnsetOnce();
+  } finally {
+    console.error = orig;
+  }
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /notifications disabled/);
 });
 
 test("activate registers a preflight override", () => {

@@ -40,7 +40,8 @@ pm install github.com/unbraind/pm-slack --project
 | `PM_SLACK_FORMAT` | No | `blockkit` | Default message format: `blockkit` (rich) or `text` (plain mrkdwn) |
 | `PM_SLACK_ROUTES` | No | — | JSON array of routing rules (see [Routing](#routing-by-event-type-or-status)) |
 | `PM_SLACK_ASSIGNEE_MAP` | No | — | Comma list of `name=slackId` pairs mapping assignees to Slack `@mentions`, e.g. `alice=U123,bob=U456` |
-| `PM_SLACK_MENTION_ASSIGNEE` | No | auto | Set `0`/`false` to disable assignee mentions even when a map is set (auto-enabled when `PM_SLACK_ASSIGNEE_MAP` is non-empty) |
+| `PM_SLACK_MENTION_MAP` | No | — | Same format as `PM_SLACK_ASSIGNEE_MAP`; overlays it (same-name entries here win). Accepts `name=@handle` and `name=Uxxxx` forms |
+| `PM_SLACK_MENTION_ASSIGNEE` | No | auto | Set `0`/`false` to disable assignee mentions even when a map is set (auto-enabled when a mention map is non-empty) |
 
 Export them in your shell profile or `.env`:
 
@@ -176,21 +177,38 @@ export PM_SLACK_ROUTES='[
 
 ## Assignee @mentions
 
-Map a pm item's `assignee` to a Slack user (or group) id so notifications
-@-mention the responsible person. Set `PM_SLACK_ASSIGNEE_MAP` to a comma list of
-`name=id` pairs:
+Map a pm item's `assignee` to a Slack user (or group) id (or a human `@handle`)
+so notifications @-mention the responsible person. Set `PM_SLACK_ASSIGNEE_MAP`
+(or `PM_SLACK_MENTION_MAP`) to a comma list of `name=id` pairs:
 
 ```bash
-export PM_SLACK_ASSIGNEE_MAP="alice=U0123ABC,bob=U0456DEF,team=<!subteam^S0789GHI>"
+export PM_SLACK_ASSIGNEE_MAP="alice=U0123ABC,bob=@bob,team=<!subteam^S0789GHI>"
 ```
 
+Mention map value forms:
+
 - A raw id (`U0123ABC`) is wrapped as `<@U0123ABC>`.
+- A plain `@handle` (e.g. `@bob`) is kept verbatim (no double-wrapping).
 - A pre-wrapped token (e.g. `<!subteam^S0789GHI>` for a group) is used verbatim.
-- Mentions auto-enable in the hook whenever the map is non-empty; set
+
+Sources & precedence (later wins for the same name):
+`PM_SLACK_ASSIGNEE_MAP` < `PM_SLACK_MENTION_MAP` < the per-command
+`--mention-map` flag. With no source set at all, output is byte-identical to
+before (no mention rendered).
+
+- Mentions auto-enable in the hook whenever the (env) map is non-empty; set
   `PM_SLACK_MENTION_ASSIGNEE=0` to force them off.
-- For ad-hoc posts, `pm slack notify --assignee alice --mention-assignee` resolves
-  the mention from the same map. When no mapping exists, the raw assignee name is
-  still shown (blockkit) — output is byte-identical to before when no map is set.
+- For ad-hoc posts, pass an inline map without touching the environment:
+
+  ```bash
+  pm slack notify --title 'Auth epic' --on create \
+    --assignee alice --mention-map 'alice=@alice,bob=U0456DEF' --dry-run
+  ```
+
+  The resolved `@mention` appears in both the plain-text fallback and the
+  Block Kit `Assignee` field. `pm slack notify --assignee alice --mention-assignee`
+  also resolves from the env map. When no mapping exists, the raw assignee name
+  is still shown (blockkit).
 
 ---
 

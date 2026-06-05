@@ -1,0 +1,11 @@
+id: pm-slack-dmgv
+title: Add --mention-map flag/PM_SLACK_MENTION_MAP env + dedup webhook-unset stderr notice
+description: ""
+type: Feature
+status: open
+priority: 2
+tags: []
+created_at: "2026-06-05T04:40:40.052Z"
+updated_at: "2026-06-05T04:40:40.052Z"
+author: codex
+body: ""
