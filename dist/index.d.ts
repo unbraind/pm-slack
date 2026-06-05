@@ -162,7 +162,16 @@ declare function resolveAssigneeMention(item: PmItem, map: Map<string, string>):
  * `--mention-map` (flag). Later sources override earlier ones for the same
  * name. With no map source set at all, the result is empty (output unchanged).
  */
-declare function buildMentionMap(flagSpec: string | undefined): Map<string, string>;
+/**
+ * Build the layered mention map. Sources merge in increasing precedence:
+ * `PM_SLACK_ASSIGNEE_MAP` < `PM_SLACK_MENTION_MAP` < `--mention-map` (flagSpec).
+ * The env values are taken as parameters (defaulting to `process.env`) so the
+ * function is pure and unit-testable without mutating global state.
+ */
+declare function buildMentionMap(flagSpec: string | undefined, env?: {
+    assigneeMap?: string;
+    mentionMap?: string;
+}): Map<string, string>;
 declare function isHttpUrl(value: unknown): value is string;
 /** Resolve a primary URL for the item, plus whether it points at GitHub. */
 declare function resolveItemUrl(item: PmItem, override?: string): {
