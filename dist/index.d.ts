@@ -126,16 +126,43 @@ declare function resolveEffectiveWebhook(webhookFlag: string | undefined): {
  * sees exactly which command was gated.
  */
 declare function assertWebhookConfigured(webhookFlag: string | undefined, commandLabel: string): void;
+interface SlackConfig {
+    webhookUrl: string;
+    channel?: string;
+    minPriority: Priority;
+    events: Set<EventKind>;
+    format: MessageFormat;
+    routes: RouteRule[];
+    assigneeMap: Map<string, string>;
+    /** When true, include assignee @mentions in hook notifications by default. */
+    mentionAssignee: boolean;
+}
+declare function warnWebhookUnsetOnce(): void;
+declare function loadConfig(): SlackConfig | null;
 declare function meetsMinPriority(item: PmItem, minPriority: Priority): boolean;
 /** Parse PM_SLACK_ASSIGNEE_MAP into a case-insensitive name→id lookup. */
 declare function parseAssigneeMap(spec: string | undefined): Map<string, string>;
 /**
+ * Format a mapped value into a ready-to-embed Slack mention token. Accepts:
+ *   - a pre-wrapped token (`<@U123>`, `<!subteam^S123>`) — used verbatim,
+ *   - a plain `@handle` (e.g. `@alice`) — kept verbatim (Slack resolves the
+ *     human-readable handle in mrkdwn),
+ *   - a raw Slack user/group id (`U123`) — wrapped as `<@U123>`.
+ */
+declare function formatMention(value: string): string;
+/**
  * Resolve an item's assignee to a Slack mention token using the map. Returns a
  * ready-to-embed mention string (e.g. `<@U123>`) or undefined when there's no
- * assignee or no mapping. A raw id is wrapped as `<@id>`; a token already
- * containing `<` is passed through unchanged (supports `<!subteam^S123>` etc).
+ * assignee or no mapping. See {@link formatMention} for accepted value forms.
  */
 declare function resolveAssigneeMention(item: PmItem, map: Map<string, string>): string | undefined;
+/**
+ * Build the effective mention map for a command by layering, in increasing
+ * precedence: PM_SLACK_ASSIGNEE_MAP (env) < PM_SLACK_MENTION_MAP (env) <
+ * `--mention-map` (flag). Later sources override earlier ones for the same
+ * name. With no map source set at all, the result is empty (output unchanged).
+ */
+declare function buildMentionMap(flagSpec: string | undefined): Map<string, string>;
 declare function isHttpUrl(value: unknown): value is string;
 /** Resolve a primary URL for the item, plus whether it points at GitHub. */
 declare function resolveItemUrl(item: PmItem, override?: string): {
@@ -244,6 +271,11 @@ export declare const __test__: {
     meetsMinPriority: typeof meetsMinPriority;
     parseAssigneeMap: typeof parseAssigneeMap;
     resolveAssigneeMention: typeof resolveAssigneeMention;
+    formatMention: typeof formatMention;
+    buildMentionMap: typeof buildMentionMap;
+    loadConfig: typeof loadConfig;
+    warnWebhookUnsetOnce: typeof warnWebhookUnsetOnce;
+    __resetWarnState: () => void;
     resolveItemUrl: typeof resolveItemUrl;
     isHttpUrl: typeof isHttpUrl;
     EVENT_META: Record<EventKind, {
