@@ -565,13 +565,29 @@ const SLACK_HEADER_TEXT_MAX = 150; // header.text.text (plain_text)
  * cut so the truncation is visible rather than silently dropped or rejected. The
  * ellipsis counts toward the limit, so the result is always <= `max`. Returns
  * the input unchanged when it already fits (zero regression for normal content).
+ *
+ * The cap is enforced on UTF-16 length (`String.length`, what Slack measures),
+ * so the result is always `<= max` units — but the cut is made on a code-point
+ * boundary (iterating with `for…of`), so a surrogate pair (emoji / non-BMP
+ * char) at the boundary is never sliced in half into a malformed string Slack
+ * would reject. This is conservative: if a multi-unit char doesn't fully fit in
+ * the remaining budget it is dropped rather than split.
  */
 function truncate(text, max) {
+    if (max <= 0)
+        return "";
     if (text.length <= max)
         return text;
-    if (max <= 1)
-        return "…".slice(0, max);
-    return text.slice(0, max - 1) + "…";
+    if (max === 1)
+        return "…";
+    const budget = max - 1; // reserve one UTF-16 unit for the "…"
+    let out = "";
+    for (const ch of text) { // `for…of` iterates whole code points
+        if (out.length + ch.length > budget)
+            break;
+        out += ch;
+    }
+    return out + "…";
 }
 function buildItemBlockKit(item, event, opts = {}) {
     const type = itemTypeLabel(item);

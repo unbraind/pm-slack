@@ -184,6 +184,13 @@ declare function buildTextMessage(item: PmItem, event: EventKind, channel?: stri
  * cut so the truncation is visible rather than silently dropped or rejected. The
  * ellipsis counts toward the limit, so the result is always <= `max`. Returns
  * the input unchanged when it already fits (zero regression for normal content).
+ *
+ * The cap is enforced on UTF-16 length (`String.length`, what Slack measures),
+ * so the result is always `<= max` units — but the cut is made on a code-point
+ * boundary (iterating with `for…of`), so a surrogate pair (emoji / non-BMP
+ * char) at the boundary is never sliced in half into a malformed string Slack
+ * would reject. This is conservative: if a multi-unit char doesn't fully fit in
+ * the remaining budget it is dropped rather than split.
  */
 declare function truncate(text: string, max: number): string;
 interface BlockKitOptions {

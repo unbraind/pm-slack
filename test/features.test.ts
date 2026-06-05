@@ -660,6 +660,20 @@ test("truncate: leaves short text unchanged, caps long text with an ellipsis", (
   assert.equal(cut.length, 10);
   assert.ok(cut.endsWith("…"));
   assert.equal(cut, "a".repeat(9) + "…");
+
+  // surrogate pairs (emoji / non-BMP) are never sliced in half (gemini review).
+  // The cap is on UTF-16 length (what Slack measures); each 🆕 is 2 units, so
+  // with max=3 one emoji (2 units) + "…" (1 unit) fits and the rest is dropped
+  // whole — never split into a lone surrogate.
+  const emojiCut = truncate("🆕🆕🆕🆕🆕", 3);
+  assert.ok(emojiCut.length <= 3, "result stays within the UTF-16 budget");
+  assert.equal(emojiCut, "🆕…", "cuts on a code-point boundary, dropping the partial emoji");
+  assert.ok(
+    ![...emojiCut].some((c) => c.length === 1 && c.charCodeAt(0) >= 0xd800 && c.charCodeAt(0) <= 0xdfff),
+    "result must contain no lone surrogate",
+  );
+  // an emoji string that already fits is returned verbatim
+  assert.equal(truncate("🆕🆕", 5), "🆕🆕");
 });
 
 test("buildItemBlockKit: oversized note + reason + title stay within Slack limits", () => {
