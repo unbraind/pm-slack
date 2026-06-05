@@ -12,6 +12,9 @@ const {
   selectRoute,
   buildItemPayload,
   buildItemBlockKit,
+  truncate,
+  SLACK_SECTION_TEXT_MAX,
+  SLACK_HEADER_TEXT_MAX,
   parseStoredItem,
   resolveWindow,
   aggregateDigest,
@@ -637,4 +640,80 @@ test("activate registers slack notify, test, and digest commands", () => {
   assert.ok(commands.includes("slack notify"));
   assert.ok(commands.includes("slack test"));
   assert.ok(commands.includes("slack digest"));
+});
+
+// ---------------------------------------------------------------------------
+// Block Kit truncation to Slack hard limits (section text 3000, header 150)
+// ---------------------------------------------------------------------------
+
+test("truncate: leaves short text unchanged, caps long text with an ellipsis", () => {
+  // exact limits expose the off-by-one boundary
+  assert.equal(SLACK_SECTION_TEXT_MAX, 3000);
+  assert.equal(SLACK_HEADER_TEXT_MAX, 150);
+
+  // shorter / equal length is returned verbatim (zero regression)
+  assert.equal(truncate("hello", 10), "hello");
+  assert.equal(truncate("hello", 5), "hello");
+
+  // longer is cut to exactly `max` and ends with the ellipsis indicator
+  const cut = truncate("a".repeat(20), 10);
+  assert.equal(cut.length, 10);
+  assert.ok(cut.endsWith("…"));
+  assert.equal(cut, "a".repeat(9) + "…");
+});
+
+test("buildItemBlockKit: oversized note + reason + title stay within Slack limits", () => {
+  const item = {
+    id: "pm-1",
+    title: "T".repeat(400), // > 150 header limit
+    type: "Issue",
+    priority: 1 as const,
+    status: "closed",
+    close_reason: "R".repeat(5000), // > 3000 section limit
+  };
+  const note = "N".repeat(5000); // > 3000 section limit
+  const { blocks } = buildItemBlockKit(item, "close", { note });
+
+  const header = blocks.find((b) => b.type === "header") as any;
+  assert.ok(header.text.text.length <= SLACK_HEADER_TEXT_MAX, "header within 150");
+  assert.ok(header.text.text.endsWith("…"), "header marked as truncated");
+
+  // every section's text.text (the long reason + note) must be within 3000
+  const sectionTexts = (blocks as any[])
+    .filter((b) => b.type === "section" && b.text)
+    .map((b) => b.text.text as string);
+  assert.ok(sectionTexts.length >= 2, "expected reason + note sections");
+  for (const t of sectionTexts) {
+    assert.ok(t.length <= SLACK_SECTION_TEXT_MAX, `section text within 3000, got ${t.length}`);
+  }
+  // the two oversized sections must be visibly truncated
+  const truncated = sectionTexts.filter((t) => t.endsWith("…"));
+  assert.equal(truncated.length, 2, "reason + note both truncated with ellipsis");
+});
+
+test("buildDigestBlockKit: oversized bucket list stays within section limit", () => {
+  // a single item with a giant title pushes the bucket section text past 3000
+  const now = new Date().toISOString();
+  const items = [
+    {
+      id: "pm-big",
+      title: "X".repeat(5000), // > 3000 section limit on its own
+      type: "Issue",
+      priority: 2 as const,
+      status: "closed",
+      created_at: now,
+      updated_at: now,
+    },
+  ];
+  const summary = aggregateDigest(items, 0, "today");
+  const { blocks } = buildDigestBlockKit(summary);
+
+  const sectionTexts = (blocks as any[])
+    .filter((b) => b.type === "section" && b.text)
+    .map((b) => b.text.text as string);
+  for (const t of sectionTexts) {
+    assert.ok(t.length <= SLACK_SECTION_TEXT_MAX, `digest section within 3000, got ${t.length}`);
+  }
+  // at least one section was big enough to require truncation
+  assert.ok(sectionTexts.some((t) => t.endsWith("…")), "a long bucket section was truncated");
 });

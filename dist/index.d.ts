@@ -179,6 +179,13 @@ declare function resolveItemUrl(item: PmItem, override?: string): {
     isGithub: boolean;
 } | undefined;
 declare function buildTextMessage(item: PmItem, event: EventKind, channel?: string, mention?: string): string;
+/**
+ * Truncate `text` to at most `max` characters, appending an ellipsis ("…") when
+ * cut so the truncation is visible rather than silently dropped or rejected. The
+ * ellipsis counts toward the limit, so the result is always <= `max`. Returns
+ * the input unchanged when it already fits (zero regression for normal content).
+ */
+declare function truncate(text: string, max: number): string;
 interface BlockKitOptions {
     channel?: string;
     /** Extra free-form body appended as a section (e.g. from `--text`). */
@@ -268,6 +275,9 @@ export declare const __test__: {
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;
+    truncate: typeof truncate;
+    SLACK_SECTION_TEXT_MAX: number;
+    SLACK_HEADER_TEXT_MAX: number;
     parseEvents: typeof parseEvents;
     normalizeEvent: typeof normalizeEvent;
     parseFormat: typeof parseFormat;
