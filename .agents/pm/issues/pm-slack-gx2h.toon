@@ -1,0 +1,12 @@
+id: pm-slack-gx2h
+title: Block Kit messages aren't truncated to Slack limits → oversized content is silently rejected (HTTP 400)
+description: "buildItemBlockKit and buildDigestBlockKit built section text and header text fields without enforcing Slack's hard Block Kit limits (section text.text <= 3000 chars, header text <= 150 chars). A long --text note, a long close reason, a long item title/header, or a long digest item title produces a block over the limit, so Slack rejects the ENTIRE message with HTTP 400. On the afterCommand hook path the rejection is swallowed (logged to stderr only), so notifications silently vanish. Fix: add a truncate(text,max) helper that appends an ellipsis when cutting, and apply it to every section text (cap 3000) and header text (cap 150) in both builders."
+type: Issue
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-05T14:53:30.604Z"
+updated_at: "2026-06-05T14:53:38.518Z"
+author: codex
+acceptance_criteria: section text capped at 3000 and header at 150 with an ellipsis indicator; normal content unchanged; unit test proves limits are enforced
+body: ""
