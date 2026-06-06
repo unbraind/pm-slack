@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-slack-yj5o](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-yj5o.toon))
+
 ## 2026.06.04-1 - 2026-06-04
 
 ### Added
