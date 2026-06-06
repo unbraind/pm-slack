@@ -687,7 +687,44 @@ function buildItemPayload(item, event, format, opts = {}) {
 // ---------------------------------------------------------------------------
 // Slack HTTP POST
 // ---------------------------------------------------------------------------
-function postToSlack(webhookUrl, payload) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+class SlackHttpError extends Error {
+    status;
+    retryAfterMs;
+    constructor(status, message, retryAfterMs) {
+        super(message);
+        this.name = "SlackHttpError";
+        this.status = status;
+        this.retryAfterMs = retryAfterMs;
+    }
+}
+function parseRetryAfterMs(header) {
+    const raw = Array.isArray(header) ? header[0] : header;
+    if (!raw)
+        return undefined;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0)
+        return seconds * 1000;
+    const dateMs = Date.parse(raw);
+    if (!Number.isNaN(dateMs))
+        return Math.max(0, dateMs - Date.now());
+    return undefined;
+}
+function slackRetryDelayMs(attempt, retryAfterMs) {
+    if (retryAfterMs !== undefined)
+        return retryAfterMs;
+    return Math.min(8000, 500 * 2 ** attempt);
+}
+function isRetryableSlackError(err) {
+    if (err instanceof SlackHttpError) {
+        return err.status === 429 || err.status >= 500;
+    }
+    if (err instanceof Error) {
+        return /timed out|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up/i.test(err.message);
+    }
+    return false;
+}
+function postToSlackOnce(webhookUrl, payload) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify(payload);
         const parsed = new URL(webhookUrl);
@@ -712,7 +749,7 @@ function postToSlack(webhookUrl, payload) {
                     resolve();
                 }
                 else {
-                    reject(new Error(`Slack webhook returned HTTP ${status}: ${data.slice(0, 200)}`));
+                    reject(new SlackHttpError(status, `Slack webhook returned HTTP ${status}: ${data.slice(0, 200)}`, parseRetryAfterMs(res.headers["retry-after"])));
                 }
             });
         });
@@ -725,6 +762,24 @@ function postToSlack(webhookUrl, payload) {
         req.write(body);
         req.end();
     });
+}
+async function postToSlack(webhookUrl, payload) {
+    const maxRetries = 2;
+    let lastErr;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            await postToSlackOnce(webhookUrl, payload);
+            return;
+        }
+        catch (err) {
+            lastErr = err;
+            if (attempt >= maxRetries || !isRetryableSlackError(err))
+                break;
+            const retryAfterMs = err instanceof SlackHttpError ? err.retryAfterMs : undefined;
+            await sleep(slackRetryDelayMs(attempt, retryAfterMs));
+        }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 // ---------------------------------------------------------------------------
 // Digest: reading the pm store + activity aggregation
@@ -1466,6 +1521,10 @@ export const __test__ = {
     buildDigestPayload,
     resolveEffectiveWebhook,
     assertWebhookConfigured,
+    slackRetryDelayMs,
+    parseRetryAfterMs,
+    isRetryableSlackError,
+    SlackHttpError,
     EXIT_CODE,
     CommandError,
 };

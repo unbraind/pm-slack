@@ -215,6 +215,14 @@ declare function buildItemBlockKit(item: PmItem, event: EventKind, opts?: BlockK
  * - "text":     plain mrkdwn only (no `blocks`), for minimal/legacy channels.
  */
 declare function buildItemPayload(item: PmItem, event: EventKind, format: MessageFormat, opts?: BlockKitOptions): SlackPayload;
+declare class SlackHttpError extends Error {
+    status: number;
+    retryAfterMs?: number;
+    constructor(status: number, message: string, retryAfterMs?: number);
+}
+declare function parseRetryAfterMs(header: string | string[] | undefined): number | undefined;
+declare function slackRetryDelayMs(attempt: number, retryAfterMs?: number): number;
+declare function isRetryableSlackError(err: unknown): boolean;
 /** Fields we read off each stored item for digest purposes. */
 interface DigestItem extends PmItem {
     created_at?: string;
@@ -316,6 +324,10 @@ export declare const __test__: {
     buildDigestPayload: typeof buildDigestPayload;
     resolveEffectiveWebhook: typeof resolveEffectiveWebhook;
     assertWebhookConfigured: typeof assertWebhookConfigured;
+    slackRetryDelayMs: typeof slackRetryDelayMs;
+    parseRetryAfterMs: typeof parseRetryAfterMs;
+    isRetryableSlackError: typeof isRetryableSlackError;
+    SlackHttpError: typeof SlackHttpError;
     EXIT_CODE: {
         readonly GENERIC_FAILURE: 1;
         readonly USAGE: 2;
