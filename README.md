@@ -4,6 +4,8 @@ Slack notifications for [pm-cli](https://github.com/unbraind/pm-cli) item lifecy
 
 Fires after `create`, `close`, `block`, `cancel`, `open`, `start`, `unblock`, and `reopen` lifecycle transitions and posts a formatted message to a Slack incoming webhook. Optionally maps assignees to Slack `@mentions` and adds Block Kit action buttons linking to the item / GitHub URL.
 
+Slack posts retry transient delivery failures (`429`, `5xx`, timeout, socket/DNS hiccups) with exponential backoff and honor Slack's `Retry-After` header, so temporary webhook throttling does not immediately drop project context.
+
 ---
 
 ## Installation

@@ -35,6 +35,10 @@ const {
   EVENT_META,
   resolveEffectiveWebhook,
   assertWebhookConfigured,
+  slackRetryDelayMs,
+  parseRetryAfterMs,
+  isRetryableSlackError,
+  SlackHttpError,
   CommandError,
   EXIT_CODE,
 } = __test__;
@@ -578,6 +582,19 @@ test("assertWebhookConfigured: passes on a valid --webhook flag override", () =>
   withEnv({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, () => {
     assert.doesNotThrow(() => assertWebhookConfigured("https://hooks.slack.com/services/A/B/C", "slack notify"));
   });
+});
+
+test("Slack retry helpers honor Retry-After and only retry transient failures", () => {
+  assert.equal(parseRetryAfterMs("2"), 2000);
+  assert.equal(slackRetryDelayMs(0), 500);
+  assert.equal(slackRetryDelayMs(3), 4000);
+  assert.equal(slackRetryDelayMs(0, 2500), 2500);
+  assert.equal(isRetryableSlackError({ status: 429 }), false, "plain objects are not treated as internal HTTP errors");
+  assert.equal(isRetryableSlackError(new SlackHttpError(429, "rate limited")), true);
+  assert.equal(isRetryableSlackError(new SlackHttpError(503, "temporary outage")), true);
+  assert.equal(isRetryableSlackError(new SlackHttpError(400, "bad webhook")), false);
+  assert.equal(isRetryableSlackError(new Error("Slack webhook request timed out after 10s")), true);
+  assert.equal(isRetryableSlackError(new Error("Slack webhook returned HTTP 400: bad webhook")), false);
 });
 
 // ---------------------------------------------------------------------------
