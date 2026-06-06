@@ -688,6 +688,41 @@ function buildTextMessage(item: PmItem, event: EventKind, channel?: string, ment
 // renders in notifications and old clients.
 // ---------------------------------------------------------------------------
 
+/**
+ * Slack Block Kit hard limits. A block exceeding these causes Slack to reject
+ * the ENTIRE message with HTTP 400, so any caller-controlled text (note, close
+ * reason, title/header, digest item lists) must be capped before it is sent.
+ * @see https://api.slack.com/reference/block-kit/blocks
+ */
+const SLACK_SECTION_TEXT_MAX = 3000; // section.text.text / fields[].text
+const SLACK_HEADER_TEXT_MAX = 150; // header.text.text (plain_text)
+
+/**
+ * Truncate `text` to at most `max` characters, appending an ellipsis ("…") when
+ * cut so the truncation is visible rather than silently dropped or rejected. The
+ * ellipsis counts toward the limit, so the result is always <= `max`. Returns
+ * the input unchanged when it already fits (zero regression for normal content).
+ *
+ * The cap is enforced on UTF-16 length (`String.length`, what Slack measures),
+ * so the result is always `<= max` units — but the cut is made on a code-point
+ * boundary (iterating with `for…of`), so a surrogate pair (emoji / non-BMP
+ * char) at the boundary is never sliced in half into a malformed string Slack
+ * would reject. This is conservative: if a multi-unit char doesn't fully fit in
+ * the remaining budget it is dropped rather than split.
+ */
+function truncate(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  if (max === 1) return "…";
+  const budget = max - 1; // reserve one UTF-16 unit for the "…"
+  let out = "";
+  for (const ch of text) { // `for…of` iterates whole code points
+    if (out.length + ch.length > budget) break;
+    out += ch;
+  }
+  return out + "…";
+}
+
 interface BlockKitOptions {
   channel?: string;
   /** Extra free-form body appended as a section (e.g. from `--text`). */
@@ -709,7 +744,11 @@ function buildItemBlockKit(
 
   blocks.push({
     type: "header",
-    text: { type: "plain_text", text: `${meta.emoji} ${item.title}`, emoji: true },
+    text: {
+      type: "plain_text",
+      text: truncate(`${meta.emoji} ${item.title}`, SLACK_HEADER_TEXT_MAX),
+      emoji: true,
+    },
   });
 
   // Fields section: a 2-column grid of mrkdwn key/value pairs.
@@ -731,14 +770,14 @@ function buildItemBlockKit(
   if (reason) {
     blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: `*Reason:* ${reason}` },
+      text: { type: "mrkdwn", text: truncate(`*Reason:* ${reason}`, SLACK_SECTION_TEXT_MAX) },
     });
   }
 
   if (opts.note) {
     blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: opts.note },
+      text: { type: "mrkdwn", text: truncate(opts.note, SLACK_SECTION_TEXT_MAX) },
     });
   }
 
@@ -1047,7 +1086,11 @@ function buildDigestBlockKit(
   const blocks: SlackBlock[] = [];
   blocks.push({
     type: "header",
-    text: { type: "plain_text", text: `📊 pm activity digest`, emoji: true },
+    text: {
+      type: "plain_text",
+      text: truncate(`📊 pm activity digest`, SLACK_HEADER_TEXT_MAX),
+      emoji: true,
+    },
   });
   blocks.push({
     type: "context",
@@ -1075,7 +1118,10 @@ function buildDigestBlockKit(
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${meta.emoji} *${meta.label}* (${items.length})\n${digestItemLines(items).join("\n")}`,
+        text: truncate(
+          `${meta.emoji} *${meta.label}* (${items.length})\n${digestItemLines(items).join("\n")}`,
+          SLACK_SECTION_TEXT_MAX
+        ),
       },
     });
   }
@@ -1651,6 +1697,9 @@ export const __test__ = {
   buildItemBlockKit,
   buildItemPayload,
   buildTextMessage,
+  truncate,
+  SLACK_SECTION_TEXT_MAX,
+  SLACK_HEADER_TEXT_MAX,
   parseEvents,
   normalizeEvent,
   parseFormat,
