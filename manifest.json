@@ -1,6 +1,6 @@
 {
   "name": "pm-slack",
-  "version": "2026.6.7",
+  "version": "2026.6.8",
   "description": "Slack notifications for pm item lifecycle events",
   "author": "@unbraind",
   "entry": "./dist/index.js",
