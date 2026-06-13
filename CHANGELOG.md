@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Daily Release publish step runs prepublishOnly post-tag: align npm publish with --ignore-scripts ([pm-slack-bff1](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-bff1.toon))
+
 ## 2026.06.07 - 2026-06-07
 
 ### Added
