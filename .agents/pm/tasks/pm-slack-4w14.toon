@@ -2,11 +2,11 @@ id: pm-slack-4w14
 title: Fix release CI ordering (publish-before-tag)
 description: ""
 type: Task
-status: in_progress
+status: closed
 priority: 1
 tags[2]: ci,release
 created_at: "2026-07-05T21:56:45.992Z"
-updated_at: "2026-07-05T21:56:46.861Z"
-assignee: codex
+updated_at: "2026-07-05T22:40:41.696Z"
 author: codex
+close_reason: Closed via pm update
 body: ""
