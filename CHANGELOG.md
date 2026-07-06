@@ -8,6 +8,7 @@
 
 ### Other
 
+- Align Node engine with pm CLI runtime ([pm-slack-wyhk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-wyhk.toon))
 - Regenerate CHANGELOG after pm close item ([pm-slack-xhc9](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-xhc9.toon))
 
 ## 2026.6.13 - 2026-06-13
