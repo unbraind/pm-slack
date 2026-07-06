@@ -12,6 +12,7 @@ const {
   selectRoute,
   buildItemPayload,
   buildItemBlockKit,
+  buildCustomMessage,
   truncate,
   SLACK_SECTION_TEXT_MAX,
   SLACK_HEADER_TEXT_MAX,
@@ -41,6 +42,10 @@ const {
   SlackHttpError,
   CommandError,
   EXIT_CODE,
+  parseFilter,
+  filterMatches,
+  matchesFilter,
+  parseChannelOverride,
 } = __test__;
 
 // ---------------------------------------------------------------------------
@@ -747,4 +752,205 @@ test("buildDigestBlockKit: oversized bucket list stays within section limit", ()
   }
   // at least one section was big enough to require truncation
   assert.ok(sectionTexts.some((t) => t.endsWith("…")), "a long bucket section was truncated");
+});
+
+// ---------------------------------------------------------------------------
+// Feature: --filter flag (filtering which events trigger notifications)
+// ---------------------------------------------------------------------------
+
+test("parseFilter: parses comma-separated selectors, ignores empty parts", () => {
+  assert.deepEqual(parseFilter(undefined), []);
+  assert.deepEqual(parseFilter(""), []);
+  assert.deepEqual(parseFilter("type:Bug"), ["type:Bug"]);
+  assert.deepEqual(parseFilter("type:Bug, status:closed"), ["type:Bug", "status:closed"]);
+  assert.deepEqual(parseFilter("create, type:Bug , ,"), ["create", "type:Bug"]);
+});
+
+test("filterMatches: type:, status:, event:, and bare event selectors", () => {
+  const item = { id: "1", title: "t", type: "Bug", status: "closed" };
+  assert.ok(filterMatches("type:Bug", "close", item));
+  assert.ok(filterMatches("type:bug", "close", item)); // case-insensitive
+  assert.ok(!filterMatches("type:Feature", "close", item));
+  assert.ok(filterMatches("status:closed", "close", item));
+  assert.ok(filterMatches("status:CLOSED", "close", item));
+  assert.ok(!filterMatches("status:open", "close", item));
+  assert.ok(filterMatches("event:close", "close", item));
+  assert.ok(filterMatches("close", "close", item)); // bare event
+  assert.ok(filterMatches("closed", "close", item)); // alias
+  assert.ok(!filterMatches("create", "close", item));
+});
+
+test("matchesFilter: ALL selectors must match (AND logic), empty = match all", () => {
+  const item = { id: "1", title: "t", type: "Bug", status: "closed" };
+  assert.ok(matchesFilter([], "close", item), "empty filter matches everything");
+  assert.ok(matchesFilter(["type:Bug"], "close", item));
+  assert.ok(matchesFilter(["type:Bug", "status:closed"], "close", item));
+  assert.ok(matchesFilter(["type:Bug", "event:close"], "close", item));
+  assert.ok(!matchesFilter(["type:Bug", "status:open"], "close", item), "AND: mismatched selector fails");
+  assert.ok(!matchesFilter(["type:Feature"], "close", item));
+});
+
+test("matchesFilter: event alias selectors work", () => {
+  const item = { id: "1", title: "t", type: "Task", status: "canceled" };
+  assert.ok(matchesFilter(["canceled"], "cancel", item));
+  assert.ok(matchesFilter(["event:canceled"], "cancel", item));
+  assert.ok(matchesFilter(["event:cancelled"], "cancel", item));
+  assert.ok(!matchesFilter(["event:close"], "cancel", item));
+});
+
+// ---------------------------------------------------------------------------
+// Feature: --channel-override (redirect specific event types to channels)
+// ---------------------------------------------------------------------------
+
+test("parseChannelOverride: parses event=channel pairs, accepts aliases", () => {
+  assert.equal(parseChannelOverride(undefined).size, 0);
+  assert.equal(parseChannelOverride("").size, 0);
+  const map = parseChannelOverride("close=#releases,block=#urgent");
+  assert.equal(map.get("close"), "#releases");
+  assert.equal(map.get("block"), "#urgent");
+  // alias accepted
+  const map2 = parseChannelOverride("canceled=#incidents,in_progress=#dev");
+  assert.equal(map2.get("cancel"), "#incidents");
+  assert.equal(map2.get("start"), "#dev");
+  // malformed entries are ignored
+  const map3 = parseChannelOverride("badpair, =empty, close=");
+  assert.equal(map3.size, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Feature: --format custom (custom message templates)
+// ---------------------------------------------------------------------------
+
+test("parseFormat: accepts 'custom' and aliases", () => {
+  assert.equal(parseFormat("custom"), "custom");
+  assert.equal(parseFormat("template"), "custom");
+  assert.equal(parseFormat("tmpl"), "custom");
+  assert.equal(parseFormat("CUSTOM"), "custom");
+  // fallback for unknown remains unchanged
+  assert.equal(parseFormat("bogus", "text"), "text");
+  assert.equal(parseFormat(undefined), "blockkit");
+});
+
+test("buildCustomMessage: replaces all supported placeholders", () => {
+  const item = { id: "pm-1", title: "Auth bug", type: "Bug", priority: 1 as const, status: "closed", author: "alice", assignee: "bob", close_reason: "Fixed" };
+  const template = "{emoji} {title} ({id}) {event} in {type} — priority: {priority}, status: {status}, by: {author}, assignee: {assignee}, mention: {mention}, reason: {reason}, channel: {channel}";
+  const result = buildCustomMessage(item, "close", template, { channel: "#ops", mention: "<@U123>" });
+  assert.ok(result.includes("✅"), "emoji replaced");
+  assert.ok(result.includes("Auth bug"), "title replaced");
+  assert.ok(result.includes("pm-1"), "id replaced");
+  assert.ok(result.includes("closed"), "event verb replaced");
+  assert.ok(result.includes("Bug"), "type replaced");
+  assert.ok(result.includes("critical"), "priority label replaced");
+  assert.ok(result.includes("closed"), "status replaced");
+  assert.ok(result.includes("alice"), "author replaced");
+  assert.ok(result.includes("bob"), "assignee replaced");
+  assert.ok(result.includes("<@U123>"), "mention replaced");
+  assert.ok(result.includes("Fixed"), "reason replaced");
+  assert.ok(result.includes("#ops"), "channel replaced");
+});
+
+test("buildCustomMessage: unknown placeholders left as-is", () => {
+  const item = { id: "pm-1", title: "T", type: "Bug", priority: 1 as const, status: "open" };
+  const result = buildCustomMessage(item, "create", "{title} {unknown_placeholder} {title}");
+  assert.ok(result.includes("T"));
+  assert.ok(result.includes("{unknown_placeholder}"), "unknown placeholder kept verbatim");
+  assert.equal(result, "T {unknown_placeholder} T");
+});
+
+test("buildCustomMessage: empty/missing fields produce empty strings", () => {
+  const item = { id: "pm-1", title: "T" };
+  const result = buildCustomMessage(item, "create", "type={type} assignee={assignee} reason={reason}");
+  assert.ok(result.includes("type=Item"), "missing type defaults to 'Item'");
+  assert.ok(result.includes("assignee="), "missing assignee is empty");
+  assert.ok(result.includes("reason="), "missing reason is empty");
+});
+
+test("buildItemPayload: custom format produces text-only payload with template output", () => {
+  const item = { id: "pm-1", title: "Deploy", type: "Feature", priority: 2 as const, status: "closed", author: "alice" };
+  const template = "{emoji} {title} {event}";
+  const payload = buildItemPayload(item, "close", "custom", { template, channel: "#ops" });
+  assert.equal(payload.blocks, undefined, "custom format has no blocks");
+  assert.equal(payload.mrkdwn, true);
+  assert.ok(payload.text.includes("Deploy"));
+  assert.ok(payload.text.includes("closed"));
+  assert.ok(payload.text.includes("✅"));
+  assert.equal(payload.channel, "#ops");
+});
+
+test("buildItemPayload: custom format without template falls back to text path", () => {
+  const item = { id: "pm-1", title: "Deploy", type: "Feature", priority: 2 as const, status: "open" };
+  // no template provided → should not crash, falls through to text/blockkit
+  const payload = buildItemPayload(item, "create", "custom", {});
+  assert.ok(payload.text.includes("Deploy"), "falls back to standard text rendering");
+});
+
+test("buildItemPayload: custom format appends note when provided", () => {
+  const item = { id: "pm-1", title: "T", type: "Bug", priority: 1 as const, status: "open" };
+  const payload = buildItemPayload(item, "create", "custom", { template: "{title}", note: "Extra note" });
+  assert.ok(payload.text.includes("Extra note"));
+  assert.ok(payload.text.includes("T"));
+});
+
+// ---------------------------------------------------------------------------
+// Feature: --thread on slack digest (thread_ts in digest payload)
+// ---------------------------------------------------------------------------
+
+test("buildDigestPayload: accepts thread_ts via spread (digest --thread)", () => {
+  const items = [{ id: "a", title: "created", created_at: "2026-06-05T00:00:00Z", status: "open" }];
+  const cutoff = Date.parse("2026-06-01T00:00:00Z");
+  const s = aggregateDigest(items, cutoff, "since 2026-06-01");
+  const payload = { ...buildDigestPayload(s, "text"), thread_ts: "1700000000.000100" };
+  assert.equal(payload.thread_ts, "1700000000.000100");
+  assert.ok(payload.text.includes("activity digest"));
+});
+
+// ---------------------------------------------------------------------------
+// Command registration: new flags appear on slack notify and slack test
+// ---------------------------------------------------------------------------
+
+test("activate registers --filter, --channel-override, --template flags on slack notify", () => {
+  let notifyFlags: { long: string }[] = [];
+  const api = {
+    registerCommand: (def: { name: string; flags?: { long: string }[] }) => {
+      if (def.name === "slack notify") notifyFlags = def.flags ?? [];
+    },
+    hooks: { afterCommand: () => {} },
+  };
+  extension.activate(api as any);
+  const longs = notifyFlags.map((f) => f.long);
+  assert.ok(longs.includes("--filter"), "slack notify has --filter");
+  assert.ok(longs.includes("--channel-override"), "slack notify has --channel-override");
+  assert.ok(longs.includes("--template"), "slack notify has --template");
+  assert.ok(longs.includes("--format"), "slack notify has --format");
+  assert.ok(longs.includes("--dry-run"), "slack notify has --dry-run");
+  assert.ok(longs.includes("--thread"), "slack notify has --thread");
+});
+
+test("activate registers --filter, --channel-override, --template flags on slack test", () => {
+  let testFlags: { long: string }[] = [];
+  const api = {
+    registerCommand: (def: { name: string; flags?: { long: string }[] }) => {
+      if (def.name === "slack test") testFlags = def.flags ?? [];
+    },
+    hooks: { afterCommand: () => {} },
+  };
+  extension.activate(api as any);
+  const longs = testFlags.map((f) => f.long);
+  assert.ok(longs.includes("--filter"), "slack test has --filter");
+  assert.ok(longs.includes("--channel-override"), "slack test has --channel-override");
+  assert.ok(longs.includes("--template"), "slack test has --template");
+});
+
+test("activate registers --thread flag on slack digest", () => {
+  let digestFlags: { long: string }[] = [];
+  const api = {
+    registerCommand: (def: { name: string; flags?: { long: string }[] }) => {
+      if (def.name === "slack digest") digestFlags = def.flags ?? [];
+    },
+    hooks: { afterCommand: () => {} },
+  };
+  extension.activate(api as any);
+  const longs = digestFlags.map((f) => f.long);
+  assert.ok(longs.includes("--thread"), "slack digest has --thread");
+  assert.ok(longs.includes("--dry-run"), "slack digest has --dry-run");
 });
