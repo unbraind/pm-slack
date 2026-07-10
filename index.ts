@@ -30,6 +30,7 @@
  */
 
 import https from "node:https";
+import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -105,7 +106,7 @@ interface PmItem {
 
 type EventKind = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
 
-type MessageFormat = "blockkit" | "text";
+type MessageFormat = "blockkit" | "text" | "custom";
 
 /** A single routing rule parsed from PM_SLACK_ROUTES. */
 interface RouteRule {
@@ -226,18 +227,20 @@ function parseEvents(spec: string | undefined): Set<EventKind> {
 // Format parsing
 // ---------------------------------------------------------------------------
 
-const ALL_FORMATS: MessageFormat[] = ["blockkit", "text"];
+const ALL_FORMATS: MessageFormat[] = ["blockkit", "text", "custom"];
 
 /**
  * Normalize a format spec to a known MessageFormat. Accepts a few friendly
- * aliases ("block"/"blocks" → blockkit, "plain"/"txt" → text). Falls back to
- * the supplied default when the spec is empty or unrecognized.
+ * aliases ("block"/"blocks" → blockkit, "plain"/"txt" → text, "template"/"tmpl"
+ * → custom). Falls back to the supplied default when the spec is empty or
+ * unrecognized.
  */
 function parseFormat(spec: string | undefined, fallback: MessageFormat = "blockkit"): MessageFormat {
   if (!spec) return fallback;
   const v = spec.trim().toLowerCase();
   if (v === "blockkit" || v === "block" || v === "blocks" || v === "rich") return "blockkit";
   if (v === "text" || v === "plain" || v === "txt") return "text";
+  if (v === "custom" || v === "template" || v === "tmpl") return "custom";
   return fallback;
 }
 
@@ -317,6 +320,82 @@ function selectRoute(
   }
   if (!defaultWebhook) return null;
   return { webhookUrl: defaultWebhook, channel: defaultChannel };
+}
+
+// ---------------------------------------------------------------------------
+// Event filtering (--filter)
+//
+// The --filter flag accepts a comma-separated list of selector expressions.
+// Only events/items matching ALL selectors (AND logic) trigger a notification.
+// An empty filter list (flag omitted) matches everything — zero regression.
+// Selector forms:
+//   "type:<itemType>"   case-insensitive on item.type
+//   "status:<status>"  case-insensitive on item.status
+//   "event:<event>"     canonical event name or alias
+//   bare event name      e.g. "create", "close" (same as event: prefix)
+// ---------------------------------------------------------------------------
+
+/** Parse a --filter spec into an array of selector strings. */
+function parseFilter(spec: string | undefined): string[] {
+  if (!spec || !spec.trim()) return [];
+  return spec
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Check if an item/event matches a single filter selector.
+ */
+function filterMatches(filter: string, event: EventKind, item: PmItem): boolean {
+  const sel = filter.toLowerCase();
+  if (sel.startsWith("type:")) {
+    return (item.type ?? "").toLowerCase() === sel.slice("type:".length).trim();
+  }
+  if (sel.startsWith("status:")) {
+    return (item.status ?? "").toLowerCase() === sel.slice("status:".length).trim();
+  }
+  if (sel.startsWith("event:")) {
+    const norm = normalizeEvent(sel.slice("event:".length).trim());
+    return norm !== null && norm === event;
+  }
+  // bare event name — accept canonical names and aliases
+  const norm = normalizeEvent(sel);
+  return norm !== null && norm === event;
+}
+
+/**
+ * Check if an item/event matches ALL filter selectors (AND logic). An empty
+ * filter list matches everything (no filtering applied).
+ */
+function matchesFilter(filters: string[], event: EventKind, item: PmItem): boolean {
+  if (filters.length === 0) return true;
+  return filters.every((f) => filterMatches(f, event, item));
+}
+
+// ---------------------------------------------------------------------------
+// Channel override (--channel-override)
+//
+// The --channel-override flag accepts a comma-separated list of
+// `event=channel` pairs. When the resolved event matches, the corresponding
+// channel is used instead of the default --channel / PM_SLACK_CHANNEL. Event
+// tokens accept canonical names and aliases (e.g. "canceled" → cancel).
+// ---------------------------------------------------------------------------
+
+/** Parse a --channel-override spec into a map of EventKind → channel. */
+function parseChannelOverride(spec: string | undefined): Map<EventKind, string> {
+  const map = new Map<EventKind, string>();
+  if (!spec || !spec.trim()) return map;
+  for (const pair of spec.split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const eventToken = pair.slice(0, eq).trim().toLowerCase();
+    const channel = pair.slice(eq + 1).trim();
+    if (!channel) continue;
+    const event = normalizeEvent(eventToken);
+    if (event) map.set(event, channel);
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -681,6 +760,46 @@ function buildTextMessage(item: PmItem, event: EventKind, channel?: string, ment
 }
 
 // ---------------------------------------------------------------------------
+// Custom template message formatting
+//
+// When --format custom is used, the caller supplies a --template string with
+// {placeholder} tokens that are replaced from the item/event context. This
+// produces a plain-text (mrkdwn) payload with no Block Kit blocks, giving full
+// control over message layout for channels or integrations that need a
+// specific format. Unknown placeholders are left as-is (e.g. "{unknown}") so
+// typos are visible rather than silently dropped.
+// ---------------------------------------------------------------------------
+
+/** Supported template placeholders mapped to their source values. */
+function templateReplacements(item: PmItem, event: EventKind, opts: BlockKitOptions): Record<string, string> {
+  const meta = EVENT_META[event];
+  return {
+    title: item.title ?? "",
+    id: item.id ?? "",
+    event: meta.verb,
+    type: itemTypeLabel(item),
+    status: item.status ?? meta.verb,
+    priority: priorityLabel(item.priority),
+    assignee: item.assignee ?? "",
+    mention: opts.mention ?? "",
+    reason: eventReason(item, event) ?? "",
+    channel: opts.channel ?? "",
+    emoji: meta.emoji,
+    author: item.author ?? "",
+  };
+}
+
+/**
+ * Render a custom template by replacing {placeholder} tokens with values
+ * from the item/event context. Unknown tokens are kept verbatim so typos are
+ * visible. Returns the rendered string.
+ */
+function buildCustomMessage(item: PmItem, event: EventKind, template: string, opts: BlockKitOptions = {}): string {
+  const replacements = templateReplacements(item, event, opts);
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => replacements[key] ?? `{${key}}`);
+}
+
+// ---------------------------------------------------------------------------
 // Block Kit rendering
 //
 // Build a Slack Block Kit `blocks` array (header + section with fields +
@@ -731,6 +850,8 @@ interface BlockKitOptions {
   mention?: string;
   /** Resolved item/GitHub URL for an action button. */
   link?: { url: string; isGithub: boolean };
+  /** Custom template string used when format is "custom". */
+  template?: string;
 }
 
 function buildItemBlockKit(
@@ -824,6 +945,16 @@ function buildItemPayload(
   format: MessageFormat,
   opts: BlockKitOptions = {}
 ): SlackPayload {
+  const template = opts.template ?? process.env.PM_SLACK_TEMPLATE;
+  if (format === "custom" && template) {
+    const text = buildCustomMessage(item, event, template, opts);
+    const body = opts.note && opts.note.trim() ? `${text}\n${opts.note.trim()}` : text;
+    return {
+      text: body,
+      mrkdwn: true,
+      ...(opts.channel ? { channel: opts.channel } : {}),
+    };
+  }
   if (format === "text") {
     const text = buildTextMessage(item, event, opts.channel, opts.mention);
     const body = opts.note && opts.note.trim() ? `${text}\n${opts.note.trim()}` : text;
@@ -889,9 +1020,9 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
     const body = JSON.stringify(payload);
     const parsed = new URL(webhookUrl);
 
-    const options: https.RequestOptions = {
+    const options: http.RequestOptions = {
       hostname: parsed.hostname,
-      port: parsed.port ? parseInt(parsed.port, 10) : 443,
+      port: parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === "http:" ? 80 : 443,
       path: parsed.pathname + parsed.search,
       method: "POST",
       headers: {
@@ -900,7 +1031,8 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
       },
     };
 
-    const req = https.request(options, (res) => {
+    const request = parsed.protocol === "http:" ? http.request : https.request;
+    const req = request(options, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => {
         data += chunk.toString();
@@ -1482,15 +1614,23 @@ export default defineExtension({
           "pm slack notify --text 'Release shipped :rocket:' --dry-run",
           "pm slack notify --title 'Deploy done' --on close --channel '#releases'",
           "pm slack notify --title 'Auth epic' --on create --thread 1700000000.000100",
+          "pm slack notify --title 'Bug fix' --on close --format custom --template '{emoji} {title} ({id}) {event} in {type}' --dry-run",
+          "pm slack notify --title 'Deploy' --type Feature --on close --filter 'type:Feature' --dry-run",
+          "pm slack notify --title 'Hotfix' --on close --channel-override 'close=#incidents,block=#urgent' --dry-run",
           "PM_SLACK_WEBHOOK=https://hooks.slack.com/... pm slack notify --text 'hello team'",
         ],
         flags: [
           { long: "--text", value_name: "message", description: "Free-form message body (mrkdwn). Used when no item context is given." },
           { long: "--title", value_name: "title", description: "Title shown in the Block Kit header (defaults to the --text first line)" },
+          { long: "--type", value_name: "type", description: "Item type used by templates and --filter (default: Note)" },
+          { long: "--status", value_name: "status", description: "Item status used by templates and --filter" },
           { long: "--channel", value_name: "name", description: "Channel name shown in the message (e.g. #pm-alerts). Overrides PM_SLACK_CHANNEL." },
           { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
           { long: "--on", value_name: "events", description: "Comma list of lifecycle events for the message template (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
-          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
+          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default), text, or custom (requires --template). Overrides PM_SLACK_FORMAT." },
+          { long: "--template", value_name: "tpl", description: "Custom message template with {placeholders} (title, id, event, type, status, priority, assignee, mention, reason, channel, emoji, author). Used with --format custom." },
+          { long: "--filter", value_name: "selectors", description: "Comma-separated selectors to filter which events trigger notifications (type:Bug, status:closed, event:create, or bare event name). ALL must match." },
+          { long: "--channel-override", value_name: "pairs", description: "Comma list of event=channel pairs to redirect specific event types to different channels (e.g. close=#releases,block=#urgent)" },
           { long: "--assignee", value_name: "name", description: "Assignee name shown on the message (mapped to a Slack @mention via the mention map)" },
           { long: "--mention-assignee", description: "Resolve the assignee to a Slack @mention using the mention map" },
           { long: "--mention-map", value_name: "pairs", description: "Inline mention map, comma list of name=@handle|name=Uxxxx pairs (overrides PM_SLACK_ASSIGNEE_MAP / PM_SLACK_MENTION_MAP for this post)" },
@@ -1522,6 +1662,10 @@ export default defineExtension({
           const events = parseEvents(readStrOption(options, "on") ?? "create");
           const event: EventKind = (ALL_EVENTS.find((e) => events.has(e)) ?? "create") as EventKind;
 
+          // --channel-override: redirect specific event types to different channels.
+          const channelOverrides = parseChannelOverride(readStrOption(options, "channel-override"));
+          const effectiveChannel = channelOverrides.get(event) ?? channel;
+
           const text = readStrOption(options, "text");
           const title = readStrOption(options, "title") ?? text?.split("\n")[0];
 
@@ -1536,7 +1680,32 @@ export default defineExtension({
           // message builder. This command is for ad-hoc posts, not item lookups.
           const assignee = readStrOption(options, "assignee");
           const url = readStrOption(options, "url");
-          const item: PmItem = { id: "manual", title, type: "Note", ...(assignee ? { assignee } : {}) };
+          const item: PmItem = {
+            id: "manual",
+            title,
+            type: readStrOption(options, "type") ?? "Note",
+            ...(readStrOption(options, "status") ? { status: readStrOption(options, "status") } : {}),
+            ...(assignee ? { assignee } : {}),
+          };
+
+          // --filter: skip the notification if the item/event does not match ALL selectors.
+          const filters = parseFilter(readStrOption(options, "filter"));
+          if (!matchesFilter(filters, event, item)) {
+            const reason = `event=${event} did not match filter: ${filters.join(", ")}`;
+            if (!asJson) {
+              console.error(`[pm-slack] Notification filtered out (${reason})`);
+            }
+            return { filtered: true, event, filter: filters.join(","), reason };
+          }
+
+          // --format custom: require --template
+          const customTemplate = readStrOption(options, "template") ?? process.env.PM_SLACK_TEMPLATE;
+          if (format === "custom" && !customTemplate) {
+            throw new CommandError(
+              "--format custom requires --template <template string> with {placeholders} (e.g. --template '{emoji} {title} {event}')",
+              EXIT_CODE.USAGE
+            );
+          }
 
           // Layer env maps with the inline --mention-map flag (flag wins).
           const assigneeMap = buildMentionMap(readStrOption(options, "mention-map"));
@@ -1548,10 +1717,11 @@ export default defineExtension({
 
           const payload: SlackPayload = {
             ...buildItemPayload(item, event, format, {
-              channel,
+              channel: effectiveChannel,
               note: text && text !== title ? text : undefined,
               mention,
               link,
+              template: customTemplate,
             }),
             ...(threadTs ? { thread_ts: threadTs } : {}),
           };
@@ -1564,7 +1734,7 @@ export default defineExtension({
               process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
               console.error("--- END ---");
             }
-            return { dryRun: true, event, format, channel, thread_ts: threadTs, payload };
+            return { dryRun: true, event, format, channel: effectiveChannel, thread_ts: threadTs, payload };
           }
 
           if (!webhookUrl) {
@@ -1587,7 +1757,7 @@ export default defineExtension({
             return { posted: false, error: message };
           }
 
-          return { posted: true, event, channel, thread_ts: threadTs };
+          return { posted: true, event, channel: effectiveChannel, thread_ts: threadTs };
         },
       });
 
@@ -1605,13 +1775,19 @@ export default defineExtension({
           "pm slack test --format text --on close",
           "pm slack test --on block --json",
           "pm slack test --on cancel",
+          "pm slack test --format custom --template '{emoji} {title} ({id}) {event}' --on close",
+          "pm slack test --on close --filter 'type:Issue'",
+          "pm slack test --on close --channel-override 'close=#releases'",
           "PM_SLACK_ASSIGNEE_MAP='alice=U123' pm slack test --on start --mention-assignee",
         ],
         flags: [
-          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
+          { long: "--format", value_name: "fmt", description: "Message format: blockkit (default), text, or custom (requires --template). Overrides PM_SLACK_FORMAT." },
+          { long: "--template", value_name: "tpl", description: "Custom message template with {placeholders} (title, id, event, type, status, priority, assignee, mention, reason, channel, emoji, author). Used with --format custom." },
           { long: "--on", value_name: "event", description: "Lifecycle event to preview (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
           { long: "--title", value_name: "title", description: "Sample item title (default: a representative example)" },
           { long: "--channel", value_name: "name", description: "Channel hint to show in the preview (overrides PM_SLACK_CHANNEL)" },
+          { long: "--filter", value_name: "selectors", description: "Comma-separated selectors to filter which events trigger notifications (type:Bug, status:closed, event:create, or bare event name). ALL must match." },
+          { long: "--channel-override", value_name: "pairs", description: "Comma list of event=channel pairs to redirect specific event types to different channels" },
           { long: "--mention-assignee", description: "Resolve the sample assignee to a Slack @mention via the mention map" },
           { long: "--mention-map", value_name: "pairs", description: "Inline mention map, comma list of name=@handle|name=Uxxxx pairs (overrides PM_SLACK_ASSIGNEE_MAP / PM_SLACK_MENTION_MAP for this preview)" },
           { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (default: a sample GitHub URL)" },
@@ -1630,6 +1806,10 @@ export default defineExtension({
           const events = parseEvents(readStrOption(options, "on") ?? "create");
           const event: EventKind = (ALL_EVENTS.find((e) => events.has(e)) ?? "create") as EventKind;
 
+          // --channel-override: redirect specific event types to different channels.
+          const channelOverrides = parseChannelOverride(readStrOption(options, "channel-override"));
+          const effectiveChannel = channelOverrides.get(event) ?? channel;
+
           const t = readStrOption(options, "title");
           // A representative sample item per event so the preview is realistic.
           const sample: Record<EventKind, PmItem> = {
@@ -1644,24 +1824,45 @@ export default defineExtension({
           };
           const item = sample[event];
 
+          // --filter: show whether the notification would be filtered out.
+          const filters = parseFilter(readStrOption(options, "filter"));
+          const filtered = !matchesFilter(filters, event, item);
+
+          // --format custom: require --template
+          const customTemplate = readStrOption(options, "template") ?? process.env.PM_SLACK_TEMPLATE;
+          if (format === "custom" && !customTemplate) {
+            throw new CommandError(
+              "--format custom requires --template <template string> with {placeholders} (e.g. --template '{emoji} {title} {event}')",
+              EXIT_CODE.USAGE
+            );
+          }
+
           const assigneeMap = buildMentionMap(readStrOption(options, "mention-map"));
           const wantMention = readBoolOption(options, "mention-assignee") || assigneeMap.size > 0;
           const mention = wantMention ? resolveAssigneeMention(item, assigneeMap) : undefined;
           const link = resolveItemUrl(item, readStrOption(options, "url"));
 
-          const payload = buildItemPayload(item, event, format, { channel, mention, link });
+          const payload = buildItemPayload(item, event, format, { channel: effectiveChannel, mention, link, template: customTemplate });
 
           // In JSON mode, pm renders the returned object — don't also write to
           // stdout (that would corrupt the JSON stream). In human mode, print a
           // readable preview to stdout/stderr.
           if (!asJson) {
-            console.error(`--- PREVIEW (${format}, event=${event}) — nothing posted ---`);
+            const filterNote = filters.length > 0 ? (filtered ? " [FILTERED OUT]" : " [filter matched]") : "";
+            console.error(`--- PREVIEW (${format}, event=${event})${filterNote} — nothing posted ---`);
             process.stdout.write(payload.text + "\n");
             console.error(`--- ${format} payload ---`);
             process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
             console.error("--- END ---");
           }
-          return { preview: true, event, format, channel, payload };
+          return {
+            preview: true,
+            event,
+            format,
+            channel: effectiveChannel,
+            ...(filters.length > 0 ? { filtered } : {}),
+            payload,
+          };
         },
       });
 
@@ -1679,12 +1880,14 @@ export default defineExtension({
           "pm slack digest --days 7 --dry-run",
           "pm slack digest --since 2026-06-01 --format text --dry-run",
           "pm slack digest --days 1 --format blockkit --json --dry-run",
+          "pm slack digest --days 7 --thread 1700000000.000100 --dry-run",
         ],
         flags: [
           { long: "--since", value_name: "date", description: "Only include activity at/after this ISO date (e.g. 2026-06-01)" },
           { long: "--days", value_name: "n", description: "Look back N days from now (default 7; ignored when --since is given)" },
           { long: "--format", value_name: "fmt", description: "Message format: blockkit (default) or text. Overrides PM_SLACK_FORMAT." },
           { long: "--channel", value_name: "name", description: "Channel to post to (overrides PM_SLACK_CHANNEL)" },
+          { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
           { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK)" },
           { long: "--dry-run", description: "Build and print the digest without posting to Slack" },
           { long: "--json", description: "Emit the digest summary/payload as JSON" },
@@ -1695,7 +1898,11 @@ export default defineExtension({
           const dryRun = readBoolOption(options, "dry-run");
           const asJson = ctx.global?.json === true || readBoolOption(options, "json");
           const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
+          if (format === "custom") {
+            throw new CommandError("slack digest supports only --format blockkit or --format text", EXIT_CODE.USAGE);
+          }
           const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
+          const threadTs = readStrOption(options, "thread");
           const webhookUrl = readStrOption(options, "webhook") ?? process.env.PM_SLACK_WEBHOOK ?? "";
 
           // Preflight gate: a real (non-dry-run) post requires a valid webhook.
@@ -1716,7 +1923,7 @@ export default defineExtension({
           const { cutoffMs, label } = resolveWindow(since, days);
           const items = readStoreItems(pmRoot);
           const summary = aggregateDigest(items, cutoffMs, label);
-          const payload = buildDigestPayload(summary, format, channel);
+          const payload = { ...buildDigestPayload(summary, format, channel), ...(threadTs ? { thread_ts: threadTs } : {}) };
 
           if (dryRun) {
             if (!asJson) {
@@ -1726,7 +1933,7 @@ export default defineExtension({
               process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
               console.error("--- END ---");
             }
-            return { dryRun: true, format, channel, counts: summary.counts, total: summary.total, window: label, payload };
+            return { dryRun: true, format, channel, thread_ts: threadTs, counts: summary.counts, total: summary.total, window: label, payload };
           }
 
           // Real post requested: a webhook is mandatory. Fail cleanly (exit 1).
@@ -1744,7 +1951,7 @@ export default defineExtension({
             throw new CommandError(`Failed to post digest to Slack: ${message}`, EXIT_CODE.GENERIC_FAILURE);
           }
 
-          return { posted: true, format, channel, counts: summary.counts, total: summary.total, window: label };
+          return { posted: true, format, channel, thread_ts: threadTs, counts: summary.counts, total: summary.total, window: label };
         },
       });
     }
@@ -1756,6 +1963,7 @@ export const __test__ = {
   buildItemBlockKit,
   buildItemPayload,
   buildTextMessage,
+  buildCustomMessage,
   truncate,
   SLACK_SECTION_TEXT_MAX,
   SLACK_HEADER_TEXT_MAX,
@@ -1792,7 +2000,12 @@ export const __test__ = {
   slackRetryDelayMs,
   parseRetryAfterMs,
   isRetryableSlackError,
+  postToSlackOnce,
   SlackHttpError,
   EXIT_CODE,
   CommandError,
+  parseFilter,
+  filterMatches,
+  matchesFilter,
+  parseChannelOverride,
 };

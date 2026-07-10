@@ -58,7 +58,7 @@ interface PmItem {
     link?: string;
 }
 type EventKind = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
-type MessageFormat = "blockkit" | "text";
+type MessageFormat = "blockkit" | "text" | "custom";
 /** A single routing rule parsed from PM_SLACK_ROUTES. */
 interface RouteRule {
     /** Raw selector string, e.g. "block", "type:Bug", "status:blocked". */
@@ -86,8 +86,9 @@ declare function normalizeEvent(token: string): EventKind | null;
 declare function parseEvents(spec: string | undefined): Set<EventKind>;
 /**
  * Normalize a format spec to a known MessageFormat. Accepts a few friendly
- * aliases ("block"/"blocks" → blockkit, "plain"/"txt" → text). Falls back to
- * the supplied default when the spec is empty or unrecognized.
+ * aliases ("block"/"blocks" → blockkit, "plain"/"txt" → text, "template"/"tmpl"
+ * → custom). Falls back to the supplied default when the spec is empty or
+ * unrecognized.
  */
 declare function parseFormat(spec: string | undefined, fallback?: MessageFormat): MessageFormat;
 declare function parseRoutes(spec: string | undefined): RouteRule[];
@@ -106,6 +107,19 @@ declare function ruleMatches(rule: RouteRule, event: EventKind, item: PmItem): b
  * webhook can be resolved at all.
  */
 declare function selectRoute(event: EventKind, item: PmItem, routes: RouteRule[], defaultWebhook: string, defaultChannel?: string): RouteTarget | null;
+/** Parse a --filter spec into an array of selector strings. */
+declare function parseFilter(spec: string | undefined): string[];
+/**
+ * Check if an item/event matches a single filter selector.
+ */
+declare function filterMatches(filter: string, event: EventKind, item: PmItem): boolean;
+/**
+ * Check if an item/event matches ALL filter selectors (AND logic). An empty
+ * filter list matches everything (no filtering applied).
+ */
+declare function matchesFilter(filters: string[], event: EventKind, item: PmItem): boolean;
+/** Parse a --channel-override spec into a map of EventKind → channel. */
+declare function parseChannelOverride(spec: string | undefined): Map<EventKind, string>;
 /**
  * Resolve the effective webhook for a posting command from an explicit
  * `--webhook` flag (highest precedence) or PM_SLACK_WEBHOOK. PM_SLACK_ROUTES
@@ -180,6 +194,12 @@ declare function resolveItemUrl(item: PmItem, override?: string): {
 } | undefined;
 declare function buildTextMessage(item: PmItem, event: EventKind, channel?: string, mention?: string): string;
 /**
+ * Render a custom template by replacing {placeholder} tokens with values
+ * from the item/event context. Unknown tokens are kept verbatim so typos are
+ * visible. Returns the rendered string.
+ */
+declare function buildCustomMessage(item: PmItem, event: EventKind, template: string, opts?: BlockKitOptions): string;
+/**
  * Truncate `text` to at most `max` characters, appending an ellipsis ("…") when
  * cut so the truncation is visible rather than silently dropped or rejected. The
  * ellipsis counts toward the limit, so the result is always <= `max`. Returns
@@ -204,6 +224,8 @@ interface BlockKitOptions {
         url: string;
         isGithub: boolean;
     };
+    /** Custom template string used when format is "custom". */
+    template?: string;
 }
 declare function buildItemBlockKit(item: PmItem, event: EventKind, opts?: BlockKitOptions): {
     blocks: SlackBlock[];
@@ -223,6 +245,7 @@ declare class SlackHttpError extends Error {
 declare function parseRetryAfterMs(header: string | string[] | undefined): number | undefined;
 declare function slackRetryDelayMs(attempt: number, retryAfterMs?: number): number;
 declare function isRetryableSlackError(err: unknown): boolean;
+declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void>;
 /** Fields we read off each stored item for digest purposes. */
 interface DigestItem extends PmItem {
     created_at?: string;
@@ -290,6 +313,7 @@ export declare const __test__: {
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;
+    buildCustomMessage: typeof buildCustomMessage;
     truncate: typeof truncate;
     SLACK_SECTION_TEXT_MAX: number;
     SLACK_HEADER_TEXT_MAX: number;
@@ -327,6 +351,7 @@ export declare const __test__: {
     slackRetryDelayMs: typeof slackRetryDelayMs;
     parseRetryAfterMs: typeof parseRetryAfterMs;
     isRetryableSlackError: typeof isRetryableSlackError;
+    postToSlackOnce: typeof postToSlackOnce;
     SlackHttpError: typeof SlackHttpError;
     EXIT_CODE: {
         readonly GENERIC_FAILURE: 1;
@@ -334,5 +359,9 @@ export declare const __test__: {
         readonly NOT_FOUND: 3;
     };
     CommandError: typeof CommandError;
+    parseFilter: typeof parseFilter;
+    filterMatches: typeof filterMatches;
+    matchesFilter: typeof matchesFilter;
+    parseChannelOverride: typeof parseChannelOverride;
 };
 //# sourceMappingURL=index.d.ts.map
