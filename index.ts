@@ -1468,7 +1468,7 @@ function extractItem(ctx: AfterCommandHookContext): PmItem | null {
 
 export default defineExtension({
   name: "pm-slack",
-  version: "2026.7.7",
+  version: "2026.7.10",
 
   activate(api) {
     // -----------------------------------------------------------------------
