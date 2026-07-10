@@ -1381,7 +1381,7 @@ export default defineExtension({
                     "pm slack notify --title 'Deploy done' --on close --channel '#releases'",
                     "pm slack notify --title 'Auth epic' --on create --thread 1700000000.000100",
                     "pm slack notify --title 'Bug fix' --on close --format custom --template '{emoji} {title} ({id}) {event} in {type}' --dry-run",
-                    "pm slack notify --title 'Deploy' --on close --filter 'type:Feature' --dry-run",
+                    "pm slack notify --title 'Deploy' --type Feature --on close --filter 'type:Feature' --dry-run",
                     "pm slack notify --title 'Hotfix' --on close --channel-override 'close=#incidents,block=#urgent' --dry-run",
                     "PM_SLACK_WEBHOOK=https://hooks.slack.com/... pm slack notify --text 'hello team'",
                 ],
