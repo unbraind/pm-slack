@@ -245,6 +245,7 @@ declare class SlackHttpError extends Error {
 declare function parseRetryAfterMs(header: string | string[] | undefined): number | undefined;
 declare function slackRetryDelayMs(attempt: number, retryAfterMs?: number): number;
 declare function isRetryableSlackError(err: unknown): boolean;
+declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void>;
 /** Fields we read off each stored item for digest purposes. */
 interface DigestItem extends PmItem {
     created_at?: string;
@@ -350,6 +351,7 @@ export declare const __test__: {
     slackRetryDelayMs: typeof slackRetryDelayMs;
     parseRetryAfterMs: typeof parseRetryAfterMs;
     isRetryableSlackError: typeof isRetryableSlackError;
+    postToSlackOnce: typeof postToSlackOnce;
     SlackHttpError: typeof SlackHttpError;
     EXIT_CODE: {
         readonly GENERIC_FAILURE: 1;

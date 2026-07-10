@@ -30,6 +30,7 @@
  */
 
 import https from "node:https";
+import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -944,8 +945,9 @@ function buildItemPayload(
   format: MessageFormat,
   opts: BlockKitOptions = {}
 ): SlackPayload {
-  if (format === "custom" && opts.template) {
-    const text = buildCustomMessage(item, event, opts.template, opts);
+  const template = opts.template ?? process.env.PM_SLACK_TEMPLATE;
+  if (format === "custom" && template) {
+    const text = buildCustomMessage(item, event, template, opts);
     const body = opts.note && opts.note.trim() ? `${text}\n${opts.note.trim()}` : text;
     return {
       text: body,
@@ -1018,9 +1020,9 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
     const body = JSON.stringify(payload);
     const parsed = new URL(webhookUrl);
 
-    const options: https.RequestOptions = {
+    const options: http.RequestOptions = {
       hostname: parsed.hostname,
-      port: parsed.port ? parseInt(parsed.port, 10) : 443,
+      port: parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === "http:" ? 80 : 443,
       path: parsed.pathname + parsed.search,
       method: "POST",
       headers: {
@@ -1029,7 +1031,8 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
       },
     };
 
-    const req = https.request(options, (res) => {
+    const request = parsed.protocol === "http:" ? http.request : https.request;
+    const req = request(options, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => {
         data += chunk.toString();
@@ -1619,6 +1622,8 @@ export default defineExtension({
         flags: [
           { long: "--text", value_name: "message", description: "Free-form message body (mrkdwn). Used when no item context is given." },
           { long: "--title", value_name: "title", description: "Title shown in the Block Kit header (defaults to the --text first line)" },
+          { long: "--type", value_name: "type", description: "Item type used by templates and --filter (default: Note)" },
+          { long: "--status", value_name: "status", description: "Item status used by templates and --filter" },
           { long: "--channel", value_name: "name", description: "Channel name shown in the message (e.g. #pm-alerts). Overrides PM_SLACK_CHANNEL." },
           { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
           { long: "--on", value_name: "events", description: "Comma list of lifecycle events for the message template (create,close,block,cancel,open,start,unblock,reopen). Default: create" },
@@ -1675,7 +1680,13 @@ export default defineExtension({
           // message builder. This command is for ad-hoc posts, not item lookups.
           const assignee = readStrOption(options, "assignee");
           const url = readStrOption(options, "url");
-          const item: PmItem = { id: "manual", title, type: "Note", ...(assignee ? { assignee } : {}) };
+          const item: PmItem = {
+            id: "manual",
+            title,
+            type: readStrOption(options, "type") ?? "Note",
+            ...(readStrOption(options, "status") ? { status: readStrOption(options, "status") } : {}),
+            ...(assignee ? { assignee } : {}),
+          };
 
           // --filter: skip the notification if the item/event does not match ALL selectors.
           const filters = parseFilter(readStrOption(options, "filter"));
@@ -1688,7 +1699,7 @@ export default defineExtension({
           }
 
           // --format custom: require --template
-          const customTemplate = readStrOption(options, "template");
+          const customTemplate = readStrOption(options, "template") ?? process.env.PM_SLACK_TEMPLATE;
           if (format === "custom" && !customTemplate) {
             throw new CommandError(
               "--format custom requires --template <template string> with {placeholders} (e.g. --template '{emoji} {title} {event}')",
@@ -1818,7 +1829,7 @@ export default defineExtension({
           const filtered = !matchesFilter(filters, event, item);
 
           // --format custom: require --template
-          const customTemplate = readStrOption(options, "template");
+          const customTemplate = readStrOption(options, "template") ?? process.env.PM_SLACK_TEMPLATE;
           if (format === "custom" && !customTemplate) {
             throw new CommandError(
               "--format custom requires --template <template string> with {placeholders} (e.g. --template '{emoji} {title} {event}')",
@@ -1844,7 +1855,14 @@ export default defineExtension({
             process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
             console.error("--- END ---");
           }
-          return { preview: true, event, format, channel: effectiveChannel, filtered, payload };
+          return {
+            preview: true,
+            event,
+            format,
+            channel: effectiveChannel,
+            ...(filters.length > 0 ? { filtered } : {}),
+            payload,
+          };
         },
       });
 
@@ -1880,6 +1898,9 @@ export default defineExtension({
           const dryRun = readBoolOption(options, "dry-run");
           const asJson = ctx.global?.json === true || readBoolOption(options, "json");
           const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
+          if (format === "custom") {
+            throw new CommandError("slack digest supports only --format blockkit or --format text", EXIT_CODE.USAGE);
+          }
           const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
           const threadTs = readStrOption(options, "thread");
           const webhookUrl = readStrOption(options, "webhook") ?? process.env.PM_SLACK_WEBHOOK ?? "";
@@ -1979,6 +2000,7 @@ export const __test__ = {
   slackRetryDelayMs,
   parseRetryAfterMs,
   isRetryableSlackError,
+  postToSlackOnce,
   SlackHttpError,
   EXIT_CODE,
   CommandError,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import test from "node:test";
 
 import extension, { __test__ } from "../dist/index.js";
@@ -39,6 +40,7 @@ const {
   slackRetryDelayMs,
   parseRetryAfterMs,
   isRetryableSlackError,
+  postToSlackOnce,
   SlackHttpError,
   CommandError,
   EXIT_CODE,
@@ -47,6 +49,27 @@ const {
   matchesFilter,
   parseChannelOverride,
 } = __test__;
+
+test("postToSlackOnce: supports an HTTP localhost webhook sink", async () => {
+  let received = "";
+  const server = http.createServer((req, res) => {
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { received += chunk; });
+    req.on("end", () => {
+      res.writeHead(200);
+      res.end("ok");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    await postToSlackOnce(`http://127.0.0.1:${address.port}/webhook`, { text: "local only" });
+    assert.deepEqual(JSON.parse(received), { text: "local only" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
+  }
+});
 
 // ---------------------------------------------------------------------------
 // parseFormat
@@ -832,7 +855,7 @@ test("parseFormat: accepts 'custom' and aliases", () => {
 });
 
 test("buildCustomMessage: replaces all supported placeholders", () => {
-  const item = { id: "pm-1", title: "Auth bug", type: "Bug", priority: 1 as const, status: "closed", author: "alice", assignee: "bob", close_reason: "Fixed" };
+  const item = { id: "pm-1", title: "Auth bug", type: "Bug", priority: 1 as const, status: "resolved", author: "alice", assignee: "bob", close_reason: "Fixed" };
   const template = "{emoji} {title} ({id}) {event} in {type} — priority: {priority}, status: {status}, by: {author}, assignee: {assignee}, mention: {mention}, reason: {reason}, channel: {channel}";
   const result = buildCustomMessage(item, "close", template, { channel: "#ops", mention: "<@U123>" });
   assert.ok(result.includes("✅"), "emoji replaced");
@@ -841,7 +864,7 @@ test("buildCustomMessage: replaces all supported placeholders", () => {
   assert.ok(result.includes("closed"), "event verb replaced");
   assert.ok(result.includes("Bug"), "type replaced");
   assert.ok(result.includes("critical"), "priority label replaced");
-  assert.ok(result.includes("closed"), "status replaced");
+  assert.ok(result.includes("resolved"), "status replaced");
   assert.ok(result.includes("alice"), "author replaced");
   assert.ok(result.includes("bob"), "assignee replaced");
   assert.ok(result.includes("<@U123>"), "mention replaced");
