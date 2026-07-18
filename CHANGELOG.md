@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Hands-on functional test pass 2026-05-29 (real data) ([pm-slack-96i1](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-96i1.toon))
+- Add --mention-map flag/PM_SLACK_MENTION_MAP env + dedup webhook-unset stderr notice ([pm-slack-dmgv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-dmgv.toon))
+
+### Other
+
+- Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-slack-bfsb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-bfsb.toon))
+
 ## 2026.7.6 - 2026-07-06
 
 ### Fixed
