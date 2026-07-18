@@ -2,10 +2,17 @@ id: pm-slack-dmgv
 title: Add --mention-map flag/PM_SLACK_MENTION_MAP env + dedup webhook-unset stderr notice
 description: "Adds per-command --mention-map flag and PM_SLACK_MENTION_MAP env for inline Slack mention resolution with layered precedence (PM_SLACK_ASSIGNEE_MAP < PM_SLACK_MENTION_MAP < --mention-map). Introduces formatMention() normalizing @handle and raw Uxxxx -> <@Uxxxx> while leaving <!subteam^...> untouched; buildMentionMap() merges sources (now pure: accepts env values as params). Suppresses repeated 'webhook not set' stderr via warnWebhookUnsetOnce() module-level guard (afterCommand hook fires every command). Fully additive/opt-in; default output unchanged. 40 tests pass."
 type: Feature
-status: open
+status: closed
 priority: 2
 tags: []
 created_at: "2026-06-05T04:40:40.052Z"
-updated_at: "2026-06-05T04:50:05.571Z"
+updated_at: "2026-07-18T09:59:01.155Z"
+closed_at: "2026-07-18T09:59:01.154Z"
 author: codex
+resolution: "PR #4 commit f2932c3 added --mention-map flag, PM_SLACK_MENTION_MAP env, and warnWebhookUnsetOnce stderr dedup in index.ts"
+expected_result: mention mapping via flag/env with deduped webhook warning
+actual_result: All three features present in index.ts (verified 2026-07-18)
+comments[1]{created_at,author,text}:
+  "2026-07-18T09:59:00.529Z",pi-agent,"Verified done 2026-07-18: landed via PR #4 (commit f2932c3): --mention-map flag + PM_SLACK_MENTION_MAP env + warnWebhookUnsetOnce stderr dedup all present in index.ts."
+close_reason: PR #4 (f2932c3) landed mention-map support
 body: ""

@@ -2,12 +2,19 @@ id: pm-slack-96i1
 title: Hands-on functional test pass 2026-05-29 (real data)
 description: "Functional testing with real pm data + production hardening. Verified afterCommand hook fires on create/close/block, fails safe when webhook unset, attempts and gracefully handles unreachable webhook without breaking the underlying mutation."
 type: Feature
-status: open
+status: closed
 priority: 2
 tags: []
 created_at: "2026-05-29T15:43:24.621Z"
-updated_at: "2026-05-29T21:59:19.282Z"
+updated_at: "2026-07-18T09:59:02.541Z"
+closed_at: "2026-07-18T09:59:02.538Z"
 author: codex
+resolution: Fleet-wide hands-on functional test pass completed 2026-05-29; only child pm-slack-ssby closed
+expected_result: hands-on functional pass with real data completed
+actual_result: Bug fixed and verified in pass (verified 2026-07-18)
+comments[1]{created_at,author,text}:
+  "2026-07-18T09:59:02.017Z",pi-agent,"Verified done 2026-07-18: fleet-wide hands-on functional test pass completed 2026-05-29 (its only child pm-slack-ssby closed; bug fixed)."
 notes[1]{created_at,author,text}:
   "2026-05-29T21:59:19.282Z",codex-audit,"2026-05-29 hands-on lifecycle note: exercised built pm-slack hook without real Slack secrets. Missing PM_SLACK_WEBHOOK produced a clear disabled notification log and did not interrupt the underlying command path. Mocked create event with priority 1 posted JSON containing the expected item title and mrkdwn flag to a fake HTTPS responder; webhook path was redacted in audit output. Mocked close event with HTTP 500 logged Failed to send Slack notification and still returned without throwing. No real customer payloads or secret values were used or printed."
+close_reason: functional test pass completed 2026-05-29; child bug fixed
 body: ""
