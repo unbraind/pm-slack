@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-slack-nyfb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-nyfb.toon))
+
 ### Other
 
 - Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-slack-zi5t](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-zi5t.toon))
