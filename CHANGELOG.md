@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Block Kit section fields are never truncated and use the wrong limit constant (2000 not 3000) ([pm-slack-mkeb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-mkeb.toon))
+
 ## 2026.7.23 - 2026-07-23
 
 ### Fixed

@@ -675,7 +675,17 @@ function buildCustomMessage(item, event, template, opts = {}) {
  * reason, title/header, digest item lists) must be capped before it is sent.
  * @see https://api.slack.com/reference/block-kit/blocks
  */
-const SLACK_SECTION_TEXT_MAX = 3000; // section.text.text / fields[].text
+const SLACK_SECTION_TEXT_MAX = 3000; // section.text.text
+/**
+ * `section.fields[].text` has its OWN, smaller cap than `section.text.text`:
+ * 2,000 characters per field, not 3,000. Conflating the two silently allows a
+ * 2,001–3,000 character field through, and Slack then rejects the whole message
+ * with HTTP 400 — the exact failure the section cap exists to prevent.
+ * @see https://docs.slack.dev/reference/block-kit/blocks/section-block/
+ */
+const SLACK_SECTION_FIELD_TEXT_MAX = 2000;
+/** `section.fields` accepts at most 10 entries; an 11th rejects the message. */
+const SLACK_SECTION_FIELDS_MAX = 10;
 const SLACK_HEADER_TEXT_MAX = 150; // header.text.text (plain_text)
 /**
  * Truncate `text` to at most `max` characters, appending an ellipsis ("…") when
@@ -706,6 +716,23 @@ function truncate(text, max) {
     }
     return out + "…";
 }
+/**
+ * Build a `section.fields` array that Slack will accept.
+ *
+ * Each entry is capped AFTER formatting, because the label, the newline and the
+ * interpolated value all count toward the 2,000-character field budget — capping
+ * only the value would let `*Assignee:*\n` push the formatted result over. The
+ * array is also capped at 10 entries, Slack's hard maximum.
+ *
+ * Every caller-controlled string reaching a field (`item.id`, `item.status`,
+ * `item.author`, `item.assignee`, `opts.mention`, digest counts) passes through
+ * here, so no field can individually reject the message.
+ */
+function sectionFields(texts) {
+    return texts
+        .slice(0, SLACK_SECTION_FIELDS_MAX)
+        .map((text) => ({ type: "mrkdwn", text: truncate(text, SLACK_SECTION_FIELD_TEXT_MAX) }));
+}
 function buildItemBlockKit(item, event, opts = {}) {
     const type = itemTypeLabel(item);
     const meta = EVENT_META[event];
@@ -719,23 +746,23 @@ function buildItemBlockKit(item, event, opts = {}) {
         },
     });
     // Fields section: a 2-column grid of mrkdwn key/value pairs.
-    const fields = [
-        { type: "mrkdwn", text: `*Item:*\n${item.id}` },
-        { type: "mrkdwn", text: `*Type:*\n${type}` },
-        { type: "mrkdwn", text: `*Event:*\n${meta.verb}` },
-        { type: "mrkdwn", text: `*Priority:*\n${priorityLabel(item.priority)}` },
+    const fieldTexts = [
+        `*Item:*\n${item.id}`,
+        `*Type:*\n${type}`,
+        `*Event:*\n${meta.verb}`,
+        `*Priority:*\n${priorityLabel(item.priority)}`,
     ];
     if (item.status)
-        fields.push({ type: "mrkdwn", text: `*Status:*\n${item.status}` });
+        fieldTexts.push(`*Status:*\n${item.status}`);
     if (item.author)
-        fields.push({ type: "mrkdwn", text: `*By:*\n${item.author}` });
+        fieldTexts.push(`*By:*\n${item.author}`);
     // Assignee mention (Feature 2): show the @mention when mapped, else the raw
     // assignee name so the field is still useful without a configured map.
     if (opts.mention)
-        fields.push({ type: "mrkdwn", text: `*Assignee:*\n${opts.mention}` });
+        fieldTexts.push(`*Assignee:*\n${opts.mention}`);
     else if (item.assignee)
-        fields.push({ type: "mrkdwn", text: `*Assignee:*\n${item.assignee}` });
-    blocks.push({ type: "section", fields });
+        fieldTexts.push(`*Assignee:*\n${item.assignee}`);
+    blocks.push({ type: "section", fields: sectionFields(fieldTexts) });
     const reason = eventReason(item, event);
     if (reason) {
         blocks.push({
@@ -1103,10 +1130,10 @@ function buildDigestBlockKit(summary, channel) {
         ],
     });
     // Counts grid.
-    const fields = DIGEST_ORDER.map((bucket) => {
+    const fields = sectionFields(DIGEST_ORDER.map((bucket) => {
         const meta = DIGEST_BUCKET_META[bucket];
-        return { type: "mrkdwn", text: `${meta.emoji} *${meta.label}:*\n${summary.counts[bucket]}` };
-    });
+        return `${meta.emoji} *${meta.label}:*\n${summary.counts[bucket]}`;
+    }));
     blocks.push({ type: "section", fields });
     for (const bucket of DIGEST_ORDER) {
         const items = summary.buckets[bucket];
@@ -1681,7 +1708,10 @@ export const __test__ = {
     buildTextMessage,
     buildCustomMessage,
     truncate,
+    sectionFields,
     SLACK_SECTION_TEXT_MAX,
+    SLACK_SECTION_FIELD_TEXT_MAX,
+    SLACK_SECTION_FIELDS_MAX,
     SLACK_HEADER_TEXT_MAX,
     parseEvents,
     normalizeEvent,
