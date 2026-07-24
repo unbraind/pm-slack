@@ -44,6 +44,10 @@
 
 - Retry transient Slack webhook delivery failures ([pm-slack-bfa8](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-bfa8.toon))
 
+### Fixed
+
+- Block Kit messages aren't truncated to Slack limits → oversized content is silently rejected (HTTP 400) ([pm-slack-gx2h](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-gx2h.toon))
+
 ### Other
 
 - Harden release readiness checks ([pm-slack-8rob](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-8rob.toon))
