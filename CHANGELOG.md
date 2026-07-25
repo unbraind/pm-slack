@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Enable governance duplicate-detection advisory mode and adopt pm-cli 2026.7.25 ([pm-slack-lnly](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-lnly.toon))
+
 ## 2026.7.25 - 2026-07-25
 
 ### Fixed
