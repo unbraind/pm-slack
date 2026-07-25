@@ -213,6 +213,22 @@ declare function buildCustomMessage(item: PmItem, event: EventKind, template: st
  * the remaining budget it is dropped rather than split.
  */
 declare function truncate(text: string, max: number): string;
+/**
+ * Build a `section.fields` array that Slack will accept.
+ *
+ * Each entry is capped AFTER formatting, because the label, the newline and the
+ * interpolated value all count toward the 2,000-character field budget — capping
+ * only the value would let `*Assignee:*\n` push the formatted result over. The
+ * array is also capped at 10 entries, Slack's hard maximum.
+ *
+ * Every caller-controlled string reaching a field (`item.id`, `item.status`,
+ * `item.author`, `item.assignee`, `opts.mention`, digest counts) passes through
+ * here, so no field can individually reject the message.
+ */
+declare function sectionFields(texts: string[]): {
+    type: "mrkdwn";
+    text: string;
+}[];
 interface BlockKitOptions {
     channel?: string;
     /** Extra free-form body appended as a section (e.g. from `--text`). */
@@ -315,7 +331,10 @@ export declare const __test__: {
     buildTextMessage: typeof buildTextMessage;
     buildCustomMessage: typeof buildCustomMessage;
     truncate: typeof truncate;
+    sectionFields: typeof sectionFields;
     SLACK_SECTION_TEXT_MAX: number;
+    SLACK_SECTION_FIELD_TEXT_MAX: number;
+    SLACK_SECTION_FIELDS_MAX: number;
     SLACK_HEADER_TEXT_MAX: number;
     parseEvents: typeof parseEvents;
     normalizeEvent: typeof normalizeEvent;

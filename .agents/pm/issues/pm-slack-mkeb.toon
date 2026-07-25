@@ -1,0 +1,21 @@
+id: pm-slack-mkeb
+title: Block Kit section fields are never truncated and use the wrong limit constant (2000 not 3000)
+description: "buildItemBlockKit and buildDigestBlockKit interpolate caller-controlled values (item.id, item.status, item.author, item.assignee, opts.mention, digest counts) directly into section.fields[].text with NO truncation. Slack caps fields[].text at 2000 characters — a SEPARATE, stricter limit than the 3000 that applies to section.text.text — and rejects the entire message with HTTP 400 when any field exceeds it. On the afterCommand hook path that rejection is swallowed to stderr, so the notification silently vanishes. The SLACK_SECTION_TEXT_MAX constant also documented itself as covering 'section.text.text / fields[].text', which is what made the 2000 cap easy to miss. Sibling of pm-slack-gx2h, which fixed section.text and header but not fields[]."
+type: Issue
+status: closed
+priority: 1
+tags[3]: block-kit,correctness,slack
+created_at: "2026-07-24T22:35:53.032Z"
+updated_at: "2026-07-24T22:36:09.480Z"
+closed_at: "2026-07-24T22:36:09.480Z"
+author: claude
+acceptance_criteria: "a dedicated SLACK_SECTION_FIELD_TEXT_MAX=2000 constant exists and is applied to each fully-formatted field (label+newline+value counted together); section.fields arrays capped at Slack's 10-entry maximum; the misleading comment on SLACK_SECTION_TEXT_MAX corrected; tests cover oversized id/status/author/assignee, an oversized mention token, and the digest counts grid; tests proven to fail if the field cap is reverted to 3000"
+dependencies[1]{id,kind,created_at,author,source_kind}:
+  pm-slack-gx2h,related,"2026-07-24T22:35:53.032Z",null,null
+notes[1]{created_at,author,text}:
+  "2026-07-24T22:36:09.082Z",claude,"Found by CodeRabbit during the round-2 review of PR #34, which correctly refused to accept pm-slack-gx2h as fully resolved. Verified the claim against the source before acting: buildItemBlockKit built its fields array as raw template literals with no truncate() call anywhere, and SLACK_SECTION_TEXT_MAX carried the comment 'section.text.text / fields[].text' — conflating two different Slack limits into one constant, which is precisely what hid the gap.\n\nFix: added SLACK_SECTION_FIELD_TEXT_MAX=2000 and SLACK_SECTION_FIELDS_MAX=10, plus a sectionFields() helper that both callers now route through. Capping happens AFTER formatting, because the label, the newline and the value all count toward the 2000-character budget — capping only the interpolated value would still let '*Assignee:*\\n' push the formatted field over.\n\nCoverage added for the three paths that take caller-controlled input: oversized id/status/author/assignee, an oversized mention token (which arrives from the assignee map, not from the item), and the digest counts grid.\n\nProven non-vacuous by mutation: reverting the field cap to the old conflated 3000 fails exactly the three new tests (62 pass / 3 fail), so the tests bind to the limit rather than merely to the presence of truncation. Restored: 65/65 pass.\n\nScope note: pm-slack-gx2h stays closed. Its acceptance criteria named section text (3000) and header (150) only, and both are genuinely satisfied; fields[] was never in its scope. This is a sibling defect, tracked separately rather than reopening a correctly-completed item."
+tests[2]{command,scope,timeout_seconds}:
+  "node --test dist-test/features.test.js --test-name-pattern \"field limit\"",project,120
+  npm test,project,300
+close_reason: "Fixed: section fields now capped at Slack's 2000-char field limit (and 10-field max) via sectionFields(); mutation-proven test coverage added."
+body: ""

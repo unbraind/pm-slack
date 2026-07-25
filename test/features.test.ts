@@ -15,7 +15,10 @@ const {
   buildItemBlockKit,
   buildCustomMessage,
   truncate,
+  sectionFields,
   SLACK_SECTION_TEXT_MAX,
+  SLACK_SECTION_FIELD_TEXT_MAX,
+  SLACK_SECTION_FIELDS_MAX,
   SLACK_HEADER_TEXT_MAX,
   parseStoredItem,
   resolveWindow,
@@ -748,6 +751,86 @@ test("buildItemBlockKit: oversized note + reason + title stay within Slack limit
   // the two oversized sections must be visibly truncated
   const truncated = sectionTexts.filter((t) => t.endsWith("…"));
   assert.equal(truncated.length, 2, "reason + note both truncated with ellipsis");
+});
+
+// ---------------------------------------------------------------------------
+// section.fields[] has its OWN 2,000-char cap, distinct from section.text's
+// 3,000. These cover the gap that let oversized metadata through: fields were
+// interpolated with no truncation at all, so a long id/status/author/assignee
+// or mention could make Slack reject the entire payload with HTTP 400.
+// ---------------------------------------------------------------------------
+
+test("sectionFields: caps each field at the 2000 field limit, not the 3000 section limit", () => {
+  assert.equal(SLACK_SECTION_FIELD_TEXT_MAX, 2000);
+  assert.ok(SLACK_SECTION_FIELD_TEXT_MAX < SLACK_SECTION_TEXT_MAX, "field cap is stricter than section cap");
+
+  // 2,500 chars fits the section cap but NOT the field cap — the regression window
+  const between = "x".repeat(2500);
+  const [field] = sectionFields([between]);
+  assert.ok(field.text.length <= SLACK_SECTION_FIELD_TEXT_MAX, `field within 2000, got ${field.text.length}`);
+  assert.ok(field.text.endsWith("…"), "truncation is visible");
+
+  // short input is returned verbatim
+  assert.equal(sectionFields(["*Item:*\npm-1"])[0].text, "*Item:*\npm-1");
+});
+
+test("sectionFields: caps the array at Slack's 10-field maximum", () => {
+  assert.equal(SLACK_SECTION_FIELDS_MAX, 10);
+  const many = Array.from({ length: 25 }, (_, i) => `*F${i}:*\nv`);
+  assert.equal(sectionFields(many).length, SLACK_SECTION_FIELDS_MAX);
+});
+
+test("buildItemBlockKit: oversized id/status/author/assignee fields stay within the field limit", () => {
+  const item = {
+    id: "pm-" + "I".repeat(4000),
+    title: "ok",
+    type: "Issue",
+    priority: 1 as const,
+    status: "S".repeat(4000),
+    author: "A".repeat(4000),
+    assignee: "Z".repeat(4000),
+  };
+  const { blocks } = buildItemBlockKit(item, "create", {});
+  const fieldBlocks = (blocks as any[]).filter((b) => b.type === "section" && b.fields);
+  assert.ok(fieldBlocks.length >= 1, "expected a fields section");
+  for (const b of fieldBlocks) {
+    assert.ok(b.fields.length <= SLACK_SECTION_FIELDS_MAX, "field count within 10");
+    for (const f of b.fields) {
+      assert.ok(
+        f.text.length <= SLACK_SECTION_FIELD_TEXT_MAX,
+        `field text within 2000, got ${f.text.length}`
+      );
+    }
+  }
+  // the oversized ones must be visibly truncated, not silently dropped
+  const truncatedFields = fieldBlocks.flatMap((b: any) => b.fields).filter((f: any) => f.text.endsWith("…"));
+  assert.ok(truncatedFields.length >= 4, "id/status/author/assignee all truncated");
+});
+
+test("buildItemBlockKit: an oversized assignee mention stays within the field limit", () => {
+  const item = { id: "pm-1", title: "ok", type: "Issue", priority: 1 as const, assignee: "bob" };
+  // a caller-supplied mention token is interpolated straight into a field
+  const { blocks } = buildItemBlockKit(item, "create", { mention: "<@" + "U".repeat(4000) + ">" });
+  const fields = (blocks as any[]).filter((b) => b.type === "section" && b.fields).flatMap((b) => b.fields);
+  const assignee = fields.find((f: any) => f.text.startsWith("*Assignee:*"));
+  assert.ok(assignee, "assignee field present");
+  assert.ok(
+    assignee.text.length <= SLACK_SECTION_FIELD_TEXT_MAX,
+    `mention field within 2000, got ${assignee.text.length}`
+  );
+});
+
+test("buildDigestBlockKit: counts grid fields stay within the field limit", () => {
+  const now = new Date().toISOString();
+  const items = [{ id: "pm-a", title: "t", type: "Issue", priority: 1 as const, status: "open", updated_at: now }];
+  const summary = aggregateDigest(items as any, Date.now() - 86_400_000, "last 24 hours");
+  const { blocks } = buildDigestBlockKit(summary as any);
+  for (const b of (blocks as any[]).filter((x) => x.type === "section" && x.fields)) {
+    assert.ok(b.fields.length <= SLACK_SECTION_FIELDS_MAX, "digest field count within 10");
+    for (const f of b.fields) {
+      assert.ok(f.text.length <= SLACK_SECTION_FIELD_TEXT_MAX, "digest field within 2000");
+    }
+  }
 });
 
 test("buildDigestBlockKit: oversized bucket list stays within section limit", () => {

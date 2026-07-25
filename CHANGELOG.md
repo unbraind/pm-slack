@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Block Kit section fields are never truncated and use the wrong limit constant (2000 not 3000) ([pm-slack-mkeb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-mkeb.toon))
+
 ## 2026.7.23 - 2026-07-23
 
 ### Fixed
@@ -43,6 +49,10 @@
 ### Added
 
 - Retry transient Slack webhook delivery failures ([pm-slack-bfa8](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-bfa8.toon))
+
+### Fixed
+
+- Block Kit messages aren't truncated to Slack limits → oversized content is silently rejected (HTTP 400) ([pm-slack-gx2h](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-gx2h.toon))
 
 ### Other
 
