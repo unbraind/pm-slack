@@ -2,6 +2,12 @@
 
 ## 2026.7.26 - 2026-07-26
 
+### Removed
+
+- Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim ([pm-slack-5il8](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-5il8.toon))
+
+## 2026.7.26 - 2026-07-26
+
 ### Other
 
 - Enable governance duplicate-detection advisory mode and adopt pm-cli 2026.7.25 ([pm-slack-lnly](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-lnly.toon))
