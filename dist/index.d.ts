@@ -28,6 +28,7 @@
  *                                    "type:<itemType>" (case-insensitive), or "status:<status>".
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
+import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -322,7 +323,7 @@ declare function extractItem(ctx: AfterCommandHookContext): PmItem | null;
 declare const _default: {
     name: string;
     version: string;
-    activate(api: import("@unbrained/pm-cli/sdk").ExtensionApi): void;
+    activate(api: ExtensionApi): void;
 };
 export default _default;
 export declare const __test__: {
