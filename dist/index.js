@@ -32,7 +32,6 @@ import https from "node:https";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-const defineExtension = ((extension) => extension);
 // ---------------------------------------------------------------------------
 // EXIT_CODE / CommandError (re-implemented locally)
 //
@@ -1272,6 +1271,15 @@ function extractItem(ctx) {
 // ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
+/**
+ * Local stand-in for the SDK's `defineExtension` identity helper.
+ *
+ * Declared here rather than imported so this package keeps a type-only
+ * dependency on `@unbrained/pm-cli` and adds no runtime module edge. The
+ * generic constraint is the SDK's own, so the extension object is contract-
+ * checked against {@link ExtensionModule} exactly as the imported helper would.
+ */
+const defineExtension = (module) => module;
 export default defineExtension({
     name: "pm-slack",
     version: "2026.7.26",
