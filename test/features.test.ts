@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
 
-import extension, { __test__ } from "../dist/index.js";
+import { __test__ } from "../dist/index.js";
 
 const {
   parseFormat,
@@ -667,29 +667,6 @@ test("warnWebhookUnsetOnce: only the first call writes to stderr", () => {
   assert.match(lines[0], /notifications disabled/);
 });
 
-test("activate registers a preflight override", () => {
-  let registered = false;
-  const api = {
-    registerCommand: () => {},
-    registerPreflight: () => { registered = true; },
-    hooks: { afterCommand: () => {} },
-  };
-  extension.activate(api as any);
-  assert.equal(registered, true);
-});
-
-test("activate registers slack notify, test, and digest commands", () => {
-  const commands: string[] = [];
-  const api = {
-    registerCommand: (def: { name: string }) => { commands.push(def.name); },
-    hooks: { afterCommand: () => {} },
-  };
-  extension.activate(api as any);
-  assert.ok(commands.includes("slack notify"));
-  assert.ok(commands.includes("slack test"));
-  assert.ok(commands.includes("slack digest"));
-});
-
 // ---------------------------------------------------------------------------
 // Block Kit truncation to Slack hard limits (section text 3000, header 150)
 // ---------------------------------------------------------------------------
@@ -1010,53 +987,5 @@ test("buildDigestPayload: accepts thread_ts via spread (digest --thread)", () =>
   assert.ok(payload.text.includes("activity digest"));
 });
 
-// ---------------------------------------------------------------------------
-// Command registration: new flags appear on slack notify and slack test
-// ---------------------------------------------------------------------------
-
-test("activate registers --filter, --channel-override, --template flags on slack notify", () => {
-  let notifyFlags: { long: string }[] = [];
-  const api = {
-    registerCommand: (def: { name: string; flags?: { long: string }[] }) => {
-      if (def.name === "slack notify") notifyFlags = def.flags ?? [];
-    },
-    hooks: { afterCommand: () => {} },
-  };
-  extension.activate(api as any);
-  const longs = notifyFlags.map((f) => f.long);
-  assert.ok(longs.includes("--filter"), "slack notify has --filter");
-  assert.ok(longs.includes("--channel-override"), "slack notify has --channel-override");
-  assert.ok(longs.includes("--template"), "slack notify has --template");
-  assert.ok(longs.includes("--format"), "slack notify has --format");
-  assert.ok(longs.includes("--dry-run"), "slack notify has --dry-run");
-  assert.ok(longs.includes("--thread"), "slack notify has --thread");
-});
-
-test("activate registers --filter, --channel-override, --template flags on slack test", () => {
-  let testFlags: { long: string }[] = [];
-  const api = {
-    registerCommand: (def: { name: string; flags?: { long: string }[] }) => {
-      if (def.name === "slack test") testFlags = def.flags ?? [];
-    },
-    hooks: { afterCommand: () => {} },
-  };
-  extension.activate(api as any);
-  const longs = testFlags.map((f) => f.long);
-  assert.ok(longs.includes("--filter"), "slack test has --filter");
-  assert.ok(longs.includes("--channel-override"), "slack test has --channel-override");
-  assert.ok(longs.includes("--template"), "slack test has --template");
-});
-
-test("activate registers --thread flag on slack digest", () => {
-  let digestFlags: { long: string }[] = [];
-  const api = {
-    registerCommand: (def: { name: string; flags?: { long: string }[] }) => {
-      if (def.name === "slack digest") digestFlags = def.flags ?? [];
-    },
-    hooks: { afterCommand: () => {} },
-  };
-  extension.activate(api as any);
-  const longs = digestFlags.map((f) => f.long);
-  assert.ok(longs.includes("--thread"), "slack digest has --thread");
-  assert.ok(longs.includes("--dry-run"), "slack digest has --dry-run");
-});
+// Command registration tests moved to test/smoke.test.ts using
+// createExtensionTestHarness from @unbrained/pm-cli/sdk/testing.
