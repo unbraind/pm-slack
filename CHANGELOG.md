@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Eliminate the last source any with real SDK handler context types ([pm-slack-1nns](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-1nns.toon))
+
 ## 2026.7.27 - 2026-07-27
 
 ### Removed
