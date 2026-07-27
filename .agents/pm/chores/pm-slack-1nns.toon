@@ -1,0 +1,20 @@
+id: pm-slack-1nns
+title: Eliminate the last source any with real SDK handler context types
+description: "index.ts carried two any casts reading fields off the after-command hook context: (ctx as any).result and (ctx as any).ok. Neither was a lazy annotation; both read runtime fields, so deleting the casts was not the fix. Replaced with the real SDK types plus a narrowing guard so the reads are type-safe and the runtime checks survive."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-27T23:12:20.552Z"
+updated_at: "2026-07-27T23:12:39.900Z"
+closed_at: "2026-07-27T23:12:39.899Z"
+author: claude-code
+acceptance_criteria: "Zero any annotations in index.ts; the runtime guards are preserved rather than deleted; build, tsc --noEmit and the full test suite green; the extension still registers on the real CLI with all three subcommands and host commands intact."
+resolution: "ctx.ok is read directly against its declared boolean; ctx.result (declared unknown) is narrowed via isCommandLifecycleResult and a narrow CommandLifecycleResult interface describing only the fields actually read. The SDK context is looser at runtime than its declared type, so the guards are kept deliberately and documented, not simplified away."
+expected_result: "Zero any in index.ts, all three slack subcommands still registering on the real CLI, and host commands unaffected."
+actual_result: "Before the change, two as-any casts read fields off the hook context with no type safety; a later reader trusting the declared type could have removed the guards and reintroduced the crash they prevent."
+notes[2]{created_at,author,text}:
+  "2026-07-27T23:12:39.255Z",claude-code,"SDK type inspection: AfterCommandHookContext is declared in the pm-cli SDK (core/extensions/extension-types.d.ts, re-exported via @unbrained/pm-cli/sdk -> authoring). It extends BeforeCommandHookContext and declares ok: boolean (required) and result?: unknown. Because the SDK DOES declare both fields, the real type is preferred over a local interface: ctx.ok is read directly with no cast, and ctx.result (typed unknown) is narrowed by a type guard isCommandLifecycleResult plus a narrow CommandLifecycleResult interface before reading item.status / previousStatus / previous_status. No any, no blind as cast. Replacements: (ctx as any).result as {...} became isCommandLifecycleResult(ctx.result) ? ctx.result : undefined with typeof narrowing; (ctx as any).ok === false became ctx.ok === false against the real declared boolean, keeping the defensive null guard."
+  "2026-07-27T23:12:39.578Z",claude-code,"Activation proof (pm-cli 2026.7.27, fresh throwaway workspace, repo paths deliberately generic since published pm items must not carry machine-specific filesystem paths): pm install <repo-root> -> verification.status ok, activated true, registered_commands slack digest / slack notify / slack test, health.status ok, failed_count 0. pm slack --help lists Commands: digest, notify, test, i.e. real subcommands rather than the misleading Commander arity error that upstream pm-cli#772 produces for a DROPPED command. pm list --json stays valid (host commands intact). pm health reports ok. The [pm-slack] PM_SLACK_WEBHOOK not set notice is written to stderr, so it does not corrupt --json output on stdout. Gates: npm run build clean, npm test 66 pass 0 fail, npx tsc --noEmit exit 0, changelog:check up to date, and the any-annotation grep over index.ts prints nothing."
+close_reason: "Shipped: both any casts replaced with the real SDK AfterCommandHookContext types plus a narrowing type guard, with the runtime guards preserved."
+body: ""

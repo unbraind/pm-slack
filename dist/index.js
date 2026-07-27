@@ -1215,6 +1215,16 @@ function statusToEvent(status) {
     }
 }
 /**
+ * Type guard: confirm `ctx.result` is a structured object before reading its
+ * lifecycle fields. The SDK types `result` as `unknown`; this guard keeps the
+ * runtime read type-safe (no `any` cast) while preserving the runtime check that
+ * a later reader must not "simplify" away — the SDK context is looser at
+ * runtime than its declared `unknown` suggests, so the guard survives.
+ */
+function isCommandLifecycleResult(value) {
+    return typeof value === "object" && value !== null;
+}
+/**
  * Detect the lifecycle event for a completed command. Strategy:
  *   1. Create/close commands map directly.
  *   2. Status-changing commands (update/set/lifecycle aliases) derive the event
@@ -1230,9 +1240,13 @@ function detectEvent(ctx) {
         return "create";
     if (CLOSE_COMMANDS.has(cmd))
         return "close";
-    const result = ctx.result;
-    const resultStatus = result?.item?.status;
-    const prevStatus = (result?.previousStatus ?? result?.previous_status ?? "").toLowerCase();
+    // `ctx.result` is declared `unknown` by the SDK; narrow with a type guard
+    // before reading lifecycle fields (see `isCommandLifecycleResult`).
+    const result = isCommandLifecycleResult(ctx.result) ? ctx.result : undefined;
+    const resultStatusRaw = result?.item?.status;
+    const resultStatus = typeof resultStatusRaw === "string" ? resultStatusRaw : undefined;
+    const prevStatusRaw = result?.previousStatus ?? result?.previous_status ?? "";
+    const prevStatus = (typeof prevStatusRaw === "string" ? prevStatusRaw : "").toLowerCase();
     // Lifecycle aliases imply a target status even without --status.
     let event = null;
     if (START_COMMANDS.has(cmd))
@@ -1294,6 +1308,12 @@ export default defineExtension({
             api.hooks.afterCommand(async (ctx) => {
                 try {
                     // Only react to successful commands.
+                    //
+                    // The SDK declares `AfterCommandHookContext.ok` as a required boolean,
+                    // so reading `ctx.ok` is type-safe here (no `any` cast). The defensive
+                    // `ctx &&` null guard is kept because the host is looser at runtime
+                    // than the declared type and may invoke the hook with a falsy/empty
+                    // context during early bootstrap; do not simplify it away.
                     if (ctx && ctx.ok === false)
                         return;
                     const config = loadConfig();
