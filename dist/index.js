@@ -1438,7 +1438,8 @@ export default defineExtension({
                     { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (e.g. a GitHub item)" },
                     { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK env var)" },
                     { long: "--dry-run", description: "Print the message and payload without posting to Slack" },
-                    { long: "--json", description: "Emit the result/payload as JSON (machine-readable)" },
+                    // `--json` is a host-owned global flag: do not redeclare it (the host
+                    // rejects the registration); read it from ctx.global instead.
                 ],
                 async run(ctx) {
                     const options = ctx.options ?? {};
@@ -1446,7 +1447,8 @@ export default defineExtension({
                     const webhookUrl = readStrOption(options, "webhook") ?? process.env.PM_SLACK_WEBHOOK ?? "";
                     const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
                     const threadTs = readStrOption(options, "thread");
-                    const asJson = ctx.global?.json === true || readBoolOption(options, "json");
+                    // `--json` is a host-owned global flag; read it from ctx.global.
+                    const asJson = ctx.global?.json === true;
                     const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
                     // Preflight gate: a real (non-dry-run) post requires a valid webhook.
                     // Fail fast with a clear error BEFORE building/attempting any post.
@@ -1566,14 +1568,14 @@ export default defineExtension({
                     { long: "--mention-assignee", description: "Resolve the sample assignee to a Slack @mention via the mention map" },
                     { long: "--mention-map", value_name: "pairs", description: "Inline mention map, comma list of name=@handle|name=Uxxxx pairs (overrides PM_SLACK_ASSIGNEE_MAP / PM_SLACK_MENTION_MAP for this preview)" },
                     { long: "--url", value_name: "url", description: "Add a Block Kit action button linking to this URL (default: a sample GitHub URL)" },
-                    { long: "--json", description: "Emit the preview payload as JSON" },
+                    // `--json` is a host-owned global flag: do not redeclare it (the host
+                    // rejects the registration); read it from ctx.global instead.
                     { long: "--dry-run", description: "Accepted for symmetry; this command never posts." },
                 ],
                 async run(ctx) {
                     const options = ctx.options ?? {};
-                    // `--json` is consumed by pm as a global flag, so prefer global.json;
-                    // also honor a local --json for robustness across runtimes.
-                    const asJson = ctx.global?.json === true || readBoolOption(options, "json");
+                    // `--json` is a host-owned global flag; read it from ctx.global.
+                    const asJson = ctx.global?.json === true;
                     const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
                     const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
                     const events = parseEvents(readStrOption(options, "on") ?? "create");
@@ -1652,12 +1654,14 @@ export default defineExtension({
                     { long: "--thread", value_name: "ts", description: "Slack thread timestamp (thread_ts) to reply into a thread" },
                     { long: "--webhook", value_name: "url", description: "Slack incoming webhook URL (overrides PM_SLACK_WEBHOOK)" },
                     { long: "--dry-run", description: "Build and print the digest without posting to Slack" },
-                    { long: "--json", description: "Emit the digest summary/payload as JSON" },
+                    // `--json` is a host-owned global flag: do not redeclare it (the host
+                    // rejects the registration); read it from ctx.global instead.
                 ],
                 async run(ctx) {
                     const options = ctx.options ?? {};
                     const dryRun = readBoolOption(options, "dry-run");
-                    const asJson = ctx.global?.json === true || readBoolOption(options, "json");
+                    // `--json` is a host-owned global flag; read it from ctx.global.
+                    const asJson = ctx.global?.json === true;
                     const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
                     if (format === "custom") {
                         throw new CommandError("slack digest supports only --format blockkit or --format text", EXIT_CODE.USAGE);
