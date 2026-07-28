@@ -1,0 +1,13 @@
+id: pm-slack-rhci
+title: Adopt pm-cli 2026.7.28
+description: Bump pm-cli dev and peer dependency ranges from 2026.7.27 to 2026.7.28 and update the extension version constant
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-28T03:36:12.333Z"
+updated_at: "2026-07-28T03:37:48.584Z"
+closed_at: "2026-07-28T03:37:48.583Z"
+author: pi-agent
+close_reason: Bumped pm-cli dependency to 2026.7.28 across package.json manifest.json and extension version constant. Release checks pass with 66 tests green.
+body: ""
