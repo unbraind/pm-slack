@@ -2,13 +2,16 @@ id: pm-slack-v7nq
 title: Production-readiness audit 2026-05-28
 description: ""
 type: Task
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-05-28T05:13:16.079Z"
-updated_at: "2026-05-29T22:33:19.466Z"
+updated_at: "2026-07-28T11:22:28.050Z"
+closed_at: "2026-07-28T11:14:22.751Z"
 author: codex
+release: 2026.7.7
 notes[2]{created_at,author,text}:
   "2026-05-29T21:59:18.352Z",codex-audit,"2026-05-29 functional readiness audit: existing in_progress readiness item selected, no new task created. Commands: npm run check PASS; npm test PASS, 2 tests passed; npm run pack:dry-run PASS, tarball dry run listed 9 files and package size 8.8 kB; npm run changelog:check PASS. Hands-on: loaded built dist/index.js with fake pm SDK hooks; missing PM_SLACK_WEBHOOK logged notifications disabled and returned without throwing; mocked create lifecycle event posted a sanitized Slack payload to fake HTTPS responder; mocked HTTP 500 webhook response logged failure and did not fail the lifecycle hook. Secret scan: current tracked high-signal token git grep no hits; current email-like git grep no hits; git history high-signal token scan no hits. Blockers: none from this pass."
   "2026-05-29T22:33:19.466Z",codex,"2026-05-29 release-readiness refresh: package manifest/lock now target @unbrained/pm-cli >=2026.5.29 / ^2026.5.29 and pm-changelog ^2026.5.29-2 where applicable. Verified npm run check, npm test, npm run pack:dry-run, npm run audit:prod, npm run changelog:full, npm run changelog:check, npm run release:check, and pm validate. High-confidence worktree/history secret scan recorded no credential-shaped token findings for active package code; nonzero scan rows were classified as placeholders or vendored historical test data where applicable. Logs: /tmp/pm-active-package-gates-20260529.tsv, /tmp/pm-active-changelog-20260529.tsv, /tmp/pm-active-release-check-20260529.tsv, /tmp/pm-active-validate-20260529.tsv, /tmp/pm-active-secret-scan-20260529.tsv."
+close_reason: "Superseded and closed 2026-07-28: this audit/hardening wave completed and the package has shipped multiple releases since, now at 2026.7.28 on pm-cli 2026.7.28. Closing so the tracker stops advertising completed work as in flight."
 body: ""
