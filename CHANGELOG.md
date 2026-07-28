@@ -1,17 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Fixed
-
-- slack notify, slack test, and slack digest fail to register on pm-cli 2026.7.27 because they redeclare the host-owned --json global ([pm-slack-e78x](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-e78x.toon))
-
-### Other
-
-- Production-readiness audit 2026-05-28 ([pm-slack-v7nq](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-v7nq.toon))
-- Full-cycle hardening wave: pm-slack ([pm-slack-r3pz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-r3pz.toon))
-- Adopt --respect-item-release in changelog scripts and close the shipped-but-stale Block Kit truncation tracker ([pm-slack-v524](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-v524.toon))
-
 ## 2026.7.28 - 2026-07-28
 
 ### Other
@@ -20,6 +8,10 @@
 - Eliminate the last source any with real SDK handler context types ([pm-slack-1nns](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-1nns.toon))
 
 ## 2026.7.27 - 2026-07-27
+
+### Fixed
+
+- slack notify, slack test, and slack digest fail to register on pm-cli 2026.7.27 because they redeclare the host-owned --json global ([pm-slack-e78x](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-e78x.toon))
 
 ### Removed
 
@@ -36,6 +28,10 @@
 ### Fixed
 
 - Block Kit section fields are never truncated and use the wrong limit constant (2000 not 3000) ([pm-slack-mkeb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-mkeb.toon))
+
+### Other
+
+- Adopt --respect-item-release in changelog scripts and close the shipped-but-stale Block Kit truncation tracker ([pm-slack-v524](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-v524.toon))
 
 ## 2026.7.23 - 2026-07-23
 
@@ -57,6 +53,18 @@
 ### Other
 
 - Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-slack-bfsb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-bfsb.toon))
+
+## 2026.7.10 - 2026-07-10
+
+### Other
+
+- Full-cycle hardening wave: pm-slack ([pm-slack-r3pz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-r3pz.toon))
+
+## 2026.7.7 - 2026-07-07
+
+### Other
+
+- Production-readiness audit 2026-05-28 ([pm-slack-v7nq](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-v7nq.toon))
 
 ## 2026.7.6 - 2026-07-06
 

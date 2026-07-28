@@ -6,9 +6,10 @@ status: closed
 priority: 1
 tags[4]: deps-2026-6-7,full-cycle-hardening,hardening-pass,wave-full-cycle-2026-06-07
 created_at: "2026-06-07T07:41:48.582Z"
-updated_at: "2026-07-28T11:14:11.259Z"
+updated_at: "2026-07-28T11:22:27.646Z"
 closed_at: "2026-07-28T11:14:11.258Z"
 author: codex-5.3-full-cycle
+release: 2026.7.10
 comments[1]{created_at,author,text}:
   "2026-07-10T11:10:41.183Z",codex,"PR #18 independent verification: npm ci/build passed; final suite 60/60 pass. Functional dry-runs covered --filter, --channel-override, --format custom/--template, notify/digest --thread, malformed inputs (exit 2, no stacks), real digest aggregation (created=2 closed=1 in_progress=1), and localhost-only HTTP sink payload capture (no Slack webhook). Found/fixed HTTP sink transport mismatch, default JSON regression, ad-hoc filter context, digest custom-format misreporting, and env custom-template hook fallback. Default slack test/notify output now byte-identical to origin/main."
 notes[2]{created_at,author,text}:
