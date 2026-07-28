@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Enforce a real coverage gate by running tests against TypeScript sources ([pm-slack-e5gh](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-e5gh.toon))
+
 ## 2026.7.28 - 2026-07-28
 
 ### Other
