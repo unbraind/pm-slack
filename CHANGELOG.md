@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- slack notify, slack test, and slack digest fail to register on pm-cli 2026.7.27 because they redeclare the host-owned --json global ([pm-slack-e78x](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-e78x.toon))
+
+### Other
+
+- Production-readiness audit 2026-05-28 ([pm-slack-v7nq](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-v7nq.toon))
+- Full-cycle hardening wave: pm-slack ([pm-slack-r3pz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-r3pz.toon))
+- Adopt --respect-item-release in changelog scripts and close the shipped-but-stale Block Kit truncation tracker ([pm-slack-v524](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-v524.toon))
+
 ## 2026.7.28 - 2026-07-28
 
 ### Other
