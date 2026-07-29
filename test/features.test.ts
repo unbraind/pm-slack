@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
 
-import { __test__ } from "../dist/index.js";
+import { __test__ } from "../index.ts";
 
 const {
   parseFormat,
