@@ -1,0 +1,16 @@
+id: pm-slack-j7ia
+title: Adopt pm-cli 2026.7.29
+description: "Bump @unbrained/pm-cli devDependency to 2026.7.29, set peerDependency to >=2026.7.29, audit for removed --all flag and fixed upstream workarounds (GH-651/672/676/785/792/794), pass all quality gates."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-29T04:29:34.802Z"
+updated_at: "2026-07-29T04:30:42.800Z"
+closed_at: "2026-07-29T04:30:42.774Z"
+completed_at: "2026-07-29T04:30:42.774Z"
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-07-29T04:30:04.776Z",pi-agent,"Bumped @unbrained/pm-cli devDep to 2026.7.29, peerDep to >=2026.7.29. --all audit: no hits. Workaround audit: no applicable workarounds (GH-651/672/676/785/792/794 none present). README 'unblock' line is event documentation, not a low_level context workaround."
+close_reason: "Bumped @unbrained/pm-cli devDep to 2026.7.29 and peerDep to >=2026.7.29. --all audit: no hits. No upstream workarounds applicable. All gates green: 66 tests pass, coverage 77.59% lines / 85.37% branches / 79.52% functions (thresholds met), changelog:check passes, audit:prod 0 vulnerabilities."
+body: ""
