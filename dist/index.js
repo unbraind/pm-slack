@@ -1296,7 +1296,7 @@ function extractItem(ctx) {
 const defineExtension = (module) => module;
 export default defineExtension({
     name: "pm-slack",
-    version: "2026.7.28",
+    version: "2026.7.29",
     activate(api) {
         // -----------------------------------------------------------------------
         // afterCommand hook — fires after every pm-cli command completes.
