@@ -6,6 +6,10 @@
 
 - Enforce a real coverage gate by running tests against TypeScript sources ([pm-slack-e5gh](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-e5gh.toon))
 
+### Other
+
+- Adopt pm-cli 2026.7.29 ([pm-slack-j7ia](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-j7ia.toon))
+
 ## 2026.7.28 - 2026-07-28
 
 ### Other
