@@ -40,24 +40,23 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Verify committed build output is current
+      - name: Build and verify committed output is current
         shell: bash
         run: |
           set -euo pipefail
-          if ! git ls-files --error-unmatch dist > /dev/null 2>&1; then
-            echo "dist/ is not tracked here; nothing to verify."
-            exit 0
+          if ! git ls-files --error-unmatch 'dist/' > /dev/null 2>&1; then
+            echo "::error::dist/ is not tracked. This package is installed by copying the repository, so the build output has to be in git."
+            exit 1
           fi
+          rm -rf dist
           npm run build
-          if ! git diff --quiet -- dist; then
-            echo "::error::Committed dist/ is stale. Run 'npm run build' and commit the result."
-            git --no-pager diff --stat -- dist
+          drift=$(git status --porcelain=v1 --untracked-files=all --ignored=matching -- 'dist/')
+          if [ -n "$drift" ]; then
+            echo "::error::Committed dist/ does not match a fresh build. Run 'npm run build' and commit the result."
+            printf '%s\n' "$drift"
             exit 1
           fi
           echo "Committed dist/ matches a fresh build."
-
-      - name: Build
-        run: npm run build
 
       - name: Test with coverage gate
         run: npm run coverage
