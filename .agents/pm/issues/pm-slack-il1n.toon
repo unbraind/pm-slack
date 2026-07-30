@@ -1,0 +1,18 @@
+id: pm-slack-il1n
+title: "Release commits discard the rebuilt dist, so the git-install path serves the previous version"
+description: "This package tracks dist in git on purpose: a git-URL install copies the repo as-is and never runs a build, so the entry file has to already be there. The release job rebuilds it and then throws it away - the commit step stages the manifest, lockfile, sources and changelog, and never dist. The committed output has therefore been stamped one release behind since that path was written, and the static analysers that read generated output review stale code. Stage the rebuilt tree at release time, and add a CI step that rebuilds and fails on any difference so drift cannot return between releases."
+type: Issue
+status: closed
+priority: 1
+tags[2]: "area:release",ci
+created_at: "2026-07-30T21:59:31.627Z"
+updated_at: "2026-07-30T21:59:32.438Z"
+closed_at: "2026-07-30T21:59:32.426Z"
+completed_at: "2026-07-30T21:59:32.426Z"
+author: codex
+acceptance_criteria: The release commit stages dist whenever it is tracked; a CI step rebuilds and fails when the committed tree differs; the committed output carries the current version
+files[2]{path,scope}:
+  .github/workflows/ci.yml,project
+  .github/workflows/release.yml,project
+close_reason: Release commit now stages the tracked dist tree and CI rebuilds and fails on any difference
+body: ""

@@ -40,6 +40,22 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Verify committed build output is current
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git ls-files --error-unmatch dist > /dev/null 2>&1; then
+            echo "dist/ is not tracked here; nothing to verify."
+            exit 0
+          fi
+          npm run build
+          if ! git diff --quiet -- dist; then
+            echo "::error::Committed dist/ is stale. Run 'npm run build' and commit the result."
+            git --no-pager diff --stat -- dist
+            exit 1
+          fi
+          echo "Committed dist/ matches a fresh build."
+
       - name: Build
         run: npm run build
 
