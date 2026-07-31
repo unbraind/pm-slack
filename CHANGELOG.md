@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Release commits discard the rebuilt dist, so the git-install path serves the previous version ([pm-slack-il1n](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-il1n.toon))
+
 ## 2026.7.29 - 2026-07-29
 
 ### Added
