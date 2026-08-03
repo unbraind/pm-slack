@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Resolve pm-changelog to the release that derives release dates in UTC ([pm-slack-vrdp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-vrdp.toon))
+
 ## 2026.7.31 - 2026-07-31
 
 ### Fixed
