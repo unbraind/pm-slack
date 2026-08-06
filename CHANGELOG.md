@@ -4,7 +4,7 @@
 
 ### Other
 
-- Gate CI on pm health so a silently discarded peer edit cannot merge ([pm-slack-k8yl](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-k8yl.toon))
+- Gate CI on strict tracked pm project health ([pm-slack-k8yl](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-k8yl.toon))
 
 ## 2026.8.4 - 2026-08-04
 
