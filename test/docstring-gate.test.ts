@@ -71,6 +71,9 @@ test("docstring gate main writes violations to stderr and sets the exit code", (
     assert.equal(observedExitCode, 1);
     assert.equal(stdout, "");
     assert.match(stderr, /undocumented: no docstring/);
+    // The failure stream is newline-terminated so the next release:check step
+    // starts on its own line rather than butting against this gate's output.
+    assert.match(stderr, /\n$/, "stderr must be newline-terminated");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -99,11 +102,17 @@ test("docstring gate main writes a success line to stdout and exits 0", () => {
   const root = resolve(import.meta.dirname, "..");
   const originalExitCode = process.exitCode;
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
   let stdout = "";
+  let stderr = "";
   process.stdout.write = ((chunk: string | Uint8Array): boolean => {
     stdout += chunk.toString();
     return true;
   }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += chunk.toString();
+    return true;
+  }) as typeof process.stderr.write;
   process.exitCode = undefined;
   let observedExitCode: number | string | undefined;
   try {
@@ -111,8 +120,13 @@ test("docstring gate main writes a success line to stdout and exits 0", () => {
   } finally {
     observedExitCode = process.exitCode;
     process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
     process.exitCode = originalExitCode;
   }
   assert.equal(observedExitCode, 0);
   assert.match(stdout, /docstring-gate:.*documented\.\n$/);
+  // The success path must leave stderr untouched: a release:check that prints
+  // to stderr while exiting 0 trains readers to ignore the stream that carries
+  // the gate's only failure output.
+  assert.equal(stderr, "", "a passing gate must write nothing to stderr");
 });
