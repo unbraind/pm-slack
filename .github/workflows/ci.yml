@@ -76,6 +76,9 @@ jobs:
           fi
           echo "Committed dist/ matches a fresh build."
 
+      - name: Verify complete docstring coverage
+        run: npm run docstring
+
       - name: Test with coverage gate
         run: npm run coverage
 

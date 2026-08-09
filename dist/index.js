@@ -65,6 +65,19 @@ class CommandError extends Error {
 function camelCase(key) {
     return key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 }
+/**
+ * Read a boolean option under both the kebab-case and camelCase spellings.
+ *
+ * pm normalizes CLI flags to camelCase at runtime, so reading only one key
+ * silently misses the value; this tries `key` then its {@link camelCase} form
+ * and accepts either a real boolean or a truthy/falsy string (`true`/`1`/`yes`/
+ * `on` vs `false`/`0`/`no`/`off`). A missing or unrecognized option resolves to
+ * `false` so an unset flag never blocks behavior.
+ *
+ * @param options - The raw flag record handed to the command.
+ * @param key - The flag name, in its kebab-case form (e.g. `dry-run`).
+ * @returns The resolved boolean, or `false` when the option is unset.
+ */
 function readBoolOption(options, key) {
     for (const candidate of [key, camelCase(key)]) {
         const value = options[candidate];
@@ -80,6 +93,17 @@ function readBoolOption(options, key) {
     }
     return false;
 }
+/**
+ * Read a trimmed, non-empty string option under both flag spellings.
+ *
+ * Like {@link readBoolOption}, this tries the kebab-case and camelCase keys so a
+ * value set under either form is found. A blank or whitespace-only value is
+ * treated as absent and skipped, so callers can rely on a non-empty return.
+ *
+ * @param options - The raw flag record handed to the command.
+ * @param key - The flag name, in its kebab-case form.
+ * @returns The trimmed value, or `undefined` when the option is unset or blank.
+ */
 function readStrOption(options, key) {
     for (const candidate of [key, camelCase(key)]) {
         const value = options[candidate];
@@ -130,6 +154,17 @@ function normalizeEvent(token) {
         return t;
     return EVENT_ALIASES[t] ?? null;
 }
+/**
+ * Parse a comma-separated event spec into the set of events to notify on.
+ *
+ * Each token is normalized via {@link normalizeEvent}, which accepts canonical
+ * names and friendly aliases (e.g. `canceled` → cancel, `in_progress` → start).
+ * A blank spec, or one whose tokens all fail to normalize, falls back to
+ * {@link ALL_EVENTS} so an empty `--on` never disables notifications silently.
+ *
+ * @param spec - The raw `PM_SLACK_EVENTS` / `--on` value, possibly undefined.
+ * @returns The resolved set of event kinds to subscribe to.
+ */
 function parseEvents(spec) {
     if (!spec)
         return new Set(ALL_EVENTS);
@@ -168,6 +203,19 @@ function parseFormat(spec, fallback = "blockkit") {
 // item types, or statuses to a different webhook/channel. Routing is purely
 // additive: with no rules configured, behavior is identical to before.
 // ---------------------------------------------------------------------------
+/**
+ * Parse the `PM_SLACK_ROUTES` JSON spec into validated routing rules.
+ *
+ * Returns an empty list (with a stderr notice) when the spec is missing, blank,
+ * not valid JSON, or not an array, so a malformed config disables routing
+ * rather than crashing. Each surviving object entry needs at least a `match`
+ * selector and one override (`webhook` or `channel`); entries missing both are
+ * dropped as meaningless. Routing is additive — an empty list means "behave as
+ * before".
+ *
+ * @param spec - The raw `PM_SLACK_ROUTES` value, possibly undefined.
+ * @returns The validated route rules (possibly empty).
+ */
 function parseRoutes(spec) {
     if (!spec || !spec.trim())
         return [];
@@ -394,6 +442,19 @@ function warnWebhookUnsetOnce() {
     warnedWebhookUnset = true;
     console.error("[pm-slack] PM_SLACK_WEBHOOK not set — notifications disabled");
 }
+/**
+ * Assemble the effective {@link SlackConfig} from the pm-slack environment.
+ *
+ * Reads the webhook, routes, channel, priority floor, event set, format, and
+ * assignee-mention map from their env vars. Returns `null` — after emitting the
+ * once-per-process disabled notice via {@link warnWebhookUnsetOnce} — when there
+ * is no webhook source at all, or when `PM_SLACK_WEBHOOK` is present but not a
+ * valid URL; a routes-only setup with no default webhook is accepted. Mentions
+ * auto-enable whenever a non-empty mention map is present unless explicitly
+ * turned off.
+ *
+ * @returns The resolved config, or `null` when notifications are disabled.
+ */
 function loadConfig() {
     const webhookUrl = process.env.PM_SLACK_WEBHOOK ?? "";
     const routes = parseRoutes(process.env.PM_SLACK_ROUTES);
@@ -534,6 +595,17 @@ function buildMentionMap(flagSpec, env = {
 // off the item; the first valid http(s) URL wins. Used to render an "Open item"
 // / "View on GitHub" action button in the Block Kit notification (Feature 3).
 // ---------------------------------------------------------------------------
+/**
+ * Type guard: whether a value is a non-empty `http` or `https` URL string.
+ *
+ * Used to validate caller-supplied item links before they reach a Block Kit
+ * action button. Parsing through `URL` (rather than a prefix check) rejects
+ * malformed strings and non-web schemes; the narrowing return lets the caller
+ * treat the value as a string without a further cast.
+ *
+ * @param value - The candidate field value from an item or flag.
+ * @returns True when `value` parses to an http(s) URL (narrowed to `string`).
+ */
 function isHttpUrl(value) {
     if (typeof value !== "string")
         return false;
@@ -585,6 +657,19 @@ const EVENT_META = {
     unblock: { verb: "unblocked", emoji: "🔓" },
     reopen: { verb: "reopened", emoji: "♻️" },
 };
+/**
+ * Extract the human-readable reason for a terminal or blocking transition.
+ *
+ * `close` reads `close_reason`/`closedReason`; `cancel` honors a dedicated
+ * `cancel_reason` first but falls back to `close_reason` (pm persists the cancel
+ * reason there today); `block` reads `blocked_reason`/`blockedReason`. Other
+ * events carry no reason and return `undefined`. Whitespace is trimmed and an
+ * empty reason collapses to `undefined`.
+ *
+ * @param item - The item the event applies to.
+ * @param event - The lifecycle event kind.
+ * @returns The trimmed reason, or `undefined` when none applies.
+ */
 function eventReason(item, event) {
     if (event === "close") {
         return item.close_reason?.trim() || item.closedReason?.trim() || undefined;
@@ -603,6 +688,22 @@ function eventReason(item, event) {
     }
     return undefined;
 }
+/**
+ * Build the plain-text (mrkdwn) Slack message for a single item event.
+ *
+ * Composes a one-line header from the item type, title, and the event's verb
+ * and emoji, then appends a detail line that depends on the event: priority and
+ * author for creations, the {@link eventReason} for terminal/blocked events, or
+ * status and assignee for plain transitions. An optional assignee mention and
+ * channel tag are appended when supplied. This is both the standalone `text`
+ * format and the Block Kit fallback produced by {@link buildItemBlockKit}.
+ *
+ * @param item - The item the event applies to.
+ * @param event - The lifecycle event kind.
+ * @param channel - Optional resolved channel, echoed as an italic footer line.
+ * @param mention - Optional pre-resolved assignee mention token.
+ * @returns The composed mrkdwn message string.
+ */
 function buildTextMessage(item, event, channel, mention) {
     const type = itemTypeLabel(item);
     const meta = EVENT_META[event];
@@ -732,6 +833,21 @@ function sectionFields(texts) {
         .slice(0, SLACK_SECTION_FIELDS_MAX)
         .map((text) => ({ type: "mrkdwn", text: truncate(text, SLACK_SECTION_FIELD_TEXT_MAX) }));
 }
+/**
+ * Build the Slack Block Kit blocks (plus a plain-text fallback) for an item event.
+ *
+ * Lays out a header, a two-column field grid (item id, type, event, priority,
+ * status, author, assignee/mention), an optional reason or note section, an
+ * optional "Open item"/"View on GitHub" action button when a link resolves, and
+ * a context footer. Every caller-controlled string is capped through
+ * {@link truncate} so no block can exceed Slack's limits and reject the message.
+ * The fallback mirrors {@link buildTextMessage}.
+ *
+ * @param item - The item the event applies to.
+ * @param event - The lifecycle event kind.
+ * @param opts - Optional channel, note, mention, link, and template overrides.
+ * @returns The `blocks` array and the plain-text fallback string.
+ */
 function buildItemBlockKit(item, event, opts = {}) {
     const type = itemTypeLabel(item);
     const meta = EVENT_META[event];
@@ -851,6 +967,18 @@ class SlackHttpError extends Error {
         this.retryAfterMs = retryAfterMs;
     }
 }
+/**
+ * Parse a Slack `Retry-After` header value into a millisecond delay.
+ *
+ * The header is either a non-negative integer of seconds or an HTTP-date; this
+ * returns seconds × 1000 for the numeric form, or the future offset for the
+ * date form (clamped at zero so a past date yields "retry now"). An empty,
+ * malformed, or negative value yields `undefined`, leaving the caller to fall
+ * back to exponential backoff.
+ *
+ * @param header - The raw `retry-after` header, which Node may give as an array.
+ * @returns The delay in milliseconds, or `undefined` when it cannot be parsed.
+ */
 function parseRetryAfterMs(header) {
     const raw = Array.isArray(header) ? header[0] : header;
     if (!raw)
@@ -868,6 +996,17 @@ function slackRetryDelayMs(attempt, retryAfterMs) {
         return retryAfterMs;
     return Math.min(8000, 500 * 2 ** attempt);
 }
+/**
+ * Decide whether a failed Slack POST is worth retrying.
+ *
+ * Retries HTTP 429 (rate limited) and any 5xx response carried by a
+ * {@link SlackHttpError}, plus the transient network errors a request can throw
+ * (timeouts, resets, DNS, dropped sockets). Anything else — a 4xx client error
+ * like an invalid payload — is not retried, since repeating it cannot succeed.
+ *
+ * @param err - The error thrown by {@link postToSlackOnce}.
+ * @returns True when a retry could plausibly succeed.
+ */
 function isRetryableSlackError(err) {
     if (err instanceof SlackHttpError) {
         return err.status === 429 || err.status >= 500;
@@ -877,6 +1016,20 @@ function isRetryableSlackError(err) {
     }
     return false;
 }
+/**
+ * POST a single payload to a Slack webhook URL, with no retry.
+ *
+ * Opens the request with the stdlib http/https module chosen by the URL scheme,
+ * sends a JSON body with a 10-second timeout, and resolves on a 2xx response.
+ * A non-2xx status rejects with a {@link SlackHttpError} carrying the status, a
+ * snippet of the body, and the parsed `Retry-After`; a transport failure or
+ * timeout rejects with a plain `Error`. The single attempt is the building
+ * block {@link postToSlack} retries around.
+ *
+ * @param webhookUrl - The Slack incoming-webhook URL to post to.
+ * @param payload - The Slack message payload to JSON-encode and send.
+ * @returns Resolves once Slack acknowledges the post with a 2xx status.
+ */
 function postToSlackOnce(webhookUrl, payload) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify(payload);
@@ -917,6 +1070,20 @@ function postToSlackOnce(webhookUrl, payload) {
         req.end();
     });
 }
+/**
+ * POST a payload to Slack, retrying transient failures up to twice.
+ *
+ * Wraps {@link postToSlackOnce}: on a {@link isRetryableSlackError} it sleeps
+ * for the server's `Retry-After` (when given) or an exponential backoff, then
+ * retries — at most two retries after the initial attempt. A 4xx client error
+ * or an exhausted retry budget re-throws the last error so the caller can
+ * surface it; the final attempt's error is always re-thrown when all retries
+ * fail.
+ *
+ * @param webhookUrl - The Slack incoming-webhook URL to post to.
+ * @param payload - The Slack message payload to send.
+ * @returns Resolves once a post attempt succeeds.
+ */
 async function postToSlack(webhookUrl, payload) {
     const maxRetries = 2;
     let lastErr;
@@ -1092,6 +1259,19 @@ function digestItemLines(items, max = 5) {
         lines.push(`• …and ${items.length - max} more`);
     return lines;
 }
+/**
+ * Build the plain-text (mrkdwn) activity digest message.
+ *
+ * Opens with a header line naming the window and total update count, then lists
+ * each non-empty bucket (created, closed, in progress, blocked) with up to five
+ * item lines and an "…and N more" overflow marker. An empty window renders a
+ * single "no activity" line. This is both the standalone `text` digest and the
+ * Block Kit fallback produced by {@link buildDigestBlockKit}.
+ *
+ * @param summary - The bucketed digest summary to render.
+ * @param channel - Optional resolved channel, echoed as an italic footer line.
+ * @returns The composed mrkdwn digest string.
+ */
 function buildDigestText(summary, channel) {
     const head = `*pm activity digest* (${summary.windowLabel}) — ${summary.total} update${summary.total === 1 ? "" : "s"}`;
     const parts = [head];
@@ -1109,6 +1289,18 @@ function buildDigestText(summary, channel) {
         parts.push(`\n_Channel: ${channel}_`);
     return parts.join("\n");
 }
+/**
+ * Build the Slack Block Kit blocks (plus a plain-text fallback) for the digest.
+ *
+ * Renders a header, a window/count context line, a counts field grid across all
+ * four buckets, then one section per non-empty bucket listing its items (capped
+ * through {@link truncate} and {@link digestItemLines}). An empty window renders
+ * a "no activity" section. The fallback mirrors {@link buildDigestText}.
+ *
+ * @param summary - The bucketed digest summary to render.
+ * @param channel - Optional resolved channel, echoed in the footer.
+ * @returns The `blocks` array and the plain-text fallback string.
+ */
 function buildDigestBlockKit(summary, channel) {
     const blocks = [];
     blocks.push({
@@ -1162,6 +1354,19 @@ function buildDigestBlockKit(summary, channel) {
     const fallback = buildDigestText(summary, channel);
     return { blocks, fallback };
 }
+/**
+ * Build a ready-to-post {@link SlackPayload} for the digest in the requested format.
+ *
+ * `text` produces a plain-text body; any other format (including the default
+ * `blockkit`) builds the rich blocks via {@link buildDigestBlockKit} with the
+ * plain text carried as the fallback. The optional channel is attached to the
+ * payload so Slack routes the digest correctly.
+ *
+ * @param summary - The bucketed digest summary to render.
+ * @param format - The message format selected via `PM_SLACK_FORMAT` / `--format`.
+ * @param channel - Optional resolved channel to post into.
+ * @returns The assembled Slack payload.
+ */
 function buildDigestPayload(summary, format, channel) {
     if (format === "text") {
         return {
@@ -1270,6 +1475,17 @@ function detectEvent(ctx) {
     }
     return event;
 }
+/**
+ * Pull the touched item out of an afterCommand hook's result.
+ *
+ * The SDK types `ctx.result` as `unknown`, so this reads it defensively: a
+ * single `result.item` with an id wins, otherwise the first entry of a
+ * `result.items` array (bulk commands like `add` return a list). Returns `null`
+ * when no item is present, so the hook can short-circuit without posting.
+ *
+ * @param ctx - The afterCommand hook context to read the result from.
+ * @returns The touched item, or `null` when the result carries none.
+ */
 function extractItem(ctx) {
     const result = ctx.result;
     const item = result?.item;
@@ -1734,6 +1950,14 @@ export default defineExtension({
     },
 });
 // Exported for unit tests (Block Kit builder + helpers).
+/**
+ * Internal helpers and builders exported only for the unit-test suite.
+ *
+ * Bundling them under one `__test__` object keeps the public surface (the
+ * default extension export) clean while letting tests exercise the pure
+ * formatting, parsing, and routing logic directly. Nothing here is part of the
+ * supported extension API.
+ */
 export const __test__ = {
     buildItemBlockKit,
     buildItemPayload,
