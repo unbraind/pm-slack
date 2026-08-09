@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- The mandatory docstring gate could skip its own scan and still exit zero ([pm-slack-3eco](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-3eco.toon))
+
 ### Other
 
 - Adopt the canonical pm-ops docstring gate ([pm-slack-hdqx](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-hdqx.toon))

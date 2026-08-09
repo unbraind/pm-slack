@@ -39,22 +39,34 @@ interface GateResult {
  * Compares resolved real filesystem paths on both sides. `import.meta.url` is
  * already symlink-resolved as a URL, but `process.argv[1]` is whatever path was
  * used to launch Node, so resolving both through `realpathSync` removes symlink
- * and casing ambiguity before the comparison. A release script that silently
- * no-ops is worse than one that throws, so fail closed if either path cannot be
- * resolved.
+ * and casing ambiguity before the comparison.
+ *
+ * The two resolutions fail for opposite reasons and are deliberately not
+ * treated alike. An unresolvable `argv[1]` only means the entry point is not
+ * this file, which is the ordinary "imported by a test" case, so it answers
+ * false. An unresolvable *own* module path is an internal contradiction: this
+ * file is executing, so it exists. Swallowing that would leave {@link main}
+ * unreached and the process exit code at zero — a mandatory gate reporting
+ * success having scanned nothing. It therefore fails closed and throws,
+ * because a release script that silently no-ops is worse than one that crashes.
  *
  * @param argv - The process argv slice to inspect.
  * @param moduleUrl - The `import.meta.url` of the module that might be main.
  * @returns True when `argv[1]` resolves to this module's own real path.
+ * @throws If this module's own path cannot be resolved.
+ * @throws If this module's own path cannot be resolved.
  */
 export function isMainInvocation(argv: readonly string[], moduleUrl: string): boolean {
   const entry = argv[1];
   if (entry === undefined) return false;
+  const self = realpathSync(fileURLToPath(moduleUrl));
+  let resolvedEntry: string;
   try {
-    return realpathSync(entry) === realpathSync(fileURLToPath(moduleUrl));
+    resolvedEntry = realpathSync(entry);
   } catch {
     return false;
   }
+  return resolvedEntry === self;
 }
 
 /**
