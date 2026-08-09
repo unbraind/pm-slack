@@ -1,0 +1,17 @@
+id: pm-slack-hdqx
+title: Adopt the canonical pm-ops docstring gate
+description: "Add pm-ops as a devDependency and a thin scripts/docstring-gate.ts launcher that calls analyzeDocstringCoverage, wire it into release:check and CI, add a behavioral test, and document every declaration the analyzer flagged so the gate passes with zero violations."
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-09T06:20:21.792Z"
+updated_at: "2026-08-09T06:20:25.196Z"
+closed_at: "2026-08-09T06:20:25.128Z"
+completed_at: "2026-08-09T06:20:25.128Z"
+author: pi-agent
+acceptance_criteria: "npm run docstring reports zero violations; npm run release:check passes in full; the 'Verify complete docstring coverage' CI step runs npm run docstring between build and coverage."
+notes[1]{created_at,author,text}:
+  "2026-08-09T06:20:23.561Z",pi-agent,"Before fixes: 18 violations across index.ts. After adding JSDoc to all 18 flagged declarations: 0 violations, 44 declarations documented across 3 files. release:check green."
+close_reason: "Docstring gate adopted: pm-ops devDependency + scripts/docstring-gate.ts launcher wired into release:check and CI; behavioral test added; all 18 violations resolved (18 -> 0). npm run release:check passes in full."
+body: ""

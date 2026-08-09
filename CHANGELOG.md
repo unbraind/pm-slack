@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Adopt the canonical pm-ops docstring gate ([pm-slack-hdqx](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-hdqx.toon))
+
 ## 2026.8.7 - 2026-08-07
 
 ### Other
