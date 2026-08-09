@@ -54,7 +54,6 @@ interface GateResult {
  * @param moduleUrl - The `import.meta.url` of the module that might be main.
  * @returns True when `argv[1]` resolves to this module's own real path.
  * @throws If this module's own path cannot be resolved.
- * @throws If this module's own path cannot be resolved.
  */
 export function isMainInvocation(argv: readonly string[], moduleUrl: string): boolean {
   const entry = argv[1];
