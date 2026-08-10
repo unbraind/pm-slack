@@ -6,9 +6,10 @@ status: open
 priority: 2
 tags: []
 created_at: "2026-08-10T15:02:08.921Z"
-updated_at: "2026-08-10T15:20:11.912Z"
+updated_at: "2026-08-10T15:40:16.228Z"
 author: pi-agent
-notes[2]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-08-10T15:02:12.639Z",pi-agent,"Applied the pm-beads PR 65 transformation: added pull-requests write permission, base_sha decide output, replaced publish-then-push with merge-PR verify publish tag-only ordering. dist is tracked and included in the verify diff list."
   "2026-08-10T15:20:11.912Z",claude,"Greptile reviewed this change and reported that creating the release pull request with GITHUB_TOKEN suppresses its pull_request event so CI never starts. Measured against pm-changelog, the event is not suppressed: a CI run was created at 04:54:24Z with event pull_request for branch release/2026.8.9. The real blocker is that attempt 1 concluded action_required, meaning GitHub parked the run awaiting workflow approval because the fork pull request contributor approval policy is first_time_contributors and github-actions had no merged pull request in that repository yet. A parked run never appears in the status check rollup, so it is indistinguishable from a required check that failed. The merge wait now detects parked runs, reports the run URL, attempts approval using the actions write permission, and separates awaiting approval from a failed check in the deadline error."
+  "2026-08-10T15:40:16.228Z",claude,"CodeRabbit caught a critical defect that every other gate missed. The gh pr create call placed the closing parenthesis of the command substitution inside the quoted body value, so the line read merged dot close-paren double-quote instead of double-quote close-paren double-quote. The substitution was therefore unterminated and bash consumed following lines until it hit an unrelated token, failing with a syntax error near fi. This would have broken release pull request creation, which is the common path. A YAML parse cannot catch it because a run block is only a string to YAML, and no gate executes the workflow, so npm ci, build, test and release:check all passed. The body now also carries the tracking item link. Verified by extracting every bash run block and checking it with bash -n, and confirmed the check fails when the fix is reverted."
 body: ""

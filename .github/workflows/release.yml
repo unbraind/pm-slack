@@ -230,7 +230,7 @@ jobs:
               --base main \
               --head "$release_branch" \
               --title "Release pm-slack ${RELEASE_TAG}" \
-              --body "Automated daily release metadata for \`${RELEASE_TAG}\`. The release gate passed before this PR was created; npm publication and tagging remain blocked until this protected PR is merged.)"
+              --body "Automated daily release metadata for \`${RELEASE_TAG}\`. The release gate passed before this PR was created; npm publication and tagging remain blocked until this protected PR is merged. Tracking: [pm-slack-1aeu](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-1aeu.toon).")"
             pr_number="${pr_url##*/}"
           fi
 
