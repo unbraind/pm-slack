@@ -1,0 +1,13 @@
+id: pm-slack-1aeu
+title: Fix release publish ordering before protected main push
+description: "The daily release workflow published to npm before pushing the version bump to protected main. The push was rejected with GH006 and set -e killed the job before the tag push, leaving npm ahead of git. Port the protected-PR merge ordering from pm-beads PR 65 so main contains the release commit before npm publish runs."
+type: Issue
+status: open
+priority: 2
+tags: []
+created_at: "2026-08-10T15:02:08.921Z"
+updated_at: "2026-08-10T15:02:12.639Z"
+author: pi-agent
+notes[1]{created_at,author,text}:
+  "2026-08-10T15:02:12.639Z",pi-agent,"Applied the pm-beads PR 65 transformation: added pull-requests write permission, base_sha decide output, replaced publish-then-push with merge-PR verify publish tag-only ordering. dist is tracked and included in the verify diff list."
+body: ""
