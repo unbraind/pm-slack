@@ -10,7 +10,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -101,14 +101,36 @@ test("docstring gate isMainInvocation resolves matching and non-matching scripts
   }
 });
 
+test("docstring gate isMainInvocation resolves a symlinked entry path to the real module URL", () => {
+  // Without this case the direct-invocation assertion is tautological: argv[1]
+  // and moduleUrl are built from the same path through the same transformation,
+  // so it passes even with realpathSync removed - and realpathSync is the whole
+  // reason the guard exists. npm bin shims and linked workspaces reach a script
+  // through a symlink, and a gate that silently declines to run is worse than
+  // one that throws.
+  const gatePath = resolve(packageRoot, "scripts", "docstring-gate.ts");
+  const linkDir = mkdtempSync(join(tmpdir(), "pm-slack-docgate-link-"));
+  const link = join(linkDir, "docstring-gate.ts");
+  try {
+    symlinkSync(gatePath, link);
+    assert.equal(
+      isMainInvocation([process.execPath, link], pathToFileURL(gatePath).href),
+      true,
+      "a symlinked entry path resolves to the real module and runs the gate",
+    );
+  } finally {
+    rmSync(linkDir, { recursive: true, force: true });
+  }
+});
+
 test("docstring gate isMainInvocation throws rather than skipping the gate when argv[1] cannot be resolved", () => {
   const gateUrl = pathToFileURL(resolve(packageRoot, "scripts", "docstring-gate.ts")).href;
   // Returning false here would leave `npm run docstring` exiting 0 having
   // scanned nothing - a required release check reporting success without doing
   // its job. Crashing is the safe outcome, so assert it is what happens.
   assert.throws(
-    () => isMainInvocation(["node", resolve(packageRoot, "does-not-exist.ts")], gateUrl),
-    /ENOENT/,
+    () => isMainInvocation([process.execPath, resolve(packageRoot, "does-not-exist.ts")], gateUrl),
+    (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT",
     "an unresolvable entry must propagate, not silently decline to run the gate",
   );
 });
