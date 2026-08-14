@@ -1,0 +1,19 @@
+id: pm-slack-wvog
+title: Scope preflight override to pm-slack's owned commands
+description: "registerPreflight used the bare-function (global) form, which collides pairwise with every other installed package's preflight override (pm health reports extension_preflight_override_collision). Rewrite it to the scoped object form declaring exactly the posting command paths the gate covers (slack notify, slack digest). slack test is deliberately excluded (offline preview). The runtime matches a command against the commands array by exact normalized path, so the array lists full command paths, not a bare top-level name (which would never match slack notify and silently disable the webhook validation). The authoritative fail-fast stays in the command handlers; this only narrows the override's scope."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-14T06:26:30.976Z"
+updated_at: "2026-08-14T06:26:53.333Z"
+closed_at: "2026-08-14T06:26:53.318Z"
+completed_at: "2026-08-14T06:26:53.318Z"
+author: pi-agent
+files[2]{path,scope}:
+  index.ts,project
+  test/smoke.test.ts,project
+tests[1]{command,path,scope,note}:
+  npm test,test/smoke.test.ts,project,"Asserts registerPreflight is a scoped object whose commands array equals pm-slack's owned posting command paths (slack notify, slack digest) and run is a function. Test title: preflight override is scoped to pm-slack's owned command paths"
+close_reason: completed
+body: ""

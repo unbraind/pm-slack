@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Scope preflight override to pm-slack's owned commands ([pm-slack-wvog](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wvog.toon))
+
 ## 2026.8.10 - 2026-08-10
 
 ### Fixed

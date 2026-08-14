@@ -1863,8 +1863,12 @@ export default defineExtension({
 
     // -----------------------------------------------------------------------
     // preflight — fail-fast webhook validation gate for the Slack-posting
-    // commands. Scoped to `slack notify` / `slack digest` only (NOT `slack
-    // test`, which is an offline preview, and NOT --dry-run previews).
+    // commands. Scoped to `slack notify` / `slack digest` (the command paths
+    // pm-slack owns) so it cannot contend with another package's preflight
+    // override: an unscoped/global override collides pairwise with every other
+    // installed package's override (pm health reports
+    // extension_preflight_override_collision). NOT `slack test`, which is an
+    // offline preview, and NOT --dry-run previews.
     //
     // NOTE: the pm runtime SWALLOWS errors thrown from a registerPreflight
     // override (runPreflightOverride wraps it in try/catch → non-fatal
@@ -1876,24 +1880,27 @@ export default defineExtension({
     // signal and never makes a network call.
     // -----------------------------------------------------------------------
     if (typeof api.registerPreflight === "function") {
-      api.registerPreflight((pfCtx) => {
-        const command = (pfCtx.command ?? "").toLowerCase();
-        // Only gate the actual posting commands.
-        if (command !== "slack notify" && command !== "slack digest") return {};
+      api.registerPreflight({
+        commands: ["slack notify", "slack digest"],
+        run: (pfCtx) => {
+          const command = (pfCtx.command ?? "").toLowerCase();
+          // Only gate the actual posting commands.
+          if (command !== "slack notify" && command !== "slack digest") return {};
 
-        const options = (pfCtx.options ?? {}) as Record<string, unknown>;
-        // Offline previews are never gated.
-        if (readBoolOption(options, "dry-run")) return {};
+          const options = (pfCtx.options ?? {}) as Record<string, unknown>;
+          // Offline previews are never gated.
+          if (readBoolOption(options, "dry-run")) return {};
 
-        try {
-          assertWebhookConfigured(readStrOption(options, "webhook"), command);
-        } catch (err) {
-          // The runtime swallows throws here; emit a visible warning so the
-          // signal isn't lost. The handler-level gate provides the real abort.
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`[pm-slack] preflight: ${message}`);
-        }
-        return {};
+          try {
+            assertWebhookConfigured(readStrOption(options, "webhook"), command);
+          } catch (err) {
+            // The runtime swallows throws here; emit a visible warning so the
+            // signal isn't lost. The handler-level gate provides the real abort.
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`[pm-slack] preflight: ${message}`);
+          }
+          return {};
+        },
       });
     }
 
