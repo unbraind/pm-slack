@@ -57,6 +57,29 @@ test("extension registers a preflight override", async () => {
   await ext.deactivate();
 });
 
+test("preflight override is scoped to pm-slack's owned command paths", async () => {
+  // The override MUST register as a scoped object (commands + run), not a bare
+  // function: a global (unscoped) override collides pairwise with every other
+  // installed package's preflight override (pm health reports
+  // extension_preflight_override_collision). The runtime matches a command
+  // against `commands` by exact normalized path, so the array lists the full
+  // posting command paths the gate covers (NOT `slack test`, an offline
+  // preview).
+  const ext = await harness();
+  const override = ext.assertPreflightOverride();
+  assert.deepEqual(
+    override.commands,
+    ["slack notify", "slack digest"],
+    "preflight override must be scoped to exactly pm-slack's owned posting command paths",
+  );
+  assert.equal(
+    typeof override.run,
+    "function",
+    "scoped preflight override must expose a run function",
+  );
+  await ext.deactivate();
+});
+
 test("slack notify declares --filter, --channel-override, --template, --format, --dry-run, --thread", async () => {
   const ext = await harness();
 
