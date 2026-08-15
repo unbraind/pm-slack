@@ -485,6 +485,59 @@ function resolveEffectiveWebhook(webhookFlag: string | undefined): {
 }
 
 /**
+ * The command paths whose preflight this package gates: the ones that actually
+ * post to Slack.
+ *
+ * This is the single source of truth for the preflight scope. It feeds both the
+ * `commands` array `registerPreflight` is registered with AND the runtime check
+ * inside that override's `run`. Those were two independent string literals
+ * holding the same knowledge, which is exactly how a command silently loses its
+ * gate: adding a posting command to one literal and not the other leaves the
+ * override registered for a path it then declines to act on, or acting on a path
+ * it was never scoped to.
+ *
+ * `slack test` is deliberately absent — it is an offline preview that makes no
+ * network call, so gating it on a configured webhook would refuse the one
+ * command that exists to work without one.
+ */
+export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"] as const;
+
+/**
+ * The command paths this package owns that are deliberately NOT gated.
+ *
+ * Declared explicitly rather than inferred as "everything not in
+ * {@link SLACK_POSTING_COMMANDS}". The difference matters: with an inferred
+ * complement, a newly declared command is silently classified as offline and
+ * loses its gate with nothing to notice. With both classes named, a command in
+ * neither is *unclassified*, which the drift test can and does reject.
+ *
+ * `slack test` is an offline preview that makes no network call, so gating it on
+ * a configured webhook would refuse the one command that exists to work without
+ * one.
+ */
+export const SLACK_OFFLINE_COMMANDS = ["slack test"] as const;
+
+/**
+ * Whether `command` is one this package gates a webhook on.
+ *
+ * @param command - Normalized (lower-cased) full command path, e.g. `slack notify`.
+ * @returns `true` only for a declared posting command.
+ */
+export function isSlackPostingCommand(command: string): boolean {
+  return (SLACK_POSTING_COMMANDS as readonly string[]).includes(command);
+}
+
+/**
+ * Whether `command` is a declared pm-slack path that is deliberately ungated.
+ *
+ * @param command - Normalized (lower-cased) full command path.
+ * @returns `true` only for a declared offline command.
+ */
+export function isSlackOfflineCommand(command: string): boolean {
+  return (SLACK_OFFLINE_COMMANDS as readonly string[]).includes(command);
+}
+
+/**
  * Validate webhook configuration for a Slack-posting command. Throws a
  * CommandError (exit 2 / USAGE) with an actionable message when no webhook is
  * configured or the configured webhook URL is syntactically invalid. Returns
@@ -1881,11 +1934,15 @@ export default defineExtension({
     // -----------------------------------------------------------------------
     if (typeof api.registerPreflight === "function") {
       api.registerPreflight({
-        commands: ["slack notify", "slack digest"],
+        commands: [...SLACK_POSTING_COMMANDS],
         run: (pfCtx) => {
           const command = (pfCtx.command ?? "").toLowerCase();
-          // Only gate the actual posting commands.
-          if (command !== "slack notify" && command !== "slack digest") return {};
+          // Only gate the actual posting commands. Reads the same constant the
+          // scope above is built from, so the registered scope and the runtime
+          // check cannot disagree — they were two separate literals before, and
+          // two literals holding the same knowledge is how a command silently
+          // loses its gate.
+          if (!isSlackPostingCommand(command)) return {};
 
           const options = (pfCtx.options ?? {}) as Record<string, unknown>;
           // Offline previews are never gated.

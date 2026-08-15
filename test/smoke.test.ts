@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 
-import extension from "../index.ts";
+import extension, { isSlackOfflineCommand, isSlackPostingCommand } from "../index.ts";
 
 /**
  * Activate pm-slack through pm's real host engine with the manifest's declared
@@ -67,10 +67,44 @@ test("preflight override is scoped to pm-slack's owned command paths", async () 
   // preview).
   const ext = await harness();
   const override = ext.assertPreflightOverride();
+  // Derive the declared set from the REAL activation registrations, never from a
+  // literal repeated here. The previous version of this test compared the scope
+  // against a hand-written array and then checked only that each CURRENT scope
+  // entry was declared — one direction. Registering another posting command and
+  // forgetting the scope left it green, which is precisely the drift this test
+  // exists to catch.
+  const declaredPaths = [...new Set(ext.activation.registrations.commands.map((c) => c.command))].sort();
+  assert.ok(declaredPaths.length > 0, "activation should declare command paths");
+  // Partition the declared set with the SAME predicates production uses, so this
+  // test cannot hold a second, drifting copy of the posting/offline knowledge.
+  // Both classes are named in production; neither is the other's complement, so
+  // a declared command in neither class is UNCLASSIFIED rather than silently
+  // defaulted to ungated.
+  const postingPaths = declaredPaths.filter(isSlackPostingCommand);
+  const offlinePaths = declaredPaths.filter(isSlackOfflineCommand);
+  const unclassified = declaredPaths.filter(
+    (command) => !isSlackPostingCommand(command) && !isSlackOfflineCommand(command),
+  );
   assert.deepEqual(
-    override.commands,
-    ["slack notify", "slack digest"],
-    "preflight override must be scoped to exactly pm-slack's owned posting command paths",
+    unclassified,
+    [],
+    `every declared command must be classified as posting or offline; unclassified: ${unclassified.join(", ")}`,
+  );
+  // Total partition: every declared path lands in exactly one class and the two
+  // classes reconstruct the declared set EXACTLY. A newly declared command that
+  // nobody classified fails here rather than passing unnoticed.
+  assert.deepEqual(
+    [...postingPaths, ...offlinePaths].sort(),
+    declaredPaths,
+    "every declared command path must be classified as posting or offline",
+  );
+  // Both directions of the scope relation: the scope EQUALS the posting class.
+  // Equality is what closes the finding — a subset check in either direction
+  // alone lets one side grow silently.
+  assert.deepEqual(
+    [...(override.commands ?? [])].sort(),
+    postingPaths,
+    "preflight override scope must equal the posting class of the declared command set exactly",
   );
   assert.equal(
     typeof override.run,
