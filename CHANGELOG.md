@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A slack posting command can silently lose its preflight webhook gate when the override scope drifts from the declared commands ([pm-slack-wymh](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wymh.toon))
+
 ## 2026.8.15 - 2026-08-15
 
 ### Fixed

@@ -1,0 +1,20 @@
+id: pm-slack-wymh
+title: A slack posting command can silently lose its preflight webhook gate when the override scope drifts from the declared commands
+description: "registerPreflight is scoped to a fixed two-entry commands array (slack notify, slack digest). That array and the commands pm-slack declares via registerCommand are maintained by hand with nothing binding them. If a posting command is added or renamed on one side only, the override silently stops running for it (the runtime matches by exact normalized path) and the command posts with no early webhook validation — silently, because the runtime swallows preflight throws and the authoritative fail-fast only fires once the handler actually runs. A test must bind the scope to the declared commands: every scoped path has to be a command the extension really declares (renames and removals fail the suite), the only declared-but-omitted path has to be the offline slack test preview, and run() has to warn for scoped posting commands without a resolvable webhook while staying silent for --dry-run previews, slack test, and configured webhooks."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-15T10:31:10.183Z"
+updated_at: "2026-08-15T10:33:08.221Z"
+closed_at: "2026-08-15T10:33:08.194Z"
+completed_at: "2026-08-15T10:33:08.194Z"
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-15T10:31:29.751Z",pi-agent,"Manifest-vs-scope audit (the check CodeRabbit asked for on pm-linear #67). Commands pm-slack declares (registerCommand): slack notify, slack test, slack digest. No importers/exporters. Preflight scope after PR #58: slack notify, slack digest. Diff: every scoped path is a declared command; the one omitted command, slack test, is an offline preview (no webhook, no network) and was never gated — the pre-scoping global override's run body already string-matched only slack notify and slack digest and returned early for everything else, so no gate was lost and nothing had to be restored. Remaining defect: nothing binds the scope to the declared command list, which this item fixes with a drift test."
+files[1]{path,scope}:
+  test/smoke.test.ts,project
+tests[1]{command,path,scope,note}:
+  npm test,test/smoke.test.ts,project,"Extends the scoping test into a drift guard: every scoped preflight path must be a command the extension declares (assertCommandContract), slack test must stay out of the scope, and run() must warn for scoped posting commands without a webhook while staying silent for --dry-run, slack test, and configured webhooks. Test title: preflight override is scoped to pm-slack owned command paths"
+close_reason: "Scope bound to the declared command set in test/smoke.test.ts: every scoped preflight path must be a command the extension really declares (assertCommandContract fails on renames/removals), the offline slack test preview must stay out of the scope, and run() must warn for scoped posting commands without a resolvable webhook while staying silent for --dry-run previews, slack test, and configured webhooks. Manifest-vs-scope audit found no lost gate. Verified: npm test 75/75 pass, release:check exit 0."
+body: ""

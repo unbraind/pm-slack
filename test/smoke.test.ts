@@ -77,6 +77,113 @@ test("preflight override is scoped to pm-slack's owned command paths", async () 
     "function",
     "scoped preflight override must expose a run function",
   );
+  // Bind the scope to the commands pm-slack declares. Narrowing the override
+  // to a command list means an entry missing on either side is a command that
+  // silently loses its webhook gate, so every scoped path must be a declared
+  // command (renames and removals fail here)...
+  for (const command of override.commands ?? []) {
+    ext.assertCommandContract({ name: command });
+  }
+  // ...and the only declared-but-omitted path must be the offline preview
+  // `slack test`, which must both stay out of the scope and never be gated.
+  assert.ok(
+    !(override.commands ?? []).includes("slack test"),
+    "slack test is an offline preview and must not claim a preflight scope entry",
+  );
+  // Behavioral half of the binding: run() warns for a scoped posting command
+  // with no resolvable webhook (the runtime swallows throws, so the stderr
+  // warning is the visible early signal), stays silent for --dry-run previews
+  // and for the offline `slack test`, and silent again once a webhook resolves.
+  const warnings: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  };
+  const hadWebhook = process.env["PM_SLACK_WEBHOOK"];
+  const hadRoutes = process.env["PM_SLACK_ROUTES"];
+  const preflightCtx = (command: string, options: Record<string, unknown>) => ({
+    command,
+    args: [],
+    options,
+    global: {},
+    pm_root: process.cwd(),
+    decision: {
+      enforce_item_format_gate: false,
+      run_preflight_item_format_sync: false,
+      run_extension_migrations: false,
+      enforce_mandatory_migration_gate: false,
+    },
+  });
+  try {
+    delete process.env["PM_SLACK_WEBHOOK"];
+    delete process.env["PM_SLACK_ROUTES"];
+    await ext.runPreflightOverride(preflightCtx("slack notify", {}));
+    assert.strictEqual(warnings.length, 1, "slack notify without a webhook must warn");
+    await ext.runPreflightOverride(preflightCtx("slack digest", {}));
+    assert.strictEqual(warnings.length, 2, "slack digest without a webhook must warn");
+    // A --dry-run preview is never gated, including the string-spelled forms a
+    // raw argv parse (no camelCase normalization) produces: every truthy
+    // spelling silences the gate, every falsy/junk spelling still warns.
+    await ext.runPreflightOverride(preflightCtx("slack notify", { "dry-run": true }));
+    for (const truthy of ["true", "1", "yes", "on"]) {
+      await ext.runPreflightOverride(preflightCtx("slack notify", { "dry-run": truthy }));
+    }
+    assert.strictEqual(
+      warnings.length,
+      2,
+      "--dry-run previews in every truthy spelling must never warn",
+    );
+    for (const falsy of ["false", "0", "no", "off", "maybe"]) {
+      await ext.runPreflightOverride(preflightCtx("slack digest", { "dry-run": falsy }));
+    }
+    assert.strictEqual(
+      warnings.length,
+      7,
+      "falsy or unrecognized --dry-run spellings must still warn (not a preview)",
+    );
+    await ext.runPreflightOverride(preflightCtx("slack test", {}));
+    assert.strictEqual(
+      warnings.length,
+      7,
+      "the offline slack test must never warn",
+    );
+    // Every valid webhook source stays silent: --webhook flag, env var, and a
+    // routes-only configuration (route rules may carry their own webhooks).
+    await ext.runPreflightOverride(
+      preflightCtx("slack notify", { webhook: "https://hooks.slack.com/services/T000/B000/XXXX" }),
+    );
+    assert.strictEqual(warnings.length, 7, "a --webhook flag must not warn");
+    process.env["PM_SLACK_ROUTES"] =
+      '[{"match":"close","webhook":"https://hooks.slack.com/services/T000/B000/R000"}]';
+    await ext.runPreflightOverride(preflightCtx("slack digest", {}));
+    assert.strictEqual(warnings.length, 7, "a routes-only webhook source must not warn");
+    delete process.env["PM_SLACK_ROUTES"];
+    process.env["PM_SLACK_WEBHOOK"] = "https://hooks.slack.com/services/T000/B000/XXXX";
+    await ext.runPreflightOverride(preflightCtx("slack notify", {}));
+    assert.strictEqual(warnings.length, 7, "a resolvable webhook must not warn");
+    // Malformed webhooks warn: not a URL at all, and a URL with a non-http(s)
+    // protocol. Both reach the user via the warning because the runtime
+    // swallows the thrown CommandError.
+    await ext.runPreflightOverride(
+      preflightCtx("slack notify", { webhook: "hooks.slack.com/services/T000/B000/XXXX" }),
+    );
+    await ext.runPreflightOverride(
+      preflightCtx("slack digest", { webhook: "ftp://hooks.example.com/services/T000/B000/XXXX" }),
+    );
+    assert.strictEqual(
+      warnings.length,
+      9,
+      "a malformed --webhook URL and a non-http(s) protocol must both warn",
+    );
+    assert.match(warnings[7]!, /not a valid URL/);
+    assert.match(warnings[8]!, /http\(s\) URL/);
+  } finally {
+    console.error = originalError;
+    if (hadWebhook === undefined) delete process.env["PM_SLACK_WEBHOOK"];
+    else process.env["PM_SLACK_WEBHOOK"] = hadWebhook;
+    if (hadRoutes === undefined) delete process.env["PM_SLACK_ROUTES"];
+    else process.env["PM_SLACK_ROUTES"] = hadRoutes;
+  }
   await ext.deactivate();
 });
 
