@@ -156,6 +156,51 @@ declare function resolveEffectiveWebhook(webhookFlag: string | undefined): {
     source: "flag" | "env" | "route" | "none";
 };
 /**
+ * The command paths whose preflight this package gates: the ones that actually
+ * post to Slack.
+ *
+ * This is the single source of truth for the preflight scope. It feeds both the
+ * `commands` array `registerPreflight` is registered with AND the runtime check
+ * inside that override's `run`. Those were two independent string literals
+ * holding the same knowledge, which is exactly how a command silently loses its
+ * gate: adding a posting command to one literal and not the other leaves the
+ * override registered for a path it then declines to act on, or acting on a path
+ * it was never scoped to.
+ *
+ * `slack test` is deliberately absent — it is an offline preview that makes no
+ * network call, so gating it on a configured webhook would refuse the one
+ * command that exists to work without one.
+ */
+export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack digest"];
+/**
+ * The command paths this package owns that are deliberately NOT gated.
+ *
+ * Declared explicitly rather than inferred as "everything not in
+ * {@link SLACK_POSTING_COMMANDS}". The difference matters: with an inferred
+ * complement, a newly declared command is silently classified as offline and
+ * loses its gate with nothing to notice. With both classes named, a command in
+ * neither is *unclassified*, which the drift test can and does reject.
+ *
+ * `slack test` is an offline preview that makes no network call, so gating it on
+ * a configured webhook would refuse the one command that exists to work without
+ * one.
+ */
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test"];
+/**
+ * Whether `command` is one this package gates a webhook on.
+ *
+ * @param command - Normalized (lower-cased) full command path, e.g. `slack notify`.
+ * @returns `true` only for a declared posting command.
+ */
+export declare function isSlackPostingCommand(command: string): boolean;
+/**
+ * Whether `command` is a declared pm-slack path that is deliberately ungated.
+ *
+ * @param command - Normalized (lower-cased) full command path.
+ * @returns `true` only for a declared offline command.
+ */
+export declare function isSlackOfflineCommand(command: string): boolean;
+/**
  * Validate webhook configuration for a Slack-posting command. Throws a
  * CommandError (exit 2 / USAGE) with an actionable message when no webhook is
  * configured or the configured webhook URL is syntactically invalid. Returns
