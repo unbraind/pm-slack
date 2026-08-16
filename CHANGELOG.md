@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The pm CLI compatibility floor is declared where npm enforces it and absent from the field the CLI actually reads ([pm-slack-4big](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-4big.toon))
 - A slack posting command can silently lose its preflight webhook gate when the override scope drifts from the declared commands ([pm-slack-wymh](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wymh.toon))
 
 ## 2026.8.15 - 2026-08-15
