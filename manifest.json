@@ -11,8 +11,5 @@
     "hooks",
     "schema",
     "preflight"
-  ],
-  "pm": {
-    "compatibility": "v2"
-  }
+  ]
 }

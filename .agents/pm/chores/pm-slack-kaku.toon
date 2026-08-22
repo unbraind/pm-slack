@@ -1,0 +1,24 @@
+id: pm-slack-kaku
+title: Drop inert pm manifest key and guard the closed manifest vocabulary
+description: "pm-cli treats the extension manifest vocabulary as a closed set of keys; since pm-cli 2026.8.19 any other top-level manifest.json key yields a manifest_unknown_key warning. This repo's manifest.json carried an inert top-level pm key ({\"compatibility\":\"v2\"}) that nothing in src/, scripts/, or test/ ever read. It caused strict-assertion failures downstream (unbraind/pm-linear PRs #75/#76 expect findings codes exactly ['pm_min_version_unmet'] but got ['manifest_unknown_key','pm_min_version_unmet']). This change deletes only that key, bumps the dev-dependency pin of @unbrained/pm-cli from 2026.8.15 to 2026.8.22 so the regression test can detect unknown manifest keys (the older CLI predates the detection), and adds test/manifest-vocabulary.test.ts asserting zero manifest_unknown_key findings. The changelog scripts already carried unbounded-read --pm-arg flags, so no script changes were needed."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-22T17:50:42.152Z"
+updated_at: "2026-08-22T17:53:08.265Z"
+closed_at: "2026-08-22T17:53:08.237Z"
+completed_at: "2026-08-22T17:53:08.237Z"
+claim_principal: ox-alpha
+author: ox-alpha
+notes[1]{created_at,author,text}:
+  "2026-08-22T17:50:55.072Z",ox-alpha,"Regression verification: re-adding the pm key programmatically made test/manifest-vocabulary.test.ts fail with a manifest_unknown_key finding (path: pm, required: pm, current: 2026.8.22); after restoring the manifest the test passes again (1 pass / 0 fail). npm test: 80 tests, 80 pass, 0 fail (exit 0). npm run release:check: exit 0 (typecheck, build, docstring gate, coverage gate, audit:prod, pack dry-run, changelog:check all green; changelog scripts already had unbounded-read --pm-arg flags). Pinned ./node_modules/.bin/pm health --strict-exit: exit 0, ok:true, 3 advisory provenance warnings only."
+files[4]{path,scope}:
+  manifest.json,project
+  package-lock.json,project
+  package.json,project
+  test/manifest-vocabulary.test.ts,project
+tests[1]{command,path,scope}:
+  PM_PATH=/tmp/pm-mv-pm-slack PM_GLOBAL_PATH=/tmp/pm-mv-g-pm-slack node --test test/manifest-vocabulary.test.ts,test/manifest-vocabulary.test.ts,project
+close_reason: "Closed: inert top-level pm manifest key removed from manifest.json after grep-verified confirmation that nothing in index.ts, scripts/, or test/ reads it; @unbrained/pm-cli dev pin bumped 2026.8.15 -> 2026.8.22 so unknown manifest keys are detectable; added test/manifest-vocabulary.test.ts asserting zero manifest_unknown_key findings — verified it fails when the pm key is re-added and passes once removed (pm test linked run passed, tests_count=1). Gates: npm test 80/80 pass exit 0; npm run release:check exit 0 (changelog scripts already had unbounded --pm-arg flags); pinned ./node_modules/.bin/pm health --strict-exit exit 0."
+body: ""
