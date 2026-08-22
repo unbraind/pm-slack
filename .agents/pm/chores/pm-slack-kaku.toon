@@ -6,7 +6,7 @@ status: closed
 priority: 2
 tags: []
 created_at: "2026-08-22T17:50:42.152Z"
-updated_at: "2026-08-22T17:53:08.265Z"
+updated_at: "2026-08-22T18:59:47.729Z"
 closed_at: "2026-08-22T17:53:08.237Z"
 completed_at: "2026-08-22T17:53:08.237Z"
 claim_principal: ox-alpha
@@ -18,7 +18,7 @@ files[4]{path,scope}:
   package-lock.json,project
   package.json,project
   test/manifest-vocabulary.test.ts,project
-tests[1]{command,path,scope}:
-  PM_PATH=/tmp/pm-mv-pm-slack PM_GLOBAL_PATH=/tmp/pm-mv-g-pm-slack node --test test/manifest-vocabulary.test.ts,test/manifest-vocabulary.test.ts,project
+tests[1]{command,path,scope,note}:
+  "PM_PATH=\"${TMPDIR:-/tmp}/pm-mv-pm-slack\" PM_GLOBAL_PATH=\"${TMPDIR:-/tmp}/pm-mv-g-pm-slack\" node --test test/manifest-vocabulary.test.ts",test/manifest-vocabulary.test.ts,project,"Runs the manifest-vocabulary guard against isolated tracker roots so it cannot touch the real workspace. Uses ${TMPDIR:-/tmp} rather than a hardcoded /tmp: the recorded command should be runnable by whoever reads it, including on a machine where TMPDIR is set elsewhere, and a concrete scratch path pins the record to one environment."
 close_reason: "Closed: inert top-level pm manifest key removed from manifest.json after grep-verified confirmation that nothing in index.ts, scripts/, or test/ reads it; @unbrained/pm-cli dev pin bumped 2026.8.15 -> 2026.8.22 so unknown manifest keys are detectable; added test/manifest-vocabulary.test.ts asserting zero manifest_unknown_key findings — verified it fails when the pm key is re-added and passes once removed (pm test linked run passed, tests_count=1). Gates: npm test 80/80 pass exit 0; npm run release:check exit 0 (changelog scripts already had unbounded --pm-arg flags); pinned ./node_modules/.bin/pm health --strict-exit exit 0."
 body: ""
