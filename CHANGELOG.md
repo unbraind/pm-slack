@@ -6,6 +6,10 @@
 
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
+### Other
+
+- Drop inert pm manifest key and guard the closed manifest vocabulary ([pm-slack-kaku](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-kaku.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
