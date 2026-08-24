@@ -1,0 +1,30 @@
+id: pm-slack-tfrk
+title: Stabilise the changelog gate release date by deriving it from the calendar version instead of the clock
+description: ""
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-24T09:22:20.539Z"
+updated_at: "2026-08-24T09:23:43.725Z"
+closed_at: "2026-08-24T09:23:43.683Z"
+completed_at: "2026-08-24T09:23:43.683Z"
+claim_principal: pi-agent
+author: pi-agent
+notes[1]:
+  - created_at: "2026-08-24T09:22:57.158Z"
+    author: pi-agent
+    text: "[{\"body\":\"Proof at version 2026.8.20 (untagged, not today): WITHOUT the date-from-version flag the generated heading is 2026.8.20 - 2026-08-24 (current UTC clock, flips at midnight); WITH the flag it is 2026.8.20 - 2026-08-20 (derived from the calendar version). Both runs used identical arguments plus --include-empty so the pending release section renders.\"}]"
+    format: json
+    data[1]{body}:
+      "Proof at version 2026.8.20 (untagged, not today): WITHOUT the date-from-version flag the generated heading is 2026.8.20 - 2026-08-24 (current UTC clock, flips at midnight); WITH the flag it is 2026.8.20 - 2026-08-20 (derived from the calendar version). Both runs used identical arguments plus --include-empty so the pending release section renders."
+files[2]{path,scope,note}:
+  package.json,project,insert the date-from-version flag into the three changelog scripts and bump pm-changelog to ^2026.8.17
+  package-lock.json,project,lockfile moved to pm-changelog 2026.8.17 which introduces the date-from-version flag
+tests[4]{command,scope,note}:
+  "npm run changelog:check",project,changelog gate stays green
+  npm test,project,full unit test suite
+  npm run coverage,project,coverage gate
+  ./node_modules/.bin/pm health --strict-exit,project,pinned binary health check
+close_reason: "Changelog scripts now pass the date-from-version flag (pm-changelog ^2026.8.17) so the no-tag release date derives from the calendar version instead of the UTC clock. Proof at version 2026.8.20: without-flag heading 2026.8.20 - 2026-08-24 vs with-flag heading 2026.8.20 - 2026-08-20. Verified: changelog:check green, npm test 80/80, coverage gate met, pm health --strict-exit exit 0."
+body: ""
