@@ -116,6 +116,39 @@ jobs:
           echo "npm_version=$npm_version" >> "$GITHUB_OUTPUT"
           echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # This runs FIRST, before the OIDC preflight, and that ordering is the
+      # point: a workflow_dispatch from a feature branch would otherwise mint an
+      # id-token and exchange it for a short-lived npm PUBLISH CREDENTIAL, and
+      # only then be refused - requesting a credential the run is not allowed to
+      # use. Refusing on the ref costs nothing and must come first.
+      - name: Check release ref
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Refusing to release from non-main ref ('$GITHUB_REF'). Run the release workflow from main."
+            exit 1
+          fi
+
+      # Persist validated release metadata through the repository's protected
+      # branch policy before publishing an immutable npm artifact. A stable
+      # branch name lets a failed run update/reuse its open release PR, while
+      # the exact remote SHA lease prevents overwriting another actor's work.
+      # Ported from pm-beads' release.yml (PR #65): main must already contain the
+      # release commit before npm publish runs - the invariant the old
+      # publish-then-push ordering violated. npm published 2026.8.10, then
+      # `git push origin HEAD:main` was rejected with GH006 by the protected
+      # branch, and `set -e` killed the job before the tag push, so npm ended
+      # up ahead of git (main still at 2026.8.7, no matching tag).
+      #
+      # The merge wait resolves review threads (required_conversation_resolution
+      # is on) then attempts `gh api --method PUT .../pulls/<n>/merge` and lets
+      # GitHub be the authority, failing fast only on DIRTY/BEHIND, with a
+      # 30-minute deadline. It does NOT poll mergeStateStatus to decide merging
+      # (that deadlocked pm-changelog's release PR #133 for 30 minutes).
       # Publication is the only step that can fail for a reason outside this
       # repository, and it runs LAST - after the version bump and the release
       # commit have already landed on main. That ordering is what let a dead
@@ -232,34 +265,6 @@ jobs:
       # trigger ref (rather than git topology) reliably distinguishes a feature
       # branch from main, which commit-topology checks cannot do (a feature
       # branch off main is also a descendant of origin/main).
-      - name: Check release ref
-        if: steps.decide.outputs.should_release == 'true'
-        shell: bash
-        env:
-          GITHUB_REF: ${{ github.ref }}
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Refusing to release from non-main ref ('$GITHUB_REF'). Run the release workflow from main."
-            exit 1
-          fi
-
-      # Persist validated release metadata through the repository's protected
-      # branch policy before publishing an immutable npm artifact. A stable
-      # branch name lets a failed run update/reuse its open release PR, while
-      # the exact remote SHA lease prevents overwriting another actor's work.
-      # Ported from pm-beads' release.yml (PR #65): main must already contain the
-      # release commit before npm publish runs - the invariant the old
-      # publish-then-push ordering violated. npm published 2026.8.10, then
-      # `git push origin HEAD:main` was rejected with GH006 by the protected
-      # branch, and `set -e` killed the job before the tag push, so npm ended
-      # up ahead of git (main still at 2026.8.7, no matching tag).
-      #
-      # The merge wait resolves review threads (required_conversation_resolution
-      # is on) then attempts `gh api --method PUT .../pulls/<n>/merge` and lets
-      # GitHub be the authority, failing fast only on DIRTY/BEHIND, with a
-      # 30-minute deadline. It does NOT poll mergeStateStatus to decide merging
-      # (that deadlocked pm-changelog's release PR #133 for 30 minutes).
       - name: Merge release metadata through protected PR
         if: steps.decide.outputs.should_release == 'true'
         id: release_pr
