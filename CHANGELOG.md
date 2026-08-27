@@ -6,6 +6,10 @@
 
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
+### Security
+
+- The identity gate deadlocks the one remediation its own failure message prescribes ([pm-slack-fopw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fopw.toon))
+
 ### Other
 
 - Drop inert pm manifest key and guard the closed manifest vocabulary ([pm-slack-kaku](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-kaku.toon))
