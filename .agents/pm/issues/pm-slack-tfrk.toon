@@ -6,14 +6,15 @@ status: closed
 priority: 2
 tags: []
 created_at: "2026-08-24T09:22:20.539Z"
-updated_at: "2026-08-27T17:09:27.053Z"
+updated_at: "2026-08-27T17:18:51.782Z"
 closed_at: "2026-08-24T09:23:43.683Z"
 completed_at: "2026-08-24T09:23:43.683Z"
 claim_principal: pi-agent
 author: pi-agent
-comments[2]{created_at,author,text}:
+comments[3]{created_at,author,text}:
   "2026-08-24T09:36:28.066Z","harness:claude-code","Completed the site coverage. The first pass flagged only the package.json scripts named changelog, leaving the three invocations in the release workflow unflagged. During a release the workflow generates the changelog and CI then checks it, so with the flag on only one side an untagged version whose calendar date is not today derives the heading from the clock on one side and from the version on the other, and the release fails on that divergence instead of on the stale date the flag exists to remove. Enumerated by grepping every tracked file for release-version-from-package rather than by reading the scripts that looked relevant. Seven sites in this package, four in package.json and three in release.yml, recount now four of four and three of three. Gates: changelog full then check reports up to date, pinned pm health --strict-exit exit 0."
   "2026-08-24T10:04:37.210Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
+  "2026-08-27T17:18:42.115Z",claude-agent,"The verifier this issue added was a file the repository shipped and nothing executed. It was absent from release:check and from every CI step, in thirteen of the fifteen repositories that carry it, so a later edit could have removed --date-from-version from the workflow and both generation and --check would have agreed on a clock-derived date without anything failing. It is now a named script, the last step of release:check, and its own CI step. Reported by CodeRabbit on unbraind/pm-graph#70.\n\nThe verifier itself gained two fixes in the same pass, also from CodeRabbit. Its static section now balances flags per line rather than per file, which closes two hiding places at once: a single line carrying several invocations where only one is flagged, and an unflagged invocation hiding behind a mention of the flag on a line that invokes nothing. Its behavioural section no longer runs the unflagged control under || true, so a control that fails to produce a heading now fails the gate instead of printing a note while the script exits zero. Both were confirmed by executing the old script against the defect and watching it exit zero."
 notes[1]:
   - created_at: "2026-08-24T09:22:57.158Z"
     author: pi-agent
@@ -21,9 +22,11 @@ notes[1]:
     format: json
     data[1]{body}:
       "Proof at version 2026.8.20 (untagged, not today): WITHOUT the date-from-version flag the generated heading is 2026.8.20 - 2026-08-24 (current UTC clock, flips at midnight); WITH the flag it is 2026.8.20 - 2026-08-20 (derived from the calendar version). Both runs used identical arguments plus --include-empty so the pending release section renders."
-files[3]{path,scope,note}:
-  package.json,project,insert the date-from-version flag into the three changelog scripts and bump pm-changelog to ^2026.8.17
+files[5]{path,scope,note}:
+  .github/workflows/ci.yml,project,runs the changelog-date verifier as its own step
+  .github/workflows/release.yml,project,holds the three release-time generator invocations this issue changed
   package-lock.json,project,lockfile moved to pm-changelog 2026.8.17 which introduces the date-from-version flag
+  package.json,project,insert the date-from-version flag into the three changelog scripts and bump pm-changelog to ^2026.8.17
   scripts/verify-release-changelog-date.sh,project,"executable proof for the release workflow invocations, which the package.json changelog check never reaches"
 tests[5]:
   - command: "npm run changelog:check"
