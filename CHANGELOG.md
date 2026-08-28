@@ -4,8 +4,6 @@
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-slack-g0rn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-g0rn.toon))
-- A failed provenance publish silently falls back to an unattested one ([pm-slack-yk8z](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-yk8z.toon))
 - A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
