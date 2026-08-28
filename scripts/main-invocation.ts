@@ -1,10 +1,11 @@
 /**
  * Shared entry-point guard for the executable scripts in this package.
  *
- * All three shipped scripts (the coverage gate, the docstring gate and the
- * merge-driver preparer) must behave identically when imported by their suites
- * versus executed as `main`, so the comparison lives in exactly one measured
- * module and can never drift between copies.
+ * Every shipped script that runs as a gate (the coverage gate, the docstring
+ * gate, the merge-driver preparer and the publish-attestation verifier) must
+ * behave identically when imported by its suite versus executed as `main`, so
+ * the comparison lives in exactly one measured module and can never drift
+ * between copies.
  */
 
 import { realpathSync } from "node:fs";

@@ -87,6 +87,7 @@ const COMMAND_PREFIXES = new Set([
   "npx",
   "bunx",
   "pnpx",
+  "corepack",
   // Shell keywords introduce a command rather than being one. `if npm publish`
   // runs npm; a scan that reads `if` as the program audits nothing.
   "if",
@@ -159,9 +160,21 @@ function isOperatorStart(character: string): boolean {
  */
 function readSubstitution(text: string, start: number): { inner: string; end: number } {
   if (text[start] === "`") {
-    const close = text.indexOf("`", start + 1);
-    if (close === -1) return { inner: text.slice(start + 1), end: text.length };
-    return { inner: text.slice(start + 1, close), end: close + 1 };
+    let index = start + 1;
+    while (index < text.length) {
+      if (text[index] === "\\") {
+        index += 2;
+        continue;
+      }
+      if (text[index] === "`") {
+        return {
+          inner: text.slice(start + 1, index).replace(/\\`/g, "`"),
+          end: index + 1,
+        };
+      }
+      index += 1;
+    }
+    return { inner: text.slice(start + 1), end: text.length };
   }
   // A parenthesis inside quotes is a literal, not a delimiter. Counting it
   // closes the substitution early and truncates the body, so
@@ -174,13 +187,10 @@ function readSubstitution(text: string, start: number): { inner: string; end: nu
     const character = text[index]!;
     if (character === "\\") index += 2;
     else {
-      // Quote state is bounded to one line. A workflow's prose carries
-      // apostrophes -- "GitHub's", "workflow's" -- inside double-quoted
-      // messages, and letting an unbalanced one persist across lines makes
-      // every later parenthesis look quoted, so the substitution runs on and
-      // swallows unrelated commands.
-      if (character === "\n") { single = false; double = false; }
-      else if (character === "'" && !double) single = !single;
+      // Quote state follows shell semantics across line breaks. A quoted
+      // parenthesis after a newline is still literal, so resetting either
+      // state here would truncate the substitution and hide later commands.
+      if (character === "'" && !double) single = !single;
       else if (character === '"' && !single) double = !double;
       else if (!single && !double && character === "(") depth += 1;
       else if (!single && !double && character === ")") depth -= 1;
@@ -297,6 +307,29 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
       started = true;
       continue;
     }
+    // `${name}`, `${name[@]}` and workflow `${{ expression }}` are one shell
+    // word. Treating the braces as command separators loses the words after
+    // an unresolved expansion, including the publish being audited.
+    if (character === "$" && text[index + 1] === "{") {
+      let depth = 0;
+      let end = index;
+      while (end < text.length) {
+        if (text[end] === "{") depth += 1;
+        else if (text[end] === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            end += 1;
+            break;
+          }
+        }
+        end += 1;
+      }
+      value += text.slice(index, end);
+      if (!started) startsQuoted = false;
+      started = true;
+      index = end - 1;
+      continue;
+    }
     if (character === " " || character === "\t" || character === "\r") {
       endWord();
       continue;
@@ -321,16 +354,22 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
 
   for (const body of nested) commands.push(...tokenizeCommands(body, depth + 1));
   for (const found of [...commands]) {
-    const name = commandName(found);
-    if (name === undefined || !SHELL_EVALUATORS.has(name)) continue;
-    // The shell joins an evaluator's words with a space and evaluates the
-    // result, so `eval "npm pub" "lish"` runs a publish that scanning each
-    // argument on its own never sees.
-    const payload = found.slice(1)
-      .filter((argument) => !argument.value.startsWith("-"))
-      .map((argument) => argument.value);
-    for (const body of new Set([...payload, payload.join(" ")])) {
-      commands.push(...tokenizeCommands(body, depth + 1));
+    // A wrapper option can make the first reading point at its value rather
+    // than the real evaluator: `sudo -u root bash -c 'npm publish'`. Audit
+    // every possible reading so evaluator recursion cannot be skipped by the
+    // same ambiguity that commandCandidates exists to close.
+    for (const candidate of commandCandidates(found)) {
+      const name = commandName(candidate);
+      if (name === undefined || !SHELL_EVALUATORS.has(name)) continue;
+      // The shell joins an evaluator's words with a space and evaluates the
+      // result, so `eval "npm pub" "lish"` runs a publish that scanning each
+      // argument on its own never sees.
+      const payload = candidate.slice(1)
+        .filter((argument) => !argument.value.startsWith("-"))
+        .map((argument) => argument.value);
+      for (const body of new Set([...payload, payload.join(" ")])) {
+        commands.push(...tokenizeCommands(body, depth + 1));
+      }
     }
   }
   return commands;
@@ -557,20 +596,20 @@ export function bashArrays(text: string): Map<string, string> {
  * invocation line can see, because the invocation line contains no publish. The
  * assignment is where the command actually is.
  *
- * Only literal single- or double-quoted values are indexed. An unquoted value
- * cannot hold a space and so cannot hold a command, and a value built from
- * other variables is not resolvable without evaluating the script, which this
- * module deliberately does not do.
+ * Literal single- or double-quoted values and simple unquoted words are
+ * indexed. An unquoted word cannot hold spaces but can still hold an executable
+ * name such as `NPM=npm`; a value built from other variables is not resolvable
+ * without evaluating the script, which this module deliberately does not do.
  *
  * @param text - File contents with continuations already joined.
  * @returns Variable name mapped to the literal text it holds.
  */
 export function shellScalars(text: string): Map<string, string> {
   const scalars = new Map<string, string>();
-  for (const match of text.matchAll(/(?:^|[\s;&|])([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"\n]*)"|'([^'\n]*)')/g)) {
-    // The alternation guarantees exactly one of the two value groups matched,
-    // so there is no third case to fall back to.
-    const value = match[2] ?? match[3]!;
+  for (const match of text.matchAll(/(?:^|[\s;&|])([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"\n]*)"|'([^'\n]*)'|([^\s;&|]+))/g)) {
+    // The alternation guarantees exactly one of the three value groups matched,
+    // so there is no fourth case to fall back to.
+    const value = match[2] ?? match[3] ?? match[4]!;
     // Only a plain literal is inlined. A value carrying a substitution, a
     // backtick, or a quote of its own changes how the line it lands in parses:
     // inlining `pkg_name="$(node -p …)"` injects an unbalanced parenthesis into

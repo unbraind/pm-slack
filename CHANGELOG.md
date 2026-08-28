@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Preserve append-only provenance history during review repair ([pm-slack-muxy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-muxy.toon))
+
 ## 2026.8.28 - 2026-08-28
 
 ### Fixed

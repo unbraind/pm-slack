@@ -59,6 +59,7 @@ const GENERATED_PREFIXES = ["dist/", "coverage/", "node_modules/", ".agents/pm/r
 /** Tracked paths that can execute a command, matched against the repository-relative path. */
 const EXECUTABLE_PATHS = [
   /^\.github\/workflows\/[^/]+\.ya?ml$/,
+  /^\.github\/actions\/.+\/action\.ya?ml$/,
   /(^|\/)package\.json$/,
   /\.(sh|bash|zsh|ksh)$/,
   /(^|\/)(Makefile|makefile|GNUmakefile)$/,
@@ -112,6 +113,109 @@ export function manifestCommandLines(text: string): string {
 // here only meant that a `publish` written after the word was never audited.
 const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]);
 
+/** npm options whose following word is a Boolean value rather than a value option. */
+const NPM_BOOLEAN_OPTIONS = new Set([
+  "--all",
+  "--allow-same-version",
+  "--allow-scripts-pending",
+  "--allow-scripts-pin",
+  "--allow-unused-patches",
+  "--audit",
+  "--bin-links",
+  "--browser",
+  "--bypass-2fa",
+  "--color",
+  "--commit-hooks",
+  "--dangerously-allow-all-scripts",
+  "--description",
+  "--dev",
+  "--diff-ignore-all-space",
+  "--diff-name-only",
+  "--diff-no-prefix",
+  "--diff-text",
+  "--dry-run",
+  "--engine-strict",
+  "--force",
+  "--foreground-scripts",
+  "--format-package-lock",
+  "--fund",
+  "--git-tag-version",
+  "--global",
+  "--global-style",
+  "--if-present",
+  "--ignore-existing",
+  "--ignore-extension",
+  "--ignore-patch-failures",
+  "--ignore-scripts",
+  "--include-attestations",
+  "--include-staged",
+  "--include-workspace-root",
+  "--init-private",
+  "--install-links",
+  "--json",
+  "--keep-edit-dir",
+  "--legacy-bundling",
+  "--legacy-peer-deps",
+  "--link",
+  "--long",
+  "--offline",
+  "--omit-lockfile-registry-resolved",
+  "--optional",
+  "--package-lock",
+  "--package-lock-only",
+  "--packages-all",
+  "--parseable",
+  "--prefer-dedupe",
+  "--prefer-offline",
+  "--prefer-online",
+  "--provenance",
+  "--no-provenance",
+  "--production",
+  "--progress",
+  "--read-only",
+  "--rebuild-bundle",
+  "--save",
+  "--save-bundle",
+  "--save-dev",
+  "--save-exact",
+  "--save-optional",
+  "--save-peer",
+  "--save-prod",
+  "--sign-git-commit",
+  "--sign-git-tag",
+  "--strict-allow-scripts",
+  "--strict-npmrc",
+  "--strict-peer-deps",
+  "--strict-ssl",
+  "--timing",
+  "--unicode",
+  "--update-notifier",
+  "--usage",
+  "--version",
+  "--versions",
+  "--workspaces",
+  "--workspaces-update",
+  "--yes",
+  "-a",
+  "-d",
+  "-f",
+  "-g",
+  "-j",
+  "-l",
+  "-p",
+  "-S",
+  "-B",
+  "-D",
+  "-E",
+  "-O",
+  "-P",
+  "-?",
+  "-H",
+  "-h",
+  "-v",
+  "-y",
+]);
+
 /**
  * Decide whether one command is a direct `npm publish`.
  *
@@ -128,6 +232,13 @@ const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]
  * package script whose body is scanned from the manifest, and requiring the
  * flag on the runner would report a defect that is not there.
  *
+ * Options with separate values are consumed before runner subcommands are
+ * considered, covering `npm --tag run publish` without turning a known Boolean
+ * flag's next word into an option value. Inline values are already one token and
+ * need no special handling. Unknown options are treated as value-taking, which
+ * preserves the conservative property: an unfamiliar option cannot make a real
+ * `publish` disappear from the audit.
+ *
  * The residual imprecision is `npm --tag publish ...`, a dist-tag named after
  * the subcommand, which this reads as a publish. That direction is deliberate:
  * a false positive is a report line to argue with, a false negative is an
@@ -140,9 +251,21 @@ const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]
  * @returns True when the command publishes.
  */
 export function isPublishCommand(command: ShellCommand): boolean {
-  for (const token of commandArguments(command)) {
-    if (RUNNER_SUBCOMMANDS.has(token.value)) return false;
+  const args = commandArguments(command);
+  let optionValue = false;
+  for (const token of args) {
+    if (optionValue) {
+      optionValue = false;
+      continue;
+    }
     if (token.value === "publish") return true;
+    if (RUNNER_SUBCOMMANDS.has(token.value)) return false;
+    if (token.value === "--") continue;
+    if (token.value.startsWith("-")) {
+      const option = token.value.split("=", 1)[0]!;
+      const boolean = NPM_BOOLEAN_OPTIONS.has(option) || option.startsWith("--no-");
+      optionValue = !token.value.includes("=") && !boolean;
+    }
   }
   return false;
 }
@@ -374,10 +497,16 @@ export function trackedPublishSources(root: string): string[] {
  * @returns Failures and notes for the whole repository.
  */
 export function verify(root: string): VerifierResult {
-  const sources: SourceFile[] = trackedPublishSources(root).map((file) => ({
-    file,
-    text: readFileSync(resolve(root, file), "utf8"),
-  }));
+  const sources: SourceFile[] = [];
+  for (const file of trackedPublishSources(root)) {
+    try {
+      sources.push({ file, text: readFileSync(resolve(root, file), "utf8") });
+    } catch {
+      // `firstBytes` applies the same explicit skip policy to unreadable paths;
+      // a dangling executable-shaped symlink must not turn the audit into an
+      // uncaught filesystem error.
+    }
+  }
   return auditPublishAttestation(sources);
 }
 

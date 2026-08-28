@@ -6,13 +6,14 @@ status: closed
 priority: 1
 tags[3]: "area:release","area:supply-chain","type:defect"
 created_at: "2026-08-28T06:27:16.194Z"
-updated_at: "2026-08-28T15:31:22.577Z"
+updated_at: "2026-08-28T21:06:20.394Z"
 closed_at: "2026-08-28T06:27:24.762Z"
 completed_at: "2026-08-28T06:27:24.762Z"
 author: codex
 acceptance_criteria: The release step has no publish path that omits --provenance; three provenance attempts are made; a version that landed despite a reported error is reconciled instead of republished; exhausting the attempts fails the job rather than publishing unattested; the workflow YAML parses and every bash run script passes bash -n.
-comments[1]{created_at,author,text}:
+comments[2]{created_at,author,text}:
   "2026-08-28T06:27:16.194Z",codex,"Non-vacuity proof:\nTest A (restore fallback): exit 1 — FAIL - .github/workflows/release.yml: a publish invocation does not enable --provenance, so it would publish an unattested artifact: npm publish --access public --ignore-scripts\nTest B (--provenance=false): exit 1 — FAIL - .github/workflows/release.yml: a publish invocation does not enable --provenance, so it would publish an unattested artifact: npm publish --access public --provenance=false --ignore-scripts\nTest C (clean tree): exit 0 — ok - .github/workflows/release.yml: 1 publish invocation(s), each carrying --provenance / verify-release-publish-attestation: every publish invocation is attested.\n\nGate table:\ntypecheck: 0, coverage: 82.31/86.10/84.88, verify:release-publish-attestation: 0"
+  "2026-08-28T21:06:20.394Z",pi-agent,"PR review follow-up on the attested-publish defect: fixed bare scalar, brace-expansion, composite-action, wrapper/evaluator, newline/backtick scanner paths and changed successful provenance publication to wait for registry attestation before returning success. Added regression coverage and preserved the preexisting history events via an explicit append-only correction."
 files[1]{path,scope,note}:
   .github/workflows/release.yml,project,publish step refuses to downgrade attestation and reconciles a late-landing version
 tests[1]{command,scope,timeout_seconds,note}:

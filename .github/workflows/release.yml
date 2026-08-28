@@ -677,25 +677,26 @@ jobs:
             attempt=$(( attempt + 1 ))
             if publish_with_provenance; then
               echo "Published with provenance on attempt ${attempt}."
-              exit 0
+              break
             fi
             if reconciled_attested; then
               echo "::notice::Version landed attested despite the reported error; treating as success."
-              exit 0
+              break
             fi
             if (( attempt < max_attempts )); then
               echo "Publish attempt ${attempt}/${max_attempts} failed; sleeping 30s before retry..."
               sleep 30
             fi
           done
-          # npm can accept a publish and still report an error, and the registry
-          # needs a moment to propagate before `npm view` can see it. The retry
-          # loop gave that grace incidentally, through the sleep between
-          # attempts; the final attempt has no sleep after it, so a single
-          # immediate read here would race propagation and fail a release npm
-          # had already accepted -- skipping the tag and the GitHub release for a
-          # version that is on the registry, which is the "npm ahead of git"
-          # split the release ordering exists to prevent. Poll instead.
+          # Do not return immediately after a successful publish. npm can accept
+          # the artifact before `dist.attestations` becomes visible to `npm view`,
+          # so every path that reaches success enters the same bounded poll below.
+          # The retry loop gave that grace incidentally for reported failures;
+          # the final attempt has no sleep after it, and a single immediate read
+          # would race propagation and fail a release npm had already accepted --
+          # skipping the tag and the GitHub release for a version that is on the
+          # registry, which is the "npm ahead of git" split the release ordering
+          # exists to prevent. Poll instead.
           #
           # 5 attempts, 30s apart. The bun verification step further down this
           # file already retries the same registry on the same 30s schedule,
