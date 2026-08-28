@@ -647,6 +647,11 @@ jobs:
             exit 1
           }
 
+          # Idempotence guard: if this exact version is already published AND
+          # attested, treat the publish as done. This is what lets an
+          # already-published release (e.g. 2026.8.10, which landed on npm while
+          # main was still at 2026.8.7) reconcile instead of failing with a 403
+          # when the workflow catches up and re-runs the transaction.
           if reconcile_or_refuse; then
             echo "::notice::${pkg_name}@${NPM_VERSION} already published and attested; skipping publish step."
             exit 0
