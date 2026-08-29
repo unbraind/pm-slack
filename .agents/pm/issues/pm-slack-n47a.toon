@@ -1,0 +1,21 @@
+id: pm-slack-n47a
+title: Rebase suffix-stable changelog release verification
+description: Rebase PR 76 after PR 81 and preserve version-derived changelog flags in the relocated release workflow.
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-29T04:49:11.737Z"
+updated_at: "2026-08-29T04:49:52.778Z"
+closed_at: "2026-08-29T04:49:52.765Z"
+completed_at: "2026-08-29T04:49:52.765Z"
+claim_principal: pi-agent
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-29T04:49:52.307Z",pi-agent,"Rebased all 16 commits onto merged PR 81, preserved both release verifiers and version-derived generator flags at the relocated release workflow steps. npm test 183/183, coverage, changelog check, and strict health passed."
+files[1]{path,scope,note}:
+  .github/workflows/release.yml,project,Preserve date-from-version after rebase
+tests[1]{command,path,scope}:
+  npm test,test,project
+close_reason: PR 76 is rebased with all changelog generation paths preserved and local gates green.
+body: ""
