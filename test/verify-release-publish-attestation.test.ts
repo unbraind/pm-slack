@@ -192,7 +192,7 @@ test("npm run publish is a script runner, not a publish", () => {
   assert.equal(isPublishCommand(onlyCommand("npm --access public publish")), true, "a flag value is not the subcommand");
   assert.equal(isPublishCommand(onlyCommand("npm -- npm publish")), true, "the option terminator is ignored while locating publish");
   assert.equal(isPublishCommand(onlyCommand("npm --ignore-scripts publish")), true);
-  for (const optionValue of ["npm --tag run publish --ignore-scripts", "npm --workspace run publish --ignore-scripts", "npm --no-fund publish --ignore-scripts", "npm --fund publish --ignore-scripts", "npm --foreground-scripts publish --ignore-scripts"]) {
+  for (const optionValue of ["npm --tag run publish --ignore-scripts", "npm --workspace run publish --ignore-scripts", "npm --no-fund publish --ignore-scripts", "npm --fund publish --ignore-scripts", "npm --foreground-scripts publish --ignore-scripts", "npm --silent publish --ignore-scripts"]) {
     assert.equal(isPublishCommand(onlyCommand(optionValue)), true, optionValue);
     assert.equal(
       auditPublishAttestation([{ file: "release.yml", text: `          ${ATTESTED}\n          ${optionValue}` }]).failures.length,
@@ -654,6 +654,7 @@ test("a redirection and its target are not command words", () => {
   // Greptile: `> /dev/null npm publish` runs npm, but a scan reading words in
   // order sees `>` as the program and audits nothing.
   const cases = [
+    "npm>/dev/null publish",
     "> /dev/null npm publish",
     ">/dev/null npm publish",
     "2>/dev/null npm publish",
@@ -669,7 +670,7 @@ test("a redirection and its target are not command words", () => {
   // that made this a bypass rather than a curiosity.
   const withSibling = {
     file: "release.yml",
-    text: "          npm publish --provenance\n          > /dev/null npm publish\n",
+    text: "          npm publish --provenance\n          npm>/dev/null publish\n",
   };
   assert.equal(auditPublishAttestation([withSibling]).failures.length, 1);
 });
@@ -806,6 +807,14 @@ test("unresolved brace expansions stay within one shell word", () => {
       text,
     );
   }
+});
+
+test("a command substitution inside a brace expansion is still audited", () => {
+  const result = auditPublishAttestation([{
+    file: "release.yml",
+    text: "          npm publish --provenance\n          x=${VAR:-$(npm publish)}\n",
+  }]);
+  assert.equal(result.failures.length, 1);
 });
 
 test("a quoted parenthesis after a newline remains inside its substitution", () => {

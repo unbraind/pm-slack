@@ -181,6 +181,7 @@ const NPM_BOOLEAN_OPTIONS = new Set([
   "--save-optional",
   "--save-peer",
   "--save-prod",
+  "--silent",
   "--sign-git-commit",
   "--sign-git-tag",
   "--strict-allow-scripts",

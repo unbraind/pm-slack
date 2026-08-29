@@ -1,0 +1,23 @@
+id: pm-slack-lzun
+title: Harden publish scanner and preserve audit history
+description: "Resolve PR 81 findings for attached redirections, substitutions inside brace expansions, npm silent option parsing, and append-only provenance corrections."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-29T04:39:15.503Z"
+updated_at: "2026-08-29T04:40:20.892Z"
+closed_at: "2026-08-29T04:40:20.878Z"
+completed_at: "2026-08-29T04:40:20.878Z"
+claim_principal: pi-agent
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-29T04:40:20.337Z",pi-agent,"Implemented attached executable redirection parsing, nested brace substitution scanning, and --silent Boolean classification. Restored original provenance-bearing events and appended event-index/path correction records. npm test 159/159, coverage, changelog check, and strict health passed."
+files[3]{path,scope,note}:
+  scripts/shell-command-scan.ts,project,Shell scanner hardening
+  scripts/verify-release-publish-attestation.ts,project,npm option classification
+  test/verify-release-publish-attestation.test.ts,project,Security regressions
+tests[1]{command,path,scope}:
+  npm test,test,project
+close_reason: All PR 81 findings fixed with regression coverage and append-only audit evidence.
+body: ""

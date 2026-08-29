@@ -324,7 +324,16 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
         }
         end += 1;
       }
-      value += text.slice(index, end);
+      const expansion = text.slice(index, end);
+      value += expansion;
+      // Preserve the expansion as one word, but still enumerate substitutions
+      // in its body: `${VAR:-$(npm publish)}` executes the nested command.
+      for (let inner = 0; inner < expansion.length; inner += 1) {
+        if (expansion[inner] !== "`" && !(expansion[inner] === "$" && expansion[inner + 1] === "(")) continue;
+        const found = readSubstitution(expansion, inner);
+        nested.push(found.inner);
+        inner = found.end - 1;
+      }
       if (!started) startsQuoted = false;
       started = true;
       index = end - 1;
@@ -412,6 +421,14 @@ function withoutRedirections(command: ShellCommand): ShellCommand {
     if (!isRedirection(token)) {
       // A joined form such as `>file` or `2>&1` is one word and takes no target.
       if (!token.startsQuoted && /^(?:[0-9]*>>?|[0-9]*<<?<?|&>>?)[^\s]/.test(token.value)) continue;
+      // Redirections need not be separated from the executable. The shell runs
+      // `npm>/dev/null publish` as npm with stdout redirected, not as a program
+      // literally named `npm>/dev/null`.
+      const suffix = token.startsQuoted ? null : /^(.+?)(?:[0-9]*>>?|[0-9]*<<?<?|&>>?)[^\s]*$/.exec(token.value);
+      if (suffix !== null) {
+        kept.push({ ...token, value: suffix[1]! });
+        continue;
+      }
       kept.push(token);
       continue;
     }
