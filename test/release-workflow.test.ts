@@ -464,3 +464,22 @@ test("publication is proven possible before anything is mutated", () => {
   assert.doesNotMatch(step, /-o\s+\/tmp\/[^\s"]+/);
   assert.match(step, /-o "\$\{response\}"/);
 });
+
+test("a successful provenance publish enters attestation reconciliation before success", () => {
+  const publish = executable(stepSource("Publish npm package"));
+  const success = publish.indexOf("if publish_with_provenance; then");
+  assert.ok(success >= 0, "the publish retry loop should call the provenance publisher");
+  const successEnd = publish.indexOf("fi", success);
+  assert.ok(successEnd > success, "the successful publish branch should be delimited");
+  const successBranch = publish.slice(success, successEnd + 2);
+  assert.match(successBranch, /break/);
+  assert.doesNotMatch(successBranch, /exit 0/);
+  assert.ok(
+    publish.indexOf("reconcile_attempts=", successEnd) > successEnd,
+    "successful publication must flow into the attestation poll",
+  );
+  assert.ok(
+    publish.indexOf("refuse_unattested_or_fail", successEnd) > publish.indexOf("reconcile_attempts=", successEnd),
+    "an expired attestation poll must refuse rather than report success",
+  );
+});

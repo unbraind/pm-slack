@@ -1,0 +1,31 @@
+id: pm-slack-muxy
+title: Preserve append-only provenance history during review repair
+description: "A review correction must retain every original provenance-bearing history event and append an explicit, replayable record of the normalization instead of rewriting prior audit history."
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-28T20:58:56.215Z"
+updated_at: "2026-08-28T21:06:12.988Z"
+closed_at: "2026-08-28T21:06:12.973Z"
+completed_at: "2026-08-28T21:06:12.973Z"
+claim_principal: pi-agent
+author: pi-agent
+resolution: Fixed all five unresolved publish-review findings and preserved provenance history append-only.
+expected_result: "Every reachable publish is audited, successful publishes are registry-attested before success, and prior history events remain replayable."
+actual_result: Release checks and focused tests pass; the original history events are retained and an explicit correction event records the ten normalized observations.
+notes[1]{created_at,author,text}:
+  "2026-08-28T21:04:45.400Z",pi-agent,"Decision: adopt all five unresolved findings. The workflow success path now breaks into the existing bounded registry-attestation poll and refuses after expiry; shell scanning resolves bare scalars, unresolved brace expansions, wrapper/evaluator recursion, and composite actions. The prior history records were restored and an explicit correction event was appended."
+files[6]{path,scope,note}:
+  .agents/pm/history/pm-slack-vrdp.jsonl,project,Append-only provenance correction
+  .github/workflows/release.yml,project,Successful publish now enters attestation polling
+  scripts/shell-command-scan.ts,project,"Shell tokenizer fixes for scalar,brace,evaluator,and wrapper paths"
+  scripts/verify-release-publish-attestation.ts,project,Publish parsing and executable-source coverage
+  test/release-workflow.test.ts,project,Successful publish attestation reconciliation contract
+  test/verify-release-publish-attestation.test.ts,project,Regression fixtures for publish bypasses
+tests[3]{command,path,scope,timeout_seconds}:
+  npm run coverage,test/verify-release-publish-attestation.test.ts,project,900
+  "npm run release:check",package.json,project,1200
+  ./node_modules/.bin/pm validate --check-history-drift --strict-exit --counts,.agents/pm/history,project,120
+close_reason: "Fixed in fix/refuse-unattested-publish-fallback; npm test passed with 155 tests, npm run release:check passed, and the append-only history chain validated with zero drift. Successful provenance publishes now enter the bounded attestation poll before success; shell and composite-action bypasses are covered by regression fixtures."
+body: ""

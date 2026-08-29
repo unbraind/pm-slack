@@ -1,9 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Harden publish scanner and preserve audit history ([pm-slack-lzun](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-lzun.toon))
+- Preserve append-only provenance history during review repair ([pm-slack-muxy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-muxy.toon))
+
 ## 2026.8.28 - 2026-08-28
 
 ### Fixed
 
+- A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
 ### Security
