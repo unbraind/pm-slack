@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Rebase suffix-stable changelog release verification ([pm-slack-n47a](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-n47a.toon))
 - Harden publish scanner and preserve audit history ([pm-slack-lzun](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-lzun.toon))
 - Preserve append-only provenance history during review repair ([pm-slack-muxy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-muxy.toon))
 
@@ -12,6 +13,7 @@
 ### Fixed
 
 - A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
+- Stabilise the changelog gate release date by deriving it from the calendar version instead of the clock ([pm-slack-tfrk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-tfrk.toon))
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
 ### Security
