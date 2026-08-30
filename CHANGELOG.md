@@ -4,13 +4,14 @@
 
 ### Fixed
 
-- Rebase suffix-stable changelog release verification ([pm-slack-n47a](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-n47a.toon))
-- Harden publish scanner and preserve audit history ([pm-slack-lzun](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-lzun.toon))
+- The release changelog remained Unreleased after the release tag was created ([pm-slack-53pp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-53pp.toon))
 
 ## 2026.8.29 - 2026-08-29
 
 ### Fixed
 
+- Rebase suffix-stable changelog release verification ([pm-slack-n47a](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-n47a.toon))
+- Harden publish scanner and preserve audit history ([pm-slack-lzun](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-lzun.toon))
 - Preserve append-only provenance history during review repair ([pm-slack-muxy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-muxy.toon))
 
 ## 2026.8.28 - 2026-08-28
