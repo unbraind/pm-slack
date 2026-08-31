@@ -1,0 +1,16 @@
+id: pm-slack-0o62
+title: Group codeql-action bumps into one pull request to end the split-PR deadlock
+description: "Dependabot opens github/codeql-action/init and github/codeql-action/analyze as two separate pull requests, but the two actions must carry the same version in a workflow, so each pull request alone leaves the pair mismatched and the codeql check fails on BOTH. Neither can go green on its own and the deadlock has to be broken by hand every time. Measured 2026-08-31 in unbraind/pm-gantt-chart 87 and 88, where codeql is the only failing check on each while every other check is green. Fix: a dependabot groups block so every github codeql-action bump arrives as one pull request, keeping init and analyze in lockstep."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-31T10:39:19.344Z"
+updated_at: "2026-08-31T10:39:20.600Z"
+closed_at: "2026-08-31T10:39:20.576Z"
+completed_at: "2026-08-31T10:39:20.576Z"
+author: claude-orchestrator
+files[1]{path,scope}:
+  .github/dependabot.yml,project
+close_reason: Resolved by a dependabot groups block that ships both codeql-action init and analyze bumps as one pull request.
+body: ""
