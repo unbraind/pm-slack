@@ -1208,8 +1208,20 @@ function parseRetryAfterMs(header: string | string[] | undefined): number | unde
   return undefined;
 }
 
+/**
+ * Upper bound on how long a single retry may sleep, in milliseconds.
+ *
+ * The exponential fallback is already bounded, but a server-supplied
+ * `Retry-After` was not — so the delay we control was capped and the delay a
+ * remote controls was not, which is exactly backwards. A response carrying
+ * `Retry-After: 99999999` would otherwise park the process for weeks. Slack's
+ * real rate-limit windows are seconds to a couple of minutes, so a two-minute
+ * ceiling never truncates a legitimate wait.
+ */
+const SLACK_MAX_RETRY_DELAY_MS = 120_000;
+
 function slackRetryDelayMs(attempt: number, retryAfterMs?: number): number {
-  if (retryAfterMs !== undefined) return retryAfterMs;
+  if (retryAfterMs !== undefined) return Math.min(SLACK_MAX_RETRY_DELAY_MS, retryAfterMs);
   return Math.min(8000, 500 * 2 ** attempt);
 }
 

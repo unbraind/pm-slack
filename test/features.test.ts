@@ -620,6 +620,21 @@ test("Slack retry helpers honor Retry-After and only retry transient failures", 
   assert.equal(slackRetryDelayMs(0), 500);
   assert.equal(slackRetryDelayMs(3), 4000);
   assert.equal(slackRetryDelayMs(0, 2500), 2500);
+
+  // A server-supplied Retry-After is clamped. Without the clamp this returns
+  // the raw value and the caller sleeps for eleven days on one response header,
+  // so the assertion below fails against an unclamped implementation rather
+  // than merely describing the clamped one.
+  assert.equal(
+    slackRetryDelayMs(0, 999_999_999),
+    120_000,
+    "a hostile or buggy Retry-After must not park the process indefinitely",
+  );
+  assert.equal(
+    slackRetryDelayMs(0, 119_999),
+    119_999,
+    "a legitimate wait just under the ceiling is passed through untouched",
+  );
   assert.equal(isRetryableSlackError({ status: 429 }), false, "plain objects are not treated as internal HTTP errors");
   assert.equal(isRetryableSlackError(new SlackHttpError(429, "rate limited")), true);
   assert.equal(isRetryableSlackError(new SlackHttpError(503, "temporary outage")), true);
