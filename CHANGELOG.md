@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- A Slack Retry-After header can park the process for weeks, because the delay we control is clamped and the delay a server controls is not ([pm-slack-m43u](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-m43u.toon))
 - This repository has never produced a static analysis, because it runs no CodeQL workflow ([pm-slack-ziy6](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-ziy6.toon))
 - Group codeql-action bumps into one pull request to end the split-PR deadlock ([pm-slack-0o62](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-0o62.toon))
 
