@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- This repository has never produced a static analysis, because it runs no CodeQL workflow ([pm-slack-ziy6](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-ziy6.toon))
 - Group codeql-action bumps into one pull request to end the split-PR deadlock ([pm-slack-0o62](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-0o62.toon))
 
 ## 2026.8.31 - 2026-08-31
