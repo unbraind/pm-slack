@@ -41,6 +41,8 @@ const {
   resolveEffectiveWebhook,
   assertWebhookConfigured,
   slackRetryDelayMs,
+  SLACK_MAX_RETRY_DELAY_MS,
+  sleep,
   parseRetryAfterMs,
   isRetryableSlackError,
   postToSlackOnce,
@@ -641,6 +643,55 @@ test("Slack retry helpers honor Retry-After and only retry transient failures", 
   assert.equal(isRetryableSlackError(new SlackHttpError(400, "bad webhook")), false);
   assert.equal(isRetryableSlackError(new Error("Slack webhook request timed out after 10s")), true);
   assert.equal(isRetryableSlackError(new Error("Slack webhook returned HTTP 400: bad webhook")), false);
+});
+
+// ---------------------------------------------------------------------------
+// Resource-exhaustion guard: sleep bounds the delay handed to setTimeout
+//
+// The CodeQL `js/resource-exhaustion` query anchors on the `sleep` helper, not
+// on any one caller: a helper that forwards its argument unchanged leaves the
+// path reachable for every caller, which is why the prior Retry-After clamp
+// at slackRetryDelayMs alone did not close the alert. This test proves the bound
+// is enforced at the anchor by capturing the value actually handed to
+// `setTimeout` and asserting it can never exceed SLACK_MAX_RETRY_DELAY_MS, no matter
+// how large (or negative) the caller's argument is. Against the unclamped helper
+// the adversarial value reaches `setTimeout` unchanged and the assertion fails.
+// ---------------------------------------------------------------------------
+
+test("sleep clamps the delay handed to setTimeout so a server-controlled value cannot park the process", async (t) => {
+  const calls: number[] = [];
+  const original = setTimeout;
+  t.mock.method(globalThis, "setTimeout", ((cb: (...a: unknown[]) => void, ms?: number) => {
+    calls.push(ms ?? 0);
+    // Resolve immediately so the promise settles without real waiting; only
+    // the delay value handed to setTimeout is under test.
+    return original(cb, 0);
+  }) as never);
+
+  // A value large enough that an unclamped setTimeout would park the process
+  // for ~28 millennia (MAX_SAFE_INTEGER ms). With the clamp this is collapsed
+  // to SLACK_MAX_RETRY_DELAY_MS before it ever reaches the timer.
+  await sleep(Number.MAX_SAFE_INTEGER);
+  assert.equal(calls.length, 1, "sleep schedules exactly one setTimeout");
+  assert.equal(
+    calls[0],
+    SLACK_MAX_RETRY_DELAY_MS,
+    `an unbounded ms (${Number.MAX_SAFE_INTEGER}) must be clamped to SLACK_MAX_RETRY_DELAY_MS before reaching setTimeout`,
+  );
+
+  // A negative argument is floored at zero rather than forwarded, so a buggy
+  // or hostile caller cannot hand setTimeout a negative schedule.
+  calls.length = 0;
+  await sleep(-1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], 0, "a negative ms is floored at zero, not forwarded to setTimeout");
+
+  // A legitimate delay under the ceiling passes through untouched, so the
+  // guard does not truncate a real wait.
+  calls.length = 0;
+  await sleep(250);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], 250, "a delay under the ceiling is passed through unchanged");
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Bound sleep helper so setTimeout never receives an unbounded server-controlled delay (CodeQL js/resource-exhaustion, index.ts:1176) ([pm-slack-7hrn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-7hrn.toon))
+
 ## 2026.9.1 - 2026-09-01
 
 ### Fixed
