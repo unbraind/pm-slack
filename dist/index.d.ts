@@ -378,6 +378,16 @@ declare function buildItemBlockKit(item: PmItem, event: EventKind, opts?: BlockK
  * - "text":     plain mrkdwn only (no `blocks`), for minimal/legacy channels.
  */
 declare function buildItemPayload(item: PmItem, event: EventKind, format: MessageFormat, opts?: BlockKitOptions): SlackPayload;
+/**
+ * Resolve after at most {@link SLACK_SLEEP_MAX_MS} milliseconds.
+ *
+ * The argument is clamped at the anchor (here) rather than at every call site:
+ * bounding one caller leaves the path reachable for every other, which is why
+ * the prior Retry-After clamp alone did not close the alert. `ms` is also floored
+ * at zero so a negative value schedules an immediate tick rather than being
+ * treated as a relative schedule by `setTimeout`.
+ */
+declare const sleep: (ms: number) => Promise<void>;
 declare class SlackHttpError extends Error {
     status: number;
     retryAfterMs?: number;
@@ -587,6 +597,8 @@ export declare const __test__: {
     resolveEffectiveWebhook: typeof resolveEffectiveWebhook;
     assertWebhookConfigured: typeof assertWebhookConfigured;
     slackRetryDelayMs: typeof slackRetryDelayMs;
+    SLACK_SLEEP_MAX_MS: number;
+    sleep: typeof sleep;
     parseRetryAfterMs: typeof parseRetryAfterMs;
     isRetryableSlackError: typeof isRetryableSlackError;
     postToSlackOnce: typeof postToSlackOnce;

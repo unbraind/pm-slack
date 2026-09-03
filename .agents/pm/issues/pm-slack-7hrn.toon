@@ -1,0 +1,22 @@
+id: pm-slack-7hrn
+title: "Bound sleep helper so setTimeout never receives an unbounded server-controlled delay (CodeQL js/resource-exhaustion, index.ts:1176)"
+description: ""
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-09-03T17:28:11.285Z"
+updated_at: "2026-09-03T17:30:07.881Z"
+closed_at: "2026-09-03T17:30:07.839Z"
+completed_at: "2026-09-03T17:30:07.839Z"
+claim_principal: pi-agent
+author: pi-agent
+expected_result: "CodeQL js/resource-exhaustion path removed at index.ts:1176"
+comments[1]{created_at,author,text}:
+  "2026-09-03T17:28:47.690Z",codex,"CodeQL alert: js/resource-exhaustion at index.ts:1176 (the `sleep` helper).\n\nRoot cause: the query anchors on the `sleep` helper, whose `ms` parameter accepts any number from any caller. A prior fix (dd71b8e) clamped `Retry-After` inside `slackRetryDelayMs` — one call site — but left the helper itself unbounded, so the path the query describes stayed reachable for every other caller.\n\nCall-site audit (every caller of `sleep`):\n- index.ts:1351 `await sleep(slackRetryDelayMs(attempt, retryAfterMs))` — the only call site. Its argument is now clamped by `slackRetryDelayMs`, but the helper is the anchor, so the fix belongs at the helper, not here. No call site can receive a raw server-controlled value any longer because the helper bounds it regardless of caller.\n\nFix at the anchor (index.ts, `sleep`): clamp `ms` with `Math.min(SLACK_SLEEP_MAX_MS, Math.max(0, ms))` before handing it to `setTimeout`. A new `SLACK_SLEEP_MAX_MS = 120_000` (two minutes, matching the legitimate retry ceiling) bounds the schedule; the floor at zero stops a negative argument being forwarded. The bound is enforced at the helper so an unbounded value can never reach `setTimeout` no matter who calls it.\n\nRegression test (\"sleep clamps the delay handed to setTimeout so a server-controlled value cannot park the process\") captures the value handed to `setTimeout` via `t.mock.method(globalThis, \"setTimeout\", ...)` and asserts:\n  - `sleep(Number.MAX_SAFE_INTEGER)` hands `setTimeout` exactly `SLACK_SLEEP_MAX_MS` (120_000), not 9007199254740991.\n  - `sleep(-1)` hands `setTimeout` 0, not -1.\n  - `sleep(250)` passes 250 through unchanged.\n\nMeasured failing output WITHOUT the fix (sleep reverted to `setTimeout(resolve, ms)`):\n  AssertionError: an unbounded ms (9007199254740991) must be clamped to SLACK_SLEEP_MAX_MS before reaching setTimeout\n  + actual: 9007199254740991\n  - expected: 120000\n  fail 1 / pass 0\n\nMeasured passing output WITH the fix:\n  ✔ sleep clamps the delay handed to setTimeout so a server-controlled value cannot park the process (26.279809ms)\n  pass 1 / fail 0\n"
+tests[1]{command,path,scope,provenance{author,created_at,source_kind,source_ref},note}:
+  npm test,test/features.test.ts,project,codex,"2026-09-03T17:29:40.233Z",local_mutation,main,sleep clamps the delay handed to setTimeout so a server-controlled value cannot park the process
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-slack/security/codeql/js/resource-exhaustion",project,"js/resource-exhaustion @ index.ts:1176"
+close_reason: "Fixed at the anchor: the sleep helper now clamps ms with Math.min(SLACK_SLEEP_MAX_MS, Math.max(0, ms)) before handing it to setTimeout, so an unbounded server-controlled value can never reach setTimeout regardless of caller. SLACK_SLEEP_MAX_MS=120000 matches the legitimate retry ceiling, so no real wait is truncated. Regression test (sleep clamps the delay handed to setTimeout so a server-controlled value cannot park the process) captures the value handed to setTimeout and fails without the fix (9007199254740991 vs 120000), passes with it. Gates: build, typecheck, npm test 184/184, coverage met, pm health --strict-exit 0, changelog:full 0."
+body: ""

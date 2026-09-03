@@ -1173,7 +1173,32 @@ function buildItemPayload(
 // Slack HTTP POST
 // ---------------------------------------------------------------------------
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Upper bound on any single `setTimeout` this client will schedule, in
+ * milliseconds.
+ *
+ * `setTimeout` accepts any non-negative number, so a sleep helper that forwards
+ * its argument unchanged lets a server-controlled value (or any future caller)
+ * park the process for arbitrarily long — the resource-exhaustion path the
+ * CodeQL `js/resource-exhaustion` query anchors on this helper. The bound is
+ * enforced at the helper itself, not at a call site, so an unbounded `ms` can
+ * never reach `setTimeout` regardless of who calls it. Two minutes mirrors the
+ * legitimate retry ceiling (see {@link SLACK_MAX_RETRY_DELAY_MS}); nothing in
+ * this client waits longer, so the clamp never truncates a real wait.
+ */
+const SLACK_SLEEP_MAX_MS = 120_000;
+
+/**
+ * Resolve after at most {@link SLACK_SLEEP_MAX_MS} milliseconds.
+ *
+ * The argument is clamped at the anchor (here) rather than at every call site:
+ * bounding one caller leaves the path reachable for every other, which is why
+ * the prior Retry-After clamp alone did not close the alert. `ms` is also floored
+ * at zero so a negative value schedules an immediate tick rather than being
+ * treated as a relative schedule by `setTimeout`.
+ */
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, Math.min(SLACK_SLEEP_MAX_MS, Math.max(0, ms))));
 
 class SlackHttpError extends Error {
   status: number;
@@ -2384,6 +2409,8 @@ export const __test__ = {
   resolveEffectiveWebhook,
   assertWebhookConfigured,
   slackRetryDelayMs,
+  SLACK_SLEEP_MAX_MS,
+  sleep,
   parseRetryAfterMs,
   isRetryableSlackError,
   postToSlackOnce,
