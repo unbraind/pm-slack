@@ -41,7 +41,7 @@ const {
   resolveEffectiveWebhook,
   assertWebhookConfigured,
   slackRetryDelayMs,
-  SLACK_SLEEP_MAX_MS,
+  SLACK_MAX_RETRY_DELAY_MS,
   sleep,
   parseRetryAfterMs,
   isRetryableSlackError,
@@ -653,7 +653,7 @@ test("Slack retry helpers honor Retry-After and only retry transient failures", 
 // path reachable for every caller, which is why the prior Retry-After clamp
 // at slackRetryDelayMs alone did not close the alert. This test proves the bound
 // is enforced at the anchor by capturing the value actually handed to
-// `setTimeout` and asserting it can never exceed SLACK_SLEEP_MAX_MS, no matter
+// `setTimeout` and asserting it can never exceed SLACK_MAX_RETRY_DELAY_MS, no matter
 // how large (or negative) the caller's argument is. Against the unclamped helper
 // the adversarial value reaches `setTimeout` unchanged and the assertion fails.
 // ---------------------------------------------------------------------------
@@ -670,13 +670,13 @@ test("sleep clamps the delay handed to setTimeout so a server-controlled value c
 
   // A value large enough that an unclamped setTimeout would park the process
   // for ~28 millennia (MAX_SAFE_INTEGER ms). With the clamp this is collapsed
-  // to SLACK_SLEEP_MAX_MS before it ever reaches the timer.
+  // to SLACK_MAX_RETRY_DELAY_MS before it ever reaches the timer.
   await sleep(Number.MAX_SAFE_INTEGER);
   assert.equal(calls.length, 1, "sleep schedules exactly one setTimeout");
   assert.equal(
     calls[0],
-    SLACK_SLEEP_MAX_MS,
-    `an unbounded ms (${Number.MAX_SAFE_INTEGER}) must be clamped to SLACK_SLEEP_MAX_MS before reaching setTimeout`,
+    SLACK_MAX_RETRY_DELAY_MS,
+    `an unbounded ms (${Number.MAX_SAFE_INTEGER}) must be clamped to SLACK_MAX_RETRY_DELAY_MS before reaching setTimeout`,
   );
 
   // A negative argument is floored at zero rather than forwarded, so a buggy

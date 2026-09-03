@@ -1174,31 +1174,46 @@ function buildItemPayload(
 // ---------------------------------------------------------------------------
 
 /**
- * Upper bound on any single `setTimeout` this client will schedule, in
- * milliseconds.
+ * Upper bound on how long a single retry may sleep, in milliseconds.
  *
- * `setTimeout` accepts any non-negative number, so a sleep helper that forwards
- * its argument unchanged lets a server-controlled value (or any future caller)
- * park the process for arbitrarily long — the resource-exhaustion path the
- * CodeQL `js/resource-exhaustion` query anchors on this helper. The bound is
- * enforced at the helper itself, not at a call site, so an unbounded `ms` can
- * never reach `setTimeout` regardless of who calls it. Two minutes mirrors the
- * legitimate retry ceiling (see {@link SLACK_MAX_RETRY_DELAY_MS}); nothing in
- * this client waits longer, so the clamp never truncates a real wait.
+ * The exponential fallback is already bounded, but a server-supplied
+ * `Retry-After` was not — so the delay we control was capped and the delay a
+ * remote controls was not, which is exactly backwards. A response carrying
+ * `Retry-After: 99999999` would otherwise park the process for weeks. Slack's
+ * real rate-limit windows are seconds to a couple of minutes, so a two-minute
+ * ceiling never truncates a legitimate wait.
  */
-const SLACK_SLEEP_MAX_MS = 120_000;
+const SLACK_MAX_RETRY_DELAY_MS = 120_000;
 
 /**
- * Resolve after at most {@link SLACK_SLEEP_MAX_MS} milliseconds.
+ * Resolve after at most {@link SLACK_MAX_RETRY_DELAY_MS} milliseconds.
  *
- * The argument is clamped at the anchor (here) rather than at every call site:
- * bounding one caller leaves the path reachable for every other, which is why
- * the prior Retry-After clamp alone did not close the alert. `ms` is also floored
- * at zero so a negative value schedules an immediate tick rather than being
- * treated as a relative schedule by `setTimeout`.
+ * `setTimeout` accepts any non-negative number, so a helper that forwards its
+ * argument unchanged lets a server-controlled value — or any future caller —
+ * park the process for arbitrarily long. That is the resource-exhaustion path
+ * CodeQL anchors on this helper, and it is why the earlier `Retry-After` clamp
+ * did not close it: that clamp sits at one call site, while the reachable path
+ * the query describes is the helper's own unbounded parameter, which every
+ * other caller can still reach.
+ *
+ * The bound is therefore applied here, at the anchor. It is written as an
+ * explicit comparison against a single named ceiling rather than as nested
+ * `Math` calls so the bound is legible at the point of use, and it reads the
+ * same {@link SLACK_MAX_RETRY_DELAY_MS} the retry policy uses rather than a
+ * second constant of its own — two ceilings governing one retry path would
+ * drift the moment either were updated alone.
+ *
+ * `ms` is also floored at zero, and the comparison is ordered so `NaN` takes
+ * the floor rather than falling through: every comparison against `NaN` is
+ * false, so a `NaN` delay lands on 0 instead of being coerced silently.
+ *
+ * @param ms - Requested delay in milliseconds; any value, from any caller.
+ * @returns A promise resolving after a delay in `[0, SLACK_MAX_RETRY_DELAY_MS]`.
  */
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, Math.min(SLACK_SLEEP_MAX_MS, Math.max(0, ms))));
+const sleep = (ms: number): Promise<void> => {
+  const bounded = ms > SLACK_MAX_RETRY_DELAY_MS ? SLACK_MAX_RETRY_DELAY_MS : ms > 0 ? ms : 0;
+  return new Promise((resolve) => setTimeout(resolve, bounded));
+};
 
 class SlackHttpError extends Error {
   status: number;
@@ -1233,17 +1248,7 @@ function parseRetryAfterMs(header: string | string[] | undefined): number | unde
   return undefined;
 }
 
-/**
- * Upper bound on how long a single retry may sleep, in milliseconds.
- *
- * The exponential fallback is already bounded, but a server-supplied
- * `Retry-After` was not — so the delay we control was capped and the delay a
- * remote controls was not, which is exactly backwards. A response carrying
- * `Retry-After: 99999999` would otherwise park the process for weeks. Slack's
- * real rate-limit windows are seconds to a couple of minutes, so a two-minute
- * ceiling never truncates a legitimate wait.
- */
-const SLACK_MAX_RETRY_DELAY_MS = 120_000;
+
 
 function slackRetryDelayMs(attempt: number, retryAfterMs?: number): number {
   if (retryAfterMs !== undefined) return Math.min(SLACK_MAX_RETRY_DELAY_MS, retryAfterMs);
@@ -2409,7 +2414,7 @@ export const __test__ = {
   resolveEffectiveWebhook,
   assertWebhookConfigured,
   slackRetryDelayMs,
-  SLACK_SLEEP_MAX_MS,
+  SLACK_MAX_RETRY_DELAY_MS,
   sleep,
   parseRetryAfterMs,
   isRetryableSlackError,

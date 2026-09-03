@@ -379,13 +379,29 @@ declare function buildItemBlockKit(item: PmItem, event: EventKind, opts?: BlockK
  */
 declare function buildItemPayload(item: PmItem, event: EventKind, format: MessageFormat, opts?: BlockKitOptions): SlackPayload;
 /**
- * Resolve after at most {@link SLACK_SLEEP_MAX_MS} milliseconds.
+ * Resolve after at most {@link SLACK_MAX_RETRY_DELAY_MS} milliseconds.
  *
- * The argument is clamped at the anchor (here) rather than at every call site:
- * bounding one caller leaves the path reachable for every other, which is why
- * the prior Retry-After clamp alone did not close the alert. `ms` is also floored
- * at zero so a negative value schedules an immediate tick rather than being
- * treated as a relative schedule by `setTimeout`.
+ * `setTimeout` accepts any non-negative number, so a helper that forwards its
+ * argument unchanged lets a server-controlled value — or any future caller —
+ * park the process for arbitrarily long. That is the resource-exhaustion path
+ * CodeQL anchors on this helper, and it is why the earlier `Retry-After` clamp
+ * did not close it: that clamp sits at one call site, while the reachable path
+ * the query describes is the helper's own unbounded parameter, which every
+ * other caller can still reach.
+ *
+ * The bound is therefore applied here, at the anchor. It is written as an
+ * explicit comparison against a single named ceiling rather than as nested
+ * `Math` calls so the bound is legible at the point of use, and it reads the
+ * same {@link SLACK_MAX_RETRY_DELAY_MS} the retry policy uses rather than a
+ * second constant of its own — two ceilings governing one retry path would
+ * drift the moment either were updated alone.
+ *
+ * `ms` is also floored at zero, and the comparison is ordered so `NaN` takes
+ * the floor rather than falling through: every comparison against `NaN` is
+ * false, so a `NaN` delay lands on 0 instead of being coerced silently.
+ *
+ * @param ms - Requested delay in milliseconds; any value, from any caller.
+ * @returns A promise resolving after a delay in `[0, SLACK_MAX_RETRY_DELAY_MS]`.
  */
 declare const sleep: (ms: number) => Promise<void>;
 declare class SlackHttpError extends Error {
@@ -597,7 +613,7 @@ export declare const __test__: {
     resolveEffectiveWebhook: typeof resolveEffectiveWebhook;
     assertWebhookConfigured: typeof assertWebhookConfigured;
     slackRetryDelayMs: typeof slackRetryDelayMs;
-    SLACK_SLEEP_MAX_MS: number;
+    SLACK_MAX_RETRY_DELAY_MS: number;
     sleep: typeof sleep;
     parseRetryAfterMs: typeof parseRetryAfterMs;
     isRetryableSlackError: typeof isRetryableSlackError;
