@@ -1,0 +1,18 @@
+id: pm-slack-gmno
+title: Consume the canonical attestation gate instead of carrying a copy of it
+description: "This repository carried its own 721-line shell scanner and 554-line verifier, duplicated from the same origin as every other package in the fleet. That gate decides whether an artefact may reach the registry, so a false pass is the failure that matters - and the canonical implementation has had many fail-open constructions found and closed in it. A copy frozen at any point in that sequence still admits every construction closed after it. The scanner is deleted, the verifier becomes a thin launcher over the published pm-ops/attestation export, and the changelog-date verifier imports its shell helpers from pm-ops/shell-scan. Measured BEFORE: nonliteral-overwrite,nonliteral-overwrite-cmdsub,bare-brace-scope-escape,subshell-scope-escape,cmdsub-in-command-position,backtick-command-position,unset-after-bind,if-branch-bind,semicolon-same-line-bind (9 wrong). Measured AFTER (target): nonliteral-overwrite,nonliteral-overwrite-cmdsub."
+type: Chore
+status: closed
+priority: 1
+tags[2]: attestation,security
+created_at: "2026-09-07T09:48:14.550Z"
+updated_at: "2026-09-07T09:57:55.539Z"
+closed_at: "2026-09-07T09:57:55.520Z"
+completed_at: "2026-09-07T09:57:55.520Z"
+claim_principal: pi-agent
+author: pi-agent
+acceptance_criteria: "Delete scripts/shell-command-scan.ts; Rewrite scripts/verify-release-publish-attestation.ts as a thin launcher over pm-ops/attestation; Repoint scripts/verify-release-changelog-date.ts to pm-ops/shell-scan; Replace test/shell-command-scan.test.ts and test/verify-release-publish-attestation.test.ts as consumer tests; All quality gates pass: check, docstring, coverage, verify:release-publish-attestation, test"
+comments[1]{created_at,author,text}:
+  "2026-09-07T09:57:50.895Z",pi-agent,"All quality gates pass: check, docstring, coverage, verify:release-publish-attestation, test (123/123). BEFORE: 9 wrong. AFTER: clean (0 wrong). pm-ops 2026.9.6-1 from local fleet."
+close_reason: "Convergence complete. Scanner deleted, verifier is thin launcher over pm-ops/attestation, tests rewritten as consumer tests. All gates pass. check.sh: 9 wrong -> clean."
+body: ""
