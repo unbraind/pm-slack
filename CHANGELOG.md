@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Consume the canonical attestation gate instead of carrying a copy of it ([pm-slack-gmno](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-gmno.toon))
+
 ## 2026.9.4 - 2026-09-04
 
 ### Fixed
