@@ -26,7 +26,7 @@ import { pathToFileURL } from "node:url";
 
 import { auditPublishAttestation, report, verify } from "pm-ops/attestation";
 
-import { runIfMain } from "../scripts/verify-release-publish-attestation.ts";
+import { runIfMain, auditPublishAttestation as launcher_auditPublishAttestation, report as launcher_report, verify as launcher_verify } from "../scripts/verify-release-publish-attestation.ts";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -48,9 +48,13 @@ test("the gate is the resolved package export, not a local copy", async () => {
     "the gate must not resolve any part of its shell model locally",
   );
 
-  // The functions the launcher runs are the package's own, by reference.
-  assert.equal(typeof verify, "function");
-  assert.equal(typeof report, "function");
+  // Identity, not similarity: the launcher must re-export the package's own
+  // functions. Asserting only that the package exports functions would pass
+  // for a launcher that imports the package and then ignores it, which is
+  // precisely the re-fork this test exists to catch.
+  assert.equal(launcher_auditPublishAttestation, auditPublishAttestation, "the launcher must re-export the package's own auditPublishAttestation");
+  assert.equal(launcher_report, report, "the launcher must re-export the package's own report");
+  assert.equal(launcher_verify, verify, "the launcher must re-export the package's own verify");
 });
 
 test("the resolved gate still refuses an unattested publish", () => {
