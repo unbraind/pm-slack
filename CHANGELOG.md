@@ -6,6 +6,10 @@
 
 - Consume the canonical attestation gate instead of carrying a copy of it ([pm-slack-gmno](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-gmno.toon))
 
+### Other
+
+- Harden the attestation consumer suite to match the rest of the converged fleet ([pm-slack-z1pl](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-z1pl.toon))
+
 ## 2026.9.4 - 2026-09-04
 
 ### Fixed
