@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Certify pm CLI 2026.9.10 and pick up the canonical auditor fixes the lockfile was holding back ([pm-slack-v3u2](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-v3u2.toon))
+
 ## 2026.9.8 - 2026-09-08
 
 ### Security
