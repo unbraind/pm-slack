@@ -1852,7 +1852,7 @@ const defineExtension = <TModule extends ExtensionModule>(module: TModule): TMod
 
 export default defineExtension({
   name: "pm-slack",
-  version: "2026.9.9",
+  version: "2026.9.11",
 
   activate(api: ExtensionApi) {
     // -----------------------------------------------------------------------
