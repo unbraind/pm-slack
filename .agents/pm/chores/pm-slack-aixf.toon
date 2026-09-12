@@ -2,11 +2,11 @@ id: pm-slack-aixf
 title: Certify the CLI and SDK on PM 2026.9.7
 description: "Upgrade to published PM CLI/SDK 2026.9.7 and pm-changelog 2026.9.6; verify package gates against the actual installed SDK and retain independent production-readiness limitations. The CLI pin was upgraded before tracker writes to honor its history epoch compatibility refusal. Companion: pm-cli-website-6yiv."
 type: Chore
-status: closed
+status: canceled
 priority: 2
 tags[3]: cli,compatibility,sdk
 created_at: "2026-09-07T21:00:34.158Z"
-updated_at: "2026-09-12T21:10:08.098Z"
+updated_at: "2026-09-12T21:16:03.564Z"
 closed_at: "2026-09-12T21:10:08.065Z"
 completed_at: "2026-09-12T21:10:08.065Z"
 claim_principal: codex-pm-ecosystem
