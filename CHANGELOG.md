@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Certify pm CLI 2026.9.17 ([pm-slack-eoqy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-eoqy.toon))
+
 ## 2026.9.13 - 2026-09-13
 
 ### Other
