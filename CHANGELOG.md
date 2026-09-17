@@ -46,6 +46,8 @@
 
 ### Fixed
 
+- A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
+- Stabilise the changelog gate release date by deriving it from the calendar version instead of the clock ([pm-slack-tfrk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-tfrk.toon))
 - Rebase suffix-stable changelog release verification ([pm-slack-n47a](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-n47a.toon))
 - Harden publish scanner and preserve audit history ([pm-slack-lzun](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-lzun.toon))
 - Preserve append-only provenance history during review repair ([pm-slack-muxy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-muxy.toon))
@@ -54,8 +56,6 @@
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
-- Stabilise the changelog gate release date by deriving it from the calendar version instead of the clock ([pm-slack-tfrk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-tfrk.toon))
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
 ### Security
@@ -66,11 +66,16 @@
 
 - Drop inert pm manifest key and guard the closed manifest vocabulary ([pm-slack-kaku](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-kaku.toon))
 
-## 2026.8.16 - 2026-08-16
+## 2026.8.17 - 2026-08-17
 
 ### Fixed
 
 - The pm CLI compatibility floor was declared only in peerDependencies, which only npm enforces, and not in manifest.json pm_min_version, which is the field the CLI enforces ([pm-slack-4big](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-4big.toon))
+
+## 2026.8.16 - 2026-08-16
+
+### Fixed
+
 - A slack posting command can silently lose its preflight webhook gate when the override scope drifts from the declared commands ([pm-slack-wymh](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wymh.toon))
 
 ## 2026.8.15 - 2026-08-15
@@ -101,7 +106,7 @@
 
 - Resolve pm-changelog to the release that derives release dates in UTC ([pm-slack-vrdp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-vrdp.toon))
 
-## 2026.7.31 - 2026-07-31
+## 2026.8.1 - 2026-08-01
 
 ### Fixed
 
