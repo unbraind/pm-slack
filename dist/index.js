@@ -55,6 +55,22 @@ class CommandError extends Error {
         this.exitCode = exitCode;
     }
 }
+/**
+ * Extract a human-readable message from a thrown value.
+ *
+ * Every throw site in this package produces an `Error` instance
+ * (`CommandError`, `SlackHttpError`, or `new Error(…)`), so the `String(err)`
+ * fallback is not reached at runtime. It is kept as a defensive guard against
+ * a future throw site that violates that invariant, and is exported for test
+ * so both arms can be exercised without constructing an unreachable production
+ * path.
+ *
+ * @param err - The value caught in a `catch` block.
+ * @returns The error message, or a stringified fallback for non-`Error` values.
+ */
+function toErrorMessage(err) {
+    return err instanceof Error ? err.message : String(err);
+}
 // ---------------------------------------------------------------------------
 // Option helpers
 //
@@ -173,6 +189,19 @@ function parseEvents(spec) {
         .map((e) => normalizeEvent(e))
         .filter((e) => e !== null);
     return parsed.length > 0 ? new Set(parsed) : new Set(ALL_EVENTS);
+}
+/**
+ * The header verb for a notification: the first selected event in
+ * {@link ALL_EVENTS} priority order, so `--on close,create` still reads as a
+ * create. {@link parseEvents} never returns an empty set, but a `Set` cannot
+ * carry non-emptiness in its type, so an empty selection falls back to
+ * `create` (the verb `--on` defaults to) instead of being asserted away.
+ *
+ * @param events - The selected events, normally from {@link parseEvents}.
+ * @returns The event whose template heads the message.
+ */
+function primaryEvent(events) {
+    return ALL_EVENTS.find((e) => events.has(e)) ?? "create";
 }
 // ---------------------------------------------------------------------------
 // Format parsing
@@ -1139,7 +1168,9 @@ function postToSlackOnce(webhookUrl, payload) {
                 data += chunk.toString();
             });
             res.on("end", () => {
-                const status = res.statusCode ?? 0;
+                // A ClientRequest response always carries statusCode; the `undefined`
+                // in IncomingMessage's type exists only for server-side requests.
+                const status = res.statusCode;
                 if (status >= 200 && status < 300) {
                     resolve();
                 }
@@ -1188,7 +1219,9 @@ async function postToSlack(webhookUrl, payload) {
             await sleep(slackRetryDelayMs(attempt, retryAfterMs));
         }
     }
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    // The loop runs at least once, and postToSlackOnce rejects only with a
+    // SlackHttpError or the Error node:https emits, so lastErr is an Error here.
+    throw lastErr;
 }
 // ---------------------------------------------------------------------------
 // Digest: reading the pm store + activity aggregation
@@ -1293,7 +1326,7 @@ function resolveWindow(since, days, now = Date.now()) {
     return { cutoffMs: now - d * 24 * 60 * 60 * 1000, label: `last ${d} day${d === 1 ? "" : "s"}` };
 }
 function statusIsClosed(status) {
-    const s = (status ?? "").toLowerCase();
+    const s = status.toLowerCase();
     return s === "closed" || s === "done" || s === "resolved" || s === "complete" || s === "completed";
 }
 /**
@@ -1659,35 +1692,8 @@ export default defineExtension({
                 }
                 catch (err) {
                     // Hooks must never throw or block the command — swallow everything.
-                    const message = err instanceof Error ? err.message : String(err);
+                    const message = toErrorMessage(err);
                     console.error(`[pm-slack] afterCommand hook error (ignored): ${message}`);
-                }
-            });
-        }
-        else if (typeof api.hooks?.beforeCommand === "function") {
-            // Fallback: use beforeCommand if afterCommand is unavailable
-            // (result data is unavailable, so we can only notify on command name).
-            api.hooks.beforeCommand(async (ctx) => {
-                try {
-                    console.error("[pm-slack] afterCommand not available — limited event detection active");
-                    const config = loadConfig();
-                    if (!config)
-                        return;
-                    const cmd = ctx.command?.toLowerCase() ?? "";
-                    let event = null;
-                    if (CREATE_COMMANDS.has(cmd))
-                        event = "create";
-                    else if (CLOSE_COMMANDS.has(cmd))
-                        event = "close";
-                    if (!event || !config.events.has(event))
-                        return;
-                    const cmdArgs = (ctx.args ?? []).join(" ");
-                    const text = `pm command \`${ctx.command}\` triggered event *${event}*\n${cmdArgs}`;
-                    await postToSlack(config.webhookUrl, { text, mrkdwn: true, channel: config.channel });
-                }
-                catch (err) {
-                    const message = err instanceof Error ? err.message : String(err);
-                    console.error(`[pm-slack] beforeCommand hook error (ignored): ${message}`);
                 }
             });
         }
@@ -1731,7 +1737,7 @@ export default defineExtension({
                     catch (err) {
                         // The runtime swallows throws here; emit a visible warning so the
                         // signal isn't lost. The handler-level gate provides the real abort.
-                        const message = err instanceof Error ? err.message : String(err);
+                        const message = toErrorMessage(err);
                         console.error(`[pm-slack] preflight: ${message}`);
                     }
                     return {};
@@ -1793,7 +1799,7 @@ export default defineExtension({
                     }
                     // `--on` selects the message template. First event wins for the header verb.
                     const events = parseEvents(readStrOption(options, "on") ?? "create");
-                    const event = (ALL_EVENTS.find((e) => events.has(e)) ?? "create");
+                    const event = primaryEvent(events);
                     // --channel-override: redirect specific event types to different channels.
                     const channelOverrides = parseChannelOverride(readStrOption(options, "channel-override"));
                     const effectiveChannel = channelOverrides.get(event) ?? channel;
@@ -1866,7 +1872,7 @@ export default defineExtension({
                     }
                     catch (err) {
                         // Never throw on network failure: warn and exit 0.
-                        const message = err instanceof Error ? err.message : String(err);
+                        const message = toErrorMessage(err);
                         console.error(`[pm-slack] Slack post failed (continuing): ${message}`);
                         return { posted: false, error: message };
                     }
@@ -1914,7 +1920,7 @@ export default defineExtension({
                     const format = parseFormat(readStrOption(options, "format") ?? process.env.PM_SLACK_FORMAT);
                     const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
                     const events = parseEvents(readStrOption(options, "on") ?? "create");
-                    const event = (ALL_EVENTS.find((e) => events.has(e)) ?? "create");
+                    const event = primaryEvent(events);
                     // --channel-override: redirect specific event types to different channels.
                     const channelOverrides = parseChannelOverride(readStrOption(options, "channel-override"));
                     const effectiveChannel = channelOverrides.get(event) ?? channel;
@@ -2039,7 +2045,7 @@ export default defineExtension({
                         await postToSlack(webhookUrl, payload);
                     }
                     catch (err) {
-                        const message = err instanceof Error ? err.message : String(err);
+                        const message = toErrorMessage(err);
                         throw new CommandError(`Failed to post digest to Slack: ${message}`, EXIT_CODE.GENERIC_FAILURE);
                     }
                     return { posted: true, format, channel, thread_ts: threadTs, counts: summary.counts, total: summary.total, window: label };
@@ -2069,6 +2075,7 @@ export const __test__ = {
     SLACK_SECTION_FIELDS_MAX,
     SLACK_HEADER_TEXT_MAX,
     parseEvents,
+    primaryEvent,
     normalizeEvent,
     parseFormat,
     parseRoutes,
@@ -2106,6 +2113,7 @@ export const __test__ = {
     postToSlackOnce,
     SlackHttpError,
     EXIT_CODE,
+    toErrorMessage,
     CommandError,
     parseFilter,
     filterMatches,
