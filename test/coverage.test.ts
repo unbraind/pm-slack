@@ -2413,10 +2413,11 @@ test("slack test: human mode with non-matching filter shows [FILTERED OUT]", asy
 
 test("postToSlackOnce: https protocol uses https.request and port 443 default", async () => {
   // An https URL with no explicit port triggers the parsed.port falsy branch
-  // (defaults to 443) and the https.request branch. The connection to
-  // localhost:443 will fail (nothing is listening), so the error handler fires.
+  // (defaults to 443) and the https.request branch. The host uses the RFC 6761
+  // `.invalid` TLD, which can never resolve, so the request fails at name
+  // resolution whatever is (or is not) listening on this machine's port 443.
   await assert.rejects(
-    postToSlackOnce("https://localhost/hook", { text: "hi" }),
+    postToSlackOnce("https://pm-slack-test.invalid/hook", { text: "hi" }),
     (err: unknown) => {
       assert.ok(err instanceof Error);
       assert.match((err as Error).message, /Slack webhook request failed/);
