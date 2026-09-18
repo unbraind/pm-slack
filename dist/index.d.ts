@@ -35,6 +35,20 @@ declare class CommandError extends Error {
     constructor(message: string, exitCode?: number);
 }
 type Priority = 1 | 2 | 3 | 4;
+/**
+ * Extract a human-readable message from a thrown value.
+ *
+ * Every throw site in this package produces an `Error` instance
+ * (`CommandError`, `SlackHttpError`, or `new Error(…)`), so the `String(err)`
+ * fallback is not reached at runtime. It is kept as a defensive guard against
+ * a future throw site that violates that invariant, and is exported for test
+ * so both arms can be exercised without constructing an unreachable production
+ * path.
+ *
+ * @param err - The value caught in a `catch` block.
+ * @returns The error message, or a stringified fallback for non-`Error` values.
+ */
+declare function toErrorMessage(err: unknown): string;
 interface PmItem {
     id: string;
     title: string;
@@ -624,6 +638,7 @@ export declare const __test__: {
         readonly USAGE: 2;
         readonly NOT_FOUND: 3;
     };
+    toErrorMessage: typeof toErrorMessage;
     CommandError: typeof CommandError;
     parseFilter: typeof parseFilter;
     filterMatches: typeof filterMatches;
