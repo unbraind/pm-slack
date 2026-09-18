@@ -103,6 +103,18 @@ async function withEnvAsync(env: Record<string, string | undefined>, fn: () => P
   }
 }
 
+/** Reserve and immediately free a port so connection attempts to it fail. */
+function getUnusedPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as { port: number }).port;
+      server.close(() => resolve(port));
+    });
+    server.on("error", reject);
+  });
+}
+
 /** Create a temp pm-root workspace with item directories and files. */
 function makeTempPmRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), "pm-slack-"));
@@ -156,11 +168,11 @@ function preflightCtx(command: string, options: Record<string, unknown>): Prefli
 // ---------------------------------------------------------------------------
 
 test("loadConfig: returns a full config when PM_SLACK_WEBHOOK is a valid URL", () => {
-  withEnv({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_ROUTES: undefined }, () => {
+  withEnv({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/services/A/B/C", PM_SLACK_ROUTES: undefined }, () => {
     __resetWarnState();
     const config = loadConfig();
     assert.ok(config, "config must be returned with a valid webhook");
-    assert.equal(config!.webhookUrl, "https://hooks.slack.com/x");
+    assert.equal(config!.webhookUrl, "https://hooks.slack.com/services/A/B/C");
     assert.equal(config!.channel, undefined);
     assert.equal(config!.minPriority, 1);
     assert.ok(config!.events.has("create"), "default events include create");
@@ -206,7 +218,7 @@ test("loadConfig: routes with webhooks keep config alive without a default webho
 test("loadConfig: channel, min-priority, and mention-env are read correctly", () => {
   withEnv(
     {
-      PM_SLACK_WEBHOOK: "https://hooks.slack.com/x",
+      PM_SLACK_WEBHOOK: "https://hooks.slack.com/services/A/B/C",
       PM_SLACK_CHANNEL: "#team",
       PM_SLACK_MIN_PRIORITY: "3",
       PM_SLACK_FORMAT: "text",
@@ -228,7 +240,7 @@ test("loadConfig: channel, min-priority, and mention-env are read correctly", ()
 
 test("loadConfig: out-of-range priority falls back to 1", () => {
   withEnv(
-    { PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_MIN_PRIORITY: "9" },
+    { PM_SLACK_WEBHOOK: "https://hooks.slack.com/services/A/B/C", PM_SLACK_MIN_PRIORITY: "9" },
     () => {
       __resetWarnState();
       const config = loadConfig();
@@ -241,7 +253,7 @@ test("loadConfig: out-of-range priority falls back to 1", () => {
 test("loadConfig: mentionAssignee=0 forces mentions off even with a map", () => {
   withEnv(
     {
-      PM_SLACK_WEBHOOK: "https://hooks.slack.com/x",
+      PM_SLACK_WEBHOOK: "https://hooks.slack.com/services/A/B/C",
       PM_SLACK_ASSIGNEE_MAP: "alice=U123",
       PM_SLACK_MENTION_ASSIGNEE: "0",
     },
@@ -362,9 +374,10 @@ test("postToSlackOnce: non-2xx response rejects with SlackHttpError carrying sta
 });
 
 test("postToSlackOnce: connection refused triggers req.on(error)", async () => {
-  // Use a port that's almost certainly not listening.
+  // Reserve and free a port so we know nothing is listening on it.
+  const port = await getUnusedPort();
   await assert.rejects(
-    postToSlackOnce("http://127.0.0.1:1/hook", { text: "hi" }),
+    postToSlackOnce(`http://127.0.0.1:${port}/hook`, { text: "hi" }),
     (err: unknown) => {
       assert.ok(err instanceof Error);
       assert.match((err as Error).message, /Slack webhook request failed/);
@@ -575,7 +588,6 @@ test("afterCommand hook: posts notification on create event", async () => {
         });
         assert.deepEqual(warnings, [], "hook must not produce warnings on a clean post");
         // Wait a tick for the async post (the hook is fire-and-forget)
-        await new Promise((r) => setTimeout(r, 100));
         assert.ok(received.length > 0, "payload must be posted");
         const payload = JSON.parse(received);
         assert.ok(payload.text.includes("New feature"), "notification includes item title");
@@ -590,7 +602,7 @@ test("afterCommand hook: posts notification on create event", async () => {
 test("afterCommand hook: event filtered by PM_SLACK_EVENTS", async () => {
   const ext = await harness();
   await withEnvAsync(
-    { PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_EVENTS: "close", PM_SLACK_ROUTES: undefined },
+    { PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_EVENTS: "close", PM_SLACK_ROUTES: undefined },
     async () => {
       const lines: string[] = [];
       const orig = console.error;
@@ -614,7 +626,7 @@ test("afterCommand hook: event filtered by PM_SLACK_EVENTS", async () => {
 
 test("afterCommand hook: no item extracted → skip", async () => {
   const ext = await harness();
-  await withEnvAsync({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_ROUTES: undefined }, async () => {
+  await withEnvAsync({ PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_ROUTES: undefined }, async () => {
     const lines: string[] = [];
     const orig = console.error;
     console.error = (...args: unknown[]) => { lines.push(args.join(" ")); };
@@ -632,7 +644,7 @@ test("afterCommand hook: no item extracted → skip", async () => {
 });
 
 test("afterCommand hook: priority below minimum → skip", async () => {
-  const ext = await harness();await withEnvAsync(    { PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_MIN_PRIORITY: "1", PM_SLACK_ROUTES: undefined },
+  const ext = await harness();await withEnvAsync(    { PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_MIN_PRIORITY: "1", PM_SLACK_ROUTES: undefined },
     async () => {
       const lines: string[] = [];
       const orig = console.error;
@@ -657,7 +669,7 @@ test("afterCommand hook: priority below minimum → skip", async () => {
 test("afterCommand hook: no route resolved → skip", async () => {
   const ext = await harness();
   // Routes-only config where the event doesn't match any rule, and no default webhook
-  withEnv(
+  await withEnvAsync(
     {
       PM_SLACK_WEBHOOK: undefined,
       PM_SLACK_ROUTES: JSON.stringify([{ match: "close", webhook: "https://h/close" }]),
@@ -686,7 +698,7 @@ test("afterCommand hook: no route resolved → skip", async () => {
 
 test("afterCommand hook: hook error is swallowed (never throws)", async () => {
   const ext = await harness();
-  await withEnvAsync({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_ROUTES: undefined }, async () => {
+  await withEnvAsync({ PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_ROUTES: undefined }, async () => {
     // An unreachable webhook will cause postToSlack to fail, but the hook
     // catches everything. The runHook helper returns warnings, not throws.
     const warnings = await ext.runHook({
@@ -893,9 +905,10 @@ test("slack notify: non-dry-run without webhook → CommandError", async () => {
 
 test("slack notify: network failure returns posted:false (does not throw)", async () => {
   const ext = await harness();
+  const port = await getUnusedPort();
   const result = await ext.runCommand({
     command: "slack notify",
-    options: { text: "Hello", webhook: "http://127.0.0.1:1/hook" },
+    options: { text: "Hello", webhook: `http://127.0.0.1:${port}/hook` },
     global: { json: true } as never,
   });
   assert.equal(result.handled, true);
@@ -1912,7 +1925,6 @@ test("afterCommand hook: mention resolved from PM_SLACK_ASSIGNEE_MAP", async () 
             result: { item: { id: "pm-1", title: "Mention me", type: "Feature", priority: 1, status: "open", author: "alice", assignee: "alice" } },
           }),
         });
-        await new Promise((r) => setTimeout(r, 100));
         const payload = JSON.parse(received);
         assert.ok(payload.text.includes("<@U123>"), "mention resolved from env assignee map");
       },
@@ -1949,7 +1961,6 @@ test("afterCommand hook: close event posts with item URL in payload", async () =
             result: { item: { id: "pm-9", title: "Fix bug", type: "Issue", priority: 1, status: "closed", close_reason: "fixed", github_url: "https://github.com/unbraind/pm-slack/issues/2" } },
           }),
         });
-        await new Promise((r) => setTimeout(r, 100));
         const payload = JSON.parse(received);
         assert.ok(JSON.stringify(payload.blocks).includes("View on GitHub"), "github URL in block kit");
       },
@@ -2005,7 +2016,7 @@ test("slack digest handler: ctx.options undefined falls back to empty object", a
   // With undefined options, dry-run defaults to false, format defaults to blockkit.
   // Set PM_SLACK_WEBHOOK so the preflight gate passes, but the post will fail
   // since there's no real server. The handler catches the failure and throws.
-  await withEnvAsync({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_ROUTES: undefined }, async () => {
+  await withEnvAsync({ PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_ROUTES: undefined }, async () => {
     await assert.rejects(
       handler!.run({ options: undefined, args: [], global: { json: true }, pm_root: pmRoot, command: "slack digest" } as never) as Promise<unknown>,
       (err: unknown) => err instanceof Error,
@@ -2140,7 +2151,7 @@ test("slack test: human mode without filter shows no filter note", async () => {
 
 test("afterCommand hook: unrelated command → detectEvent returns null → no post", async () => {
   const ext = await harness();
-  await withEnvAsync({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_ROUTES: undefined }, async () => {
+  await withEnvAsync({ PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_ROUTES: undefined }, async () => {
     __resetWarnState();
     const warnings = await ext.runHook({
       kind: "after_command",
@@ -2330,7 +2341,7 @@ test("preflight override: posting command with undefined options triggers ?? {} 
   const ext = await harness();
   const override = ext.activation.preflight.overrides[0];
   assert.ok(override, "preflight override must be registered");
-  await withEnvAsync({ PM_SLACK_WEBHOOK: "https://hooks.slack.com/x", PM_SLACK_ROUTES: undefined }, async () => {
+  await withEnvAsync({ PM_SLACK_WEBHOOK: "http://127.0.0.1:1/hook", PM_SLACK_ROUTES: undefined }, async () => {
     // command is a posting command so the early return is NOT taken,
     // and options is undefined so the ?? {} defensive guard fires.
     const result = await override.run({
@@ -2393,4 +2404,22 @@ test("slack test: human mode with non-matching filter shows [FILTERED OUT]", asy
   }
   assert.ok(lines.some((l) => l.includes("[FILTERED OUT]")), "non-matching filter shows [FILTERED OUT]");
   await ext.deactivate();
+});
+
+// ---------------------------------------------------------------------------
+// postToSlackOnce: https protocol without explicit port defaults to 443
+// ---------------------------------------------------------------------------
+
+test("postToSlackOnce: https protocol uses https.request and port 443 default", async () => {
+  // An https URL with no explicit port triggers the parsed.port falsy branch
+  // (defaults to 443) and the https.request branch. The connection to
+  // localhost:443 will fail (nothing is listening), so the error handler fires.
+  await assert.rejects(
+    postToSlackOnce("https://localhost/hook", { text: "hi" }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match((err as Error).message, /Slack webhook request failed/);
+      return true;
+    },
+  );
 });
