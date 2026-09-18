@@ -4,6 +4,7 @@
 
 ### Other
 
+- Cover every pm-slack code path with behavioural tests and raise the coverage gate to 100 ([pm-slack-hn3n](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-hn3n.toon))
 - Certify pm CLI 2026.9.17 ([pm-slack-eoqy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-eoqy.toon))
 
 ## 2026.9.13 - 2026-09-13
