@@ -111,6 +111,17 @@ declare function normalizeEvent(token: string): EventKind | null;
  */
 declare function parseEvents(spec: string | undefined): Set<EventKind>;
 /**
+ * The header verb for a notification: the first selected event in
+ * {@link ALL_EVENTS} priority order, so `--on close,create` still reads as a
+ * create. {@link parseEvents} never returns an empty set, but a `Set` cannot
+ * carry non-emptiness in its type, so an empty selection falls back to
+ * `create` (the verb `--on` defaults to) instead of being asserted away.
+ *
+ * @param events - The selected events, normally from {@link parseEvents}.
+ * @returns The event whose template heads the message.
+ */
+declare function primaryEvent(events: ReadonlySet<EventKind>): EventKind;
+/**
  * Normalize a format spec to a known MessageFormat. Accepts a few friendly
  * aliases ("block"/"blocks" → blockkit, "plain"/"txt" → text, "template"/"tmpl"
  * → custom). Falls back to the supplied default when the spec is empty or
@@ -596,6 +607,7 @@ export declare const __test__: {
     SLACK_SECTION_FIELDS_MAX: number;
     SLACK_HEADER_TEXT_MAX: number;
     parseEvents: typeof parseEvents;
+    primaryEvent: typeof primaryEvent;
     normalizeEvent: typeof normalizeEvent;
     parseFormat: typeof parseFormat;
     parseRoutes: typeof parseRoutes;

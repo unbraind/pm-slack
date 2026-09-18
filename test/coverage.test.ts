@@ -36,6 +36,7 @@ const {
   buildDigestBlockKit,
   aggregateDigest,
   parseEvents,
+  primaryEvent,
   parseFormat,
   parseRoutes,
   parseFilter,
@@ -2422,4 +2423,11 @@ test("postToSlackOnce: https protocol uses https.request and port 443 default", 
       return true;
     },
   );
+});
+
+test("primaryEvent: first selected event in ALL_EVENTS priority order, create when nothing is selected", () => {
+  assert.equal(primaryEvent(new Set(["close", "create"] as const)), "create");
+  assert.equal(primaryEvent(new Set(["reopen", "block"] as const)), "block");
+  assert.equal(primaryEvent(new Set<never>()), "create");
+  assert.equal(primaryEvent(parseEvents("nonsense")), "create");
 });

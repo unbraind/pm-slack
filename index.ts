@@ -273,6 +273,20 @@ function parseEvents(spec: string | undefined): Set<EventKind> {
   return parsed.length > 0 ? new Set(parsed) : new Set(ALL_EVENTS);
 }
 
+/**
+ * The header verb for a notification: the first selected event in
+ * {@link ALL_EVENTS} priority order, so `--on close,create` still reads as a
+ * create. {@link parseEvents} never returns an empty set, but a `Set` cannot
+ * carry non-emptiness in its type, so an empty selection falls back to
+ * `create` (the verb `--on` defaults to) instead of being asserted away.
+ *
+ * @param events - The selected events, normally from {@link parseEvents}.
+ * @returns The event whose template heads the message.
+ */
+function primaryEvent(events: ReadonlySet<EventKind>): EventKind {
+  return ALL_EVENTS.find((e) => events.has(e)) ?? "create";
+}
+
 // ---------------------------------------------------------------------------
 // Format parsing
 // ---------------------------------------------------------------------------
@@ -1329,6 +1343,8 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
         data += chunk.toString();
       });
       res.on("end", () => {
+        // A ClientRequest response always carries statusCode; the `undefined`
+        // in IncomingMessage's type exists only for server-side requests.
         const status = res.statusCode as number;
         if (status >= 200 && status < 300) {
           resolve();
@@ -1383,6 +1399,8 @@ async function postToSlack(webhookUrl: string, payload: SlackPayload): Promise<v
       await sleep(slackRetryDelayMs(attempt, retryAfterMs));
     }
   }
+  // The loop runs at least once, and postToSlackOnce rejects only with a
+  // SlackHttpError or the Error node:https emits, so lastErr is an Error here.
   throw lastErr;
 }
 
@@ -2054,7 +2072,7 @@ export default defineExtension({
 
           // `--on` selects the message template. First event wins for the header verb.
           const events = parseEvents(readStrOption(options, "on") ?? "create");
-          const event: EventKind = ALL_EVENTS.find((e) => events.has(e)) as EventKind;
+          const event = primaryEvent(events);
 
           // --channel-override: redirect specific event types to different channels.
           const channelOverrides = parseChannelOverride(readStrOption(options, "channel-override"));
@@ -2198,7 +2216,7 @@ export default defineExtension({
           const channel = (readStrOption(options, "channel") ?? process.env.PM_SLACK_CHANNEL?.trim()) || undefined;
 
           const events = parseEvents(readStrOption(options, "on") ?? "create");
-          const event: EventKind = ALL_EVENTS.find((e) => events.has(e)) as EventKind;
+          const event = primaryEvent(events);
 
           // --channel-override: redirect specific event types to different channels.
           const channelOverrides = parseChannelOverride(readStrOption(options, "channel-override"));
@@ -2375,6 +2393,7 @@ export const __test__ = {
   SLACK_SECTION_FIELDS_MAX,
   SLACK_HEADER_TEXT_MAX,
   parseEvents,
+  primaryEvent,
   normalizeEvent,
   parseFormat,
   parseRoutes,
