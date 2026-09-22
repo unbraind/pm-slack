@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A publish that npm accepts late is reported as failed and the GitHub Release is skipped on bun mirror lag ([pm-slack-x0wg](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-x0wg.toon))
+
+### Other
+
+- Certify pm CLI 2026.9.21 and install merge drivers through the canonical pm-ops launcher ([pm-slack-h3ba](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-h3ba.toon))
+
 ## 2026.9.18 - 2026-09-18
 
 ### Other
