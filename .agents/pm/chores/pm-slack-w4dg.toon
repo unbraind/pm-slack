@@ -6,11 +6,13 @@ status: closed
 priority: 1
 tags[4]: certify,merge-driver,multi-agent,pm-cli-2026.9.23
 created_at: "2026-09-25T08:32:05.853Z"
-updated_at: "2026-09-25T08:34:26.058Z"
+updated_at: "2026-09-25T09:09:39.862Z"
 closed_at: "2026-09-25T08:34:24.370Z"
 completed_at: "2026-09-25T08:34:24.370Z"
 author: fleet-wave-script
 acceptance_criteria: "package.json and package-lock.json pin pm-cli 2026.9.23 and pm-ops 2026.9.23 (pm-changelog 2026.9.23 where used); scripts/prepare-merge-driver.ts is byte-identical to the pinned pm-ops template, enforced by a test; CI runs pm health --strict-exit --require-merge-drivers and release:check exits 0"
+comments[1]{created_at,author,text}:
+  "2026-09-25T09:09:39.862Z",fleet-wave-script,"Review round 1 (Greptile): the README now describes the guarded launcher as it behaves, handing over to pm-ops's installer, skipping with one notice when pm-ops is absent and failing on a stale or broken pm-ops."
 files[5]{path,scope}:
   package-lock.json,project
   package.json,project
