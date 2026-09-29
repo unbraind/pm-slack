@@ -1,0 +1,14 @@
+id: pm-slack-5fb5
+title: Measure all authored source and internal declarations before release approval
+description: "Current coverage-gate sources=[.] silently skips scripts by DEFAULT_SKIP_DIRS and certifies only index.ts. It reports lines/branches/functions but has no independent statement metric. Docstring analyzer reports 7 files and 51 selected declarations, without proving all internal declarations. This is a release blocker under the complete-source quality mandate and follows the narrower completed pm-slack-hn3n work."
+type: Issue
+status: blocked
+priority: 1
+tags: []
+created_at: "2026-09-29T17:30:56.694Z"
+updated_at: "2026-09-29T17:30:56.694Z"
+author: codex-slack-digest-0929
+acceptance_criteria: Every authored executable TypeScript file including scripts is enumerated in per-file coverage; Statements branches functions and lines are actually measured and all reach 100 percent; Documentation denominator includes all internal documentable declarations and modules; Applicable lint duplication pm-lint security and platform gates run fail-closed locally and in CI with deliberately broken fixtures
+risk: high
+blocked_reason: Current measurement denominator omits operational scripts and independent statements and does not prove full internal documentation
+body: ""

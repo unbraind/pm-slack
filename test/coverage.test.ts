@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { close, create, init } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import type { AfterCommandHookContext, PreflightOverrideContext } from "@unbrained/pm-cli/sdk/authoring";
 
@@ -42,7 +43,6 @@ const {
   parseFilter,
   selectRoute,
   parseRetryAfterMs,
-  parseStoredItem,
   resolveWindow,
   resolveEffectiveWebhook,
   assertWebhookConfigured,
@@ -117,9 +117,10 @@ function getUnusedPort(): Promise<number> {
 }
 
 /** Create a temp pm-root workspace with item directories and files. */
-function makeTempPmRoot(): string {
+async function makeTempPmRoot(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "pm-slack-"));
-  return dir;
+  await init("slack", { defaults: true, agentGuidance: "skip" }, { cwd: dir, pmRoot: join(dir, ".agents", "pm"), noExtensions: true });
+  return join(dir, ".agents", "pm");
 }
 
 /**
@@ -470,36 +471,14 @@ test("postToSlack exhausts retries on persistent 500 and re-throws", async () =>
 });
 
 // ---------------------------------------------------------------------------
-// readStoreItems: tested through slack digest command with a temp pm root
+// Complete SDK read: tested through slack digest with an initialized fixture
 // ---------------------------------------------------------------------------
 
 test("slack digest reads store items from a temp pm root (dry-run)", async () => {
-  const pmRoot = makeTempPmRoot();
-  mkdirSync(join(pmRoot, "tasks"), { recursive: true });
-  writeFileSync(
-    join(pmRoot, "tasks", "pm-aaa.toon"),
-    [
-      "id: pm-aaa",
-      'title: "Test task"',
-      "type: Task",
-      "status: open",
-      "priority: 2",
-      `created_at: "${new Date().toISOString()}"`,
-      `updated_at: "${new Date().toISOString()}"`,
-    ].join("\n"),
-  );
-  mkdirSync(join(pmRoot, "issues"), { recursive: true });
-  writeFileSync(
-    join(pmRoot, "issues", "pm-bbb.toon"),
-    [
-      "id: pm-bbb",
-      'title: "Closed issue"',
-      "type: Issue",
-      "status: closed",
-      `created_at: "${new Date(Date.now() - 10 * 86400000).toISOString()}"`,
-      `updated_at: "${new Date().toISOString()}"`,
-    ].join("\n"),
-  );
+  const pmRoot = await makeTempPmRoot();
+  await create({ type: "Task", title: "Test task" }, { pmRoot, noExtensions: true });
+  const issue = await create({ type: "Issue", title: "Closed issue" }, { pmRoot, noExtensions: true });
+  await close(issue.item.id, "Fixture completion", {}, { pmRoot, noExtensions: true });
   // A non-item directory to verify it's walked but non-item files are skipped
   mkdirSync(join(pmRoot, "features"), { recursive: true });
   writeFileSync(join(pmRoot, "features", "readme.txt"), "not an item");
@@ -514,9 +493,9 @@ test("slack digest reads store items from a temp pm root (dry-run)", async () =>
   assert.equal(result.handled, true);
   const res = result.result as { dryRun: boolean; counts: { created: number; closed: number }; total: number };
   assert.equal(res.dryRun, true);
-  assert.equal(res.counts.created, 1, "pm-aaa created today");
-  assert.equal(res.counts.closed, 1, "pm-bbb closed today");
-  assert.equal(res.total, 2);
+  assert.equal(res.counts.created, 2, "both SDK-created items were created today");
+  assert.equal(res.counts.closed, 1, "SDK-closed issue closed today");
+  assert.equal(res.total, 3);
   await ext.deactivate();
 });
 
@@ -1082,7 +1061,7 @@ test("slack test: --title overrides sample title", async () => {
 // ---------------------------------------------------------------------------
 
 test("slack digest --dry-run: empty store yields zero counts", async () => {
-  const pmRoot = makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   const result = await ext.runCommand({
     command: "slack digest",
@@ -1130,33 +1109,23 @@ test("slack digest: --format custom → CommandError", async () => {
 });
 
 test("slack digest: --since overrides --days", async () => {
-  const pmRoot = makeTempPmRoot();
-  mkdirSync(join(pmRoot, "tasks"), { recursive: true });
-  writeFileSync(
-    join(pmRoot, "tasks", "pm-old.toon"),
-    [
-      "id: pm-old",
-      'title: "Old task"',
-      "type: Task",
-      "status: open",
-      `created_at: "${new Date(Date.now() - 30 * 86400000).toISOString()}"`,
-    ].join("\n"),
-  );
+  const pmRoot = await makeTempPmRoot();
+  await create({ type: "Task", title: "Recent task" }, { pmRoot, noExtensions: true });
   const ext = await harness();
-  // --since far in the past includes the old item
+  // A future --since excludes today even though --days would include it.
   const result = await ext.runCommand({
     command: "slack digest",
-    options: { "dry-run": true, since: "2020-01-01" },
+    options: { "dry-run": true, since: new Date(Date.now() + 86400000).toISOString(), days: "7" },
     pmRoot,
     global: { json: true } as never,
   });
   assert.equal(result.handled, true);
-  assert.equal((result.result as { total: number }).total, 1, "old item included with wide since");
+  assert.equal((result.result as { total: number }).total, 0, "since takes precedence over days");
   await ext.deactivate();
 });
 
 test("slack digest: --thread adds thread_ts to payload", async () => {
-  const pmRoot = makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   const result = await ext.runCommand({
     command: "slack digest",
@@ -1178,7 +1147,7 @@ test("slack digest: real post to local server succeeds", async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
-  const pmRoot = makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot();
   try {
     const ext = await harness();
     const result = await ext.runCommand({
@@ -1197,7 +1166,7 @@ test("slack digest: real post to local server succeeds", async () => {
 });
 
 test("slack digest: non-dry-run without webhook → CommandError", async () => {
-  const pmRoot = makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   await withEnvAsync({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, async () => {
     await assert.rejects(
@@ -1225,7 +1194,7 @@ test("slack digest: post failure throws CommandError", async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
-  const pmRoot = makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot();
   try {
     const ext = await harness();
     await assert.rejects(
@@ -1249,7 +1218,7 @@ test("slack digest: post failure throws CommandError", async () => {
 });
 
 test("slack digest: human-mode dry-run writes to stdout", async () => {
-  const pmRoot = makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   const origWrite = process.stdout.write.bind(process.stdout);
   const chunks: string[] = [];
@@ -1559,12 +1528,11 @@ test("eventReason: cancel with no reason fields returns undefined", () => {
 });
 
 // ---------------------------------------------------------------------------
-// readStoreItems: unreadable file is skipped (catch block)
+// Complete SDK read: unreadable files refuse an incomplete digest
 // ---------------------------------------------------------------------------
 
-test("slack digest skips unreadable items in store (catch block)", async () => {
-  const pmRoot = mkdtempSync(join(tmpdir(), "pm-slack-"));
-  mkdirSync(join(pmRoot, "tasks"), { recursive: true });
+test("slack digest rejects unreadable items instead of silently skipping them", async () => {
+  const pmRoot = await makeTempPmRoot();
   // A directory with .toon extension causes readFileSync to throw EISDIR
   mkdirSync(join(pmRoot, "tasks", "bad.toon"), { recursive: true });
   // A valid item alongside the bad one
@@ -1573,14 +1541,12 @@ test("slack digest skips unreadable items in store (catch block)", async () => {
     ["id: pm-good", 'title: "Good"', "type: Task", "status: open", `created_at: "${new Date().toISOString()}"`].join("\n"),
   );
   const ext = await harness();
-  const result = await ext.runCommand({
+  await assert.rejects(ext.runCommand({
     command: "slack digest",
     options: { "dry-run": true, days: "1" },
     pmRoot,
     global: { json: true } as never,
-  });
-  assert.equal(result.handled, true);
-  assert.equal((result.result as { total: number }).total, 1, "only the valid item is counted");
+  }), /read|complete|unreadable/i);
   await ext.deactivate();
 });
 
@@ -1620,7 +1586,7 @@ test("slack notify: routes-only config without --webhook hits defensive guard", 
 // ---------------------------------------------------------------------------
 
 test("slack digest: routes-only config without --webhook hits defensive guard", async () => {
-  const pmRoot = mkdtempSync(join(tmpdir(), "pm-slack-"));
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   await withEnvAsync(
     {
@@ -1881,7 +1847,7 @@ test("slack test: --filter that does not match → filtered=true", async () => {
 // ---------------------------------------------------------------------------
 
 test("slack digest: --format text dry-run", async () => {
-  const pmRoot = mkdtempSync(join(tmpdir(), "pm-slack-"));
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   const result = await ext.runCommand({
     command: "slack digest",
@@ -2013,7 +1979,7 @@ test("slack digest handler: ctx.options undefined falls back to empty object", a
   const ext = await harness();
   const handler = ext.activation.commands.handlers.find((h) => h.command === "slack digest");
   assert.ok(handler, "slack digest handler must be registered");
-  const pmRoot = mkdtempSync(join(tmpdir(), "pm-slack-"));
+  const pmRoot = await makeTempPmRoot();
   // With undefined options, dry-run defaults to false, format defaults to blockkit.
   // Set PM_SLACK_WEBHOOK so the preflight gate passes, but the post will fail
   // since there's no real server. The handler catches the failure and throws.
@@ -2059,7 +2025,7 @@ test("slack test: PM_SLACK_CHANNEL env var provides channel", async () => {
 });
 
 test("slack digest: PM_SLACK_CHANNEL env var provides channel", async () => {
-  const pmRoot = mkdtempSync(join(tmpdir(), "pm-slack-"));
+  const pmRoot = await makeTempPmRoot();
   const ext = await harness();
   await withEnvAsync({ PM_SLACK_CHANNEL: "#digest-env" }, async () => {
     const result = await ext.runCommand({

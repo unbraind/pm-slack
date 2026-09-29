@@ -475,17 +475,19 @@ declare function isRetryableSlackError(err: unknown): boolean;
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
 declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void>;
-/** Fields we read off each stored item for digest purposes. */
-interface DigestItem extends PmItem {
+/** Metadata used for digest aggregation and item lines, independent of notification priorities. */
+interface DigestItem {
+    /** Stable SDK item identity. */
+    id: string;
+    /** Decoded display title, with an untitled fallback for legacy fixtures. */
+    title?: string;
+    /** Persisted lifecycle status used by the existing digest buckets. */
+    status?: string;
+    /** Creation timestamp determining membership in the created bucket. */
     created_at?: string;
+    /** Last mutation timestamp determining status bucket membership. */
     updated_at?: string;
 }
-/**
- * Minimal parser for a stored pm item file. Handles the toon scalar form
- * (`key: value`, optionally quoted) and JSON. Only top-level scalar fields are
- * extracted; nested/array sections are ignored. Returns null when no id found.
- */
-declare function parseStoredItem(content: string, ext: string): DigestItem | null;
 /**
  * Resolve a `--since <date>` / `--days <n>` window into an epoch-ms cutoff.
  * `since` (ISO date or datetime) wins when both are given; otherwise `days`
@@ -630,7 +632,6 @@ export declare const __test__: {
         verb: string;
         emoji: string;
     }>;
-    parseStoredItem: typeof parseStoredItem;
     resolveWindow: typeof resolveWindow;
     aggregateDigest: typeof aggregateDigest;
     buildDigestText: typeof buildDigestText;

@@ -30,7 +30,7 @@
  */
 import https from "node:https";
 import http from "node:http";
-import fs from "node:fs";
+import { listAllComplete } from "@unbrained/pm-cli/sdk";
 import path from "node:path";
 // ---------------------------------------------------------------------------
 // EXIT_CODE / CommandError (re-implemented locally)
@@ -1223,93 +1223,6 @@ async function postToSlack(webhookUrl, payload) {
     // SlackHttpError or the Error node:https emits, so lastErr is an Error here.
     throw lastErr;
 }
-// ---------------------------------------------------------------------------
-// Digest: reading the pm store + activity aggregation
-//
-// The digest reads items directly from the pm store (`<pm_root>/<dir>/*.toon`
-// and `*.json`) using a tiny scalar parser — we only need a handful of
-// top-level fields (id/title/type/status/priority/timestamps/reasons). This
-// avoids a runtime dependency on the pm SDK service layer (registerService is
-// limited and corrupts output, #96) and keeps the package dependency-free.
-// ---------------------------------------------------------------------------
-/** Directories under a pm root that hold items, by convention. */
-const ITEM_DIRS = ["tasks", "features", "issues", "epics", "stories", "bugs", "decisions", "items"];
-/**
- * Minimal parser for a stored pm item file. Handles the toon scalar form
- * (`key: value`, optionally quoted) and JSON. Only top-level scalar fields are
- * extracted; nested/array sections are ignored. Returns null when no id found.
- */
-function parseStoredItem(content, ext) {
-    if (ext === ".json") {
-        try {
-            const obj = JSON.parse(content);
-            const node = (obj.item ?? obj);
-            if (typeof node.id !== "string")
-                return null;
-            return node;
-        }
-        catch {
-            return null;
-        }
-    }
-    // toon: line-oriented `key: value`. Stop reading a key when it introduces a
-    // block/array (e.g. `notes[1]{...}:`); we only want flat scalars.
-    const out = {};
-    for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine;
-        if (!line || /^\s/.test(line))
-            continue; // skip indented (nested) lines
-        const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
-        if (!m)
-            continue;
-        const key = m[1];
-        let value = m[2].trim();
-        if (value === "" || value === '""') {
-            out[key] = "";
-            continue;
-        }
-        // Strip surrounding double quotes (toon quotes strings with embedded chars).
-        if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
-            value = value.slice(1, -1).replace(/\\"/g, '"');
-        }
-        out[key] = value;
-    }
-    if (typeof out.id !== "string")
-        return null;
-    if (typeof out.priority === "string" && /^\d+$/.test(out.priority)) {
-        out.priority = parseInt(out.priority, 10);
-    }
-    return out;
-}
-/** Read all items from a pm root. Best-effort: unreadable files are skipped. */
-function readStoreItems(pmRoot) {
-    const items = [];
-    for (const dir of ITEM_DIRS) {
-        const full = path.join(pmRoot, dir);
-        let entries;
-        try {
-            entries = fs.readdirSync(full);
-        }
-        catch {
-            continue;
-        }
-        for (const name of entries) {
-            const ext = path.extname(name);
-            if (ext !== ".toon" && ext !== ".json")
-                continue;
-            try {
-                const content = fs.readFileSync(path.join(full, name), "utf8");
-                const item = parseStoredItem(content, ext);
-                if (item)
-                    items.push(item);
-            }
-            catch {
-                // skip unreadable item
-            }
-        }
-    }
-    return items;
-}
 /**
  * Resolve a `--since <date>` / `--days <n>` window into an epoch-ms cutoff.
  * `since` (ISO date or datetime) wins when both are given; otherwise `days`
@@ -2024,7 +1937,10 @@ export default defineExtension({
                     }
                     const pmRoot = ctx.pm_root ?? path.join(process.cwd(), ".agents", "pm");
                     const { cutoffMs, label } = resolveWindow(since, days);
-                    const items = readStoreItems(pmRoot);
+                    // Certify all statuses, custom item directories, unique IDs and a full
+                    // unbounded strict read before constructing or posting any payload.
+                    // Disable nested extension hooks: this is an observational read.
+                    const { items } = await listAllComplete({}, { pmRoot, noExtensions: true });
                     const summary = aggregateDigest(items, cutoffMs, label);
                     const payload = { ...buildDigestPayload(summary, format, channel), ...(threadTs ? { thread_ts: threadTs } : {}) };
                     if (dryRun) {
@@ -2097,7 +2013,6 @@ export const __test__ = {
     resolveItemUrl,
     isHttpUrl,
     EVENT_META,
-    parseStoredItem,
     resolveWindow,
     aggregateDigest,
     buildDigestText,
