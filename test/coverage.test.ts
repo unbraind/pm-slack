@@ -11,10 +11,10 @@
 
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 
 import { close, create, init } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
@@ -116,9 +116,13 @@ function getUnusedPort(): Promise<number> {
   });
 }
 
-/** Create a temp pm-root workspace with item directories and files. */
-async function makeTempPmRoot(): Promise<string> {
+/** Initialize an isolated tracker and register cleanup even when setup or assertions fail.
+ * @param context - Owning test lifecycle for guaranteed fixture removal.
+ * @returns The initialized tracker root inside the disposable directory.
+ */
+async function makeTempPmRoot(context: TestContext): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "pm-slack-"));
+  context.after(() => rmSync(dir, { recursive: true, force: true }));
   await init("slack", { defaults: true, agentGuidance: "skip" }, { cwd: dir, pmRoot: join(dir, ".agents", "pm"), noExtensions: true });
   return join(dir, ".agents", "pm");
 }
@@ -474,8 +478,8 @@ test("postToSlack exhausts retries on persistent 500 and re-throws", async () =>
 // Complete SDK read: tested through slack digest with an initialized fixture
 // ---------------------------------------------------------------------------
 
-test("slack digest reads store items from a temp pm root (dry-run)", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest reads store items from a temp pm root (dry-run)", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   await create({ type: "Task", title: "Test task" }, { pmRoot, noExtensions: true });
   const issue = await create({ type: "Issue", title: "Closed issue" }, { pmRoot, noExtensions: true });
   await close(issue.item.id, "Fixture completion", {}, { pmRoot, noExtensions: true });
@@ -1060,8 +1064,8 @@ test("slack test: --title overrides sample title", async () => {
 // slack digest command: full behavioural coverage
 // ---------------------------------------------------------------------------
 
-test("slack digest --dry-run: empty store yields zero counts", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest --dry-run: empty store yields zero counts", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   const result = await ext.runCommand({
     command: "slack digest",
@@ -1108,8 +1112,8 @@ test("slack digest: --format custom → CommandError", async () => {
   await ext.deactivate();
 });
 
-test("slack digest: --since overrides --days", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: --since overrides --days", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   await create({ type: "Task", title: "Recent task" }, { pmRoot, noExtensions: true });
   const ext = await harness();
   // A future --since excludes today even though --days would include it.
@@ -1124,8 +1128,8 @@ test("slack digest: --since overrides --days", async () => {
   await ext.deactivate();
 });
 
-test("slack digest: --thread adds thread_ts to payload", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: --thread adds thread_ts to payload", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   const result = await ext.runCommand({
     command: "slack digest",
@@ -1138,7 +1142,7 @@ test("slack digest: --thread adds thread_ts to payload", async () => {
   await ext.deactivate();
 });
 
-test("slack digest: real post to local server succeeds", async () => {
+test("slack digest: real post to local server succeeds", async (t) => {
   let received = "";
   const server = http.createServer((req, res) => {
     req.setEncoding("utf8");
@@ -1147,7 +1151,7 @@ test("slack digest: real post to local server succeeds", async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
-  const pmRoot = await makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot(t);
   try {
     const ext = await harness();
     const result = await ext.runCommand({
@@ -1165,8 +1169,8 @@ test("slack digest: real post to local server succeeds", async () => {
   }
 });
 
-test("slack digest: non-dry-run without webhook → CommandError", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: non-dry-run without webhook → CommandError", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   await withEnvAsync({ PM_SLACK_WEBHOOK: undefined, PM_SLACK_ROUTES: undefined }, async () => {
     await assert.rejects(
@@ -1187,14 +1191,14 @@ test("slack digest: non-dry-run without webhook → CommandError", async () => {
   await ext.deactivate();
 });
 
-test("slack digest: post failure throws CommandError", async () => {
+test("slack digest: post failure throws CommandError", async (t) => {
   const server = http.createServer((_req, res) => {
     res.writeHead(400);
     res.end("bad webhook");
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
-  const pmRoot = await makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot(t);
   try {
     const ext = await harness();
     await assert.rejects(
@@ -1217,8 +1221,8 @@ test("slack digest: post failure throws CommandError", async () => {
   }
 });
 
-test("slack digest: human-mode dry-run writes to stdout", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: human-mode dry-run writes to stdout", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   const origWrite = process.stdout.write.bind(process.stdout);
   const chunks: string[] = [];
@@ -1531,8 +1535,8 @@ test("eventReason: cancel with no reason fields returns undefined", () => {
 // Complete SDK read: unreadable files refuse an incomplete digest
 // ---------------------------------------------------------------------------
 
-test("slack digest rejects unreadable items instead of silently skipping them", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest rejects unreadable items instead of silently skipping them", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   // A directory with .toon extension causes readFileSync to throw EISDIR
   mkdirSync(join(pmRoot, "tasks", "bad.toon"), { recursive: true });
   // A valid item alongside the bad one
@@ -1585,8 +1589,8 @@ test("slack notify: routes-only config without --webhook hits defensive guard", 
 // slack digest: routes-only config hits the defensive webhook guard
 // ---------------------------------------------------------------------------
 
-test("slack digest: routes-only config without --webhook hits defensive guard", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: routes-only config without --webhook hits defensive guard", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   await withEnvAsync(
     {
@@ -1846,8 +1850,8 @@ test("slack test: --filter that does not match → filtered=true", async () => {
 // slack digest: --format text produces text-only payload
 // ---------------------------------------------------------------------------
 
-test("slack digest: --format text dry-run", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: --format text dry-run", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   const result = await ext.runCommand({
     command: "slack digest",
@@ -1975,11 +1979,11 @@ test("slack test handler: ctx.options undefined falls back to empty object", asy
   await ext.deactivate();
 });
 
-test("slack digest handler: ctx.options undefined falls back to empty object", async () => {
+test("slack digest handler: ctx.options undefined falls back to empty object", async (t) => {
   const ext = await harness();
   const handler = ext.activation.commands.handlers.find((h) => h.command === "slack digest");
   assert.ok(handler, "slack digest handler must be registered");
-  const pmRoot = await makeTempPmRoot();
+  const pmRoot = await makeTempPmRoot(t);
   // With undefined options, dry-run defaults to false, format defaults to blockkit.
   // Set PM_SLACK_WEBHOOK so the preflight gate passes, but the post will fail
   // since there's no real server. The handler catches the failure and throws.
@@ -2024,8 +2028,8 @@ test("slack test: PM_SLACK_CHANNEL env var provides channel", async () => {
   await ext.deactivate();
 });
 
-test("slack digest: PM_SLACK_CHANNEL env var provides channel", async () => {
-  const pmRoot = await makeTempPmRoot();
+test("slack digest: PM_SLACK_CHANNEL env var provides channel", async (t) => {
+  const pmRoot = await makeTempPmRoot(t);
   const ext = await harness();
   await withEnvAsync({ PM_SLACK_CHANNEL: "#digest-env" }, async () => {
     const result = await ext.runCommand({
