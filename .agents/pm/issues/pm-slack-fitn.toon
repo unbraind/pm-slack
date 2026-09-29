@@ -6,18 +6,19 @@ status: blocked
 priority: 1
 tags: []
 created_at: "2026-09-29T17:22:22.309Z"
-updated_at: "2026-09-29T17:37:00.742Z"
+updated_at: "2026-09-29T17:39:10.459Z"
 author: codex-slack-digest-0929
 acceptance_criteria: Configured custom item directories and escaped titles appear in digests; Unreadable or malformed source records fail before any webhook request; Complete SDK reads include terminal items and refuse truncation or omissions; Real installed CLI and packed Node/Bun acceptance preserve dry-run and digest behavior; All mandatory source coverage and documentation gates and exact-head reviews pass before merge
 risk: medium
 blocked_reason: Implementation validated locally and in packed consumers; release awaits pm-slack-5fb5 all-source quality gates and exact-head review completion
 dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-slack-5fb5,blocked_by,"2026-09-29T17:31:30.144Z",codex-slack-digest-0929,local,asserted
-notes[4]{created_at,author,text}:
+notes[5]{created_at,author,text}:
   "2026-09-29T17:28:18.672Z",codex-slack-digest-0929,"TDD: real SDK Maintenance fixture was omitted (0 vs 1) and malformed isolated TOON did not reject before the change. Both pass after replacing the package-owned scalar parser and fixed folder list with listAllComplete({}, {pmRoot,noExtensions:true}). Public SDK init/create/close signatures verified from installed declarations. Existing digest fixtures now use initialized SDK trackers. Published dependency pins CLI and pm-ops 2026.9.29, pm-changelog 2026.9.25, with reproducible lockfile and published launcher byte identity."
   "2026-09-29T17:33:57.585Z",codex-slack-digest-0929,"Packed nine-file allowlist passed public-safe content inspection. SHA256 02c6c3da3178a80a19a088345442af311987c257c3c435aeef9b7aa55a23a6fe. Clean npm/Node and Bun installs exercised real package activation, custom-type digest (total 1), unchanged item history, and corrupt-source refusal. Measured one-item wall time Node 493ms and Bun 1198ms. Direct release gate passed 263/263 tests, zero skips, 100% lines/branches/functions for index.ts only. Docstring gate: 7 files and 51 selected declarations. Independent statements and operational-script coverage are unmeasured. pm-slack-5fb5 blocks release. ESLint/jscpd are absent from the direct dependency set; Trivy/ShellCheck unavailable on PATH. Strict health passed with preexisting stale/provenance advisories, while validate reports metadata/resolution/files/command-reference debt."
   "2026-09-29T17:34:28.290Z",codex-slack-digest-0929,"Fixture correction: SDK-created trackers now pass both cwd and pmRoot explicitly, so a linked-test sandbox cannot redirect fixture initialization. The first PM-linked full run exposed a cwd-only helper and is retained as failed evidence rather than treated as an upstream defect. Multi-item acceptance measures 12 items and 13 bucket updates, not unlimited corpus size or concurrent-writer snapshot consistency."
   "2026-09-29T17:37:00.074Z",codex-slack-digest-0929,"PM-linked full release:check now passes 263/263, zero skips and zero failure categories in tracker/source mode after giving the SDK fixture helper an explicit pmRoot. Earlier 180-second timeout is preserved in the test ledger. This was package-test context configuration, so no upstream issue was filed. Final direct release:check also passes. Generated dist is required by the existing Git-install contract and verified by CI rebuild drift checks."
+  "2026-09-29T17:39:09.971Z",codex-slack-digest-0929,"Candidate PR https://github.com/unbraind/pm-slack/pull/120. Initial tested commit https://github.com/unbraind/pm-slack/commit/ee477c634b8e5091bc8309166a21de6dd3e6ec9f. Available exact-head CI and configured Greptile/CodeRabbit review are requested for the final linked checkpoint. Sourcery already reports a skipped review; this is missing review, not approval. Candidate is not merged, published or deployed."
 files[2]{path,scope,note}:
   index.ts,project,Complete SDK digest read
   test/digest-corpus.test.ts,project,Custom-type full-corpus and malformed-record regressions
