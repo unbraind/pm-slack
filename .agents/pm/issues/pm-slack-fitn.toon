@@ -2,17 +2,22 @@ id: pm-slack-fitn
 title: Read Slack digests through the complete SDK corpus and refuse unreadable records
 description: The fixed digest directory list omits configured item types such as Chore and its scalar parser silently skips malformed or unreadable records. Replace the package-owned parser with the public listAllComplete SDK operation. Supersedes the implementation approach in pm-slack-06ti while preserving formatting and aggregation semantics.
 type: Issue
-status: blocked
+status: in_progress
 priority: 1
 tags: []
 created_at: "2026-09-29T17:22:22.309Z"
-updated_at: "2026-09-29T17:46:49.159Z"
+updated_at: "2026-10-02T18:39:55.376Z"
+assignee: pi-land
+claim_principal: pi-land
 author: codex-slack-digest-0929
 acceptance_criteria: Configured custom item directories and escaped titles appear in digests; Unreadable or malformed source records fail before any webhook request; Complete SDK reads include terminal items and refuse truncation or omissions; Real installed CLI and packed Node/Bun acceptance preserve dry-run and digest behavior; All mandatory source coverage and documentation gates and exact-head reviews pass before merge
 risk: medium
 blocked_reason: Review cleanup fixed; release still awaits complete-source quality gates and substantive final-head reviewer receipts
 dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-slack-5fb5,blocked_by,"2026-09-29T17:31:30.144Z",codex-slack-digest-0929,local,asserted
+comments[2]{created_at,author,text}:
+  "2026-10-02T18:39:49.636Z",pi-land,"Greptile 4136613100 (setup failure skips cleanup) is valid: reproduced empirically on the pre-fix pattern (a rejected createExtensionTestHarness left one pm-slack temp directory in tmpdir). Fix: corpus tests now use a createCorpusFixture helper that registers the full teardown hook (harness deactivate, server close, directory removal) on the owning TestContext immediately after mkdtempSync, before any risky setup; added a regression pair asserting the directory is removed when later setup never runs. Release:check 265/265, zero skips."
+  "2026-10-02T18:39:52.626Z",pi-land,"Greptile 4136613100-adjacent P1 4136613086 (standalone extension may not load) is refused: pm's installer links every installed package copy to the exact running host CLI (node_modules/@unbrained/pm-cli symlink, linkHostedPmCliDependency in pm-cli install-sources; EXTENSIONS.md: 'Runtime modules use static SDK imports; installed copies receive a host SDK link'), and pm-slack declared the peer dependency since its initial commit, so the listAllComplete import resolves for npm, GitHub, bundled, and local sources; the PR body records real npm/Node/Bun packed-install activation. The stale comment claiming '@unbrained/pm-cli is not resolvable at runtime' contradicted the import ten lines below it; corrected it to state the host-link contract and raw-entry precondition (docs EXTENSIONS.md standalone entries need the host SDK link before runtime SDK imports)."
 notes[6]{created_at,author,text}:
   "2026-09-29T17:28:18.672Z",codex-slack-digest-0929,"TDD: real SDK Maintenance fixture was omitted (0 vs 1) and malformed isolated TOON did not reject before the change. Both pass after replacing the package-owned scalar parser and fixed folder list with listAllComplete({}, {pmRoot,noExtensions:true}). Public SDK init/create/close signatures verified from installed declarations. Existing digest fixtures now use initialized SDK trackers. Published dependency pins CLI and pm-ops 2026.9.29, pm-changelog 2026.9.25, with reproducible lockfile and published launcher byte identity."
   "2026-09-29T17:33:57.585Z",codex-slack-digest-0929,"Packed nine-file allowlist passed public-safe content inspection. SHA256 02c6c3da3178a80a19a088345442af311987c257c3c435aeef9b7aa55a23a6fe. Clean npm/Node and Bun installs exercised real package activation, custom-type digest (total 1), unchanged item history, and corrupt-source refusal. Measured one-item wall time Node 493ms and Bun 1198ms. Direct release gate passed 263/263 tests, zero skips, 100% lines/branches/functions for index.ts only. Docstring gate: 7 files and 51 selected declarations. Independent statements and operational-script coverage are unmeasured. pm-slack-5fb5 blocks release. ESLint/jscpd are absent from the direct dependency set; Trivy/ShellCheck unavailable on PATH. Strict health passed with preexisting stale/provenance advisories, while validate reports metadata/resolution/files/command-reference debt."
@@ -23,8 +28,23 @@ notes[6]{created_at,author,text}:
 files[2]{path,scope,note}:
   index.ts,project,Complete SDK digest read
   test/digest-corpus.test.ts,project,Custom-type full-corpus and malformed-record regressions
-tests[1]{command,scope,timeout_seconds,pm_context_mode,provenance{author,created_at,source_kind,source_ref}}:
-  "npm run release:check",project,180,tracker,codex-slack-digest-0929,"2026-09-29T17:28:18.082Z",local_mutation,fix/pm-slack-complete-sdk-digests-2026-09-29
+tests[2]:
+  - command: "npm run release:check"
+    scope: project
+    timeout_seconds: 180
+    pm_context_mode: tracker
+    provenance:
+      author: codex-slack-digest-0929
+      created_at: "2026-09-29T17:28:18.082Z"
+      source_kind: local_mutation
+      source_ref: fix/pm-slack-complete-sdk-digests-2026-09-29
+  - command: "npm run release:check"
+    scope: project
+    provenance:
+      author: pi-land
+      created_at: "2026-10-02T18:39:55.138Z"
+      source_kind: local_mutation
+      source_ref: land/pm-slack-120
 docs[1]{path,scope,note}:
   README.md,project,SDK compatibility floor and stricter digest behavior
 body: "Scope: pm-slack digest read path only. Use SDK listAllComplete with noExtensions to avoid nested package hooks during an observational read. Dependencies: published CLI/SDK and pm-ops pinned 2026.9.29, pm-changelog 2026.9.25. Risk: runtime SDK resolution and stricter refusal change compatibility. Tests: failing custom-type and malformed-source regression, real SDK fixture trackers, existing digest and localhost webhook tests, full release check, packed npm/Bun activation. Rollout: reviewed package release only. Rollback: revert candidate commit or reinstall prior published package. No hosted data or Slack tenant data is used."

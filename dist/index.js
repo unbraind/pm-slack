@@ -38,9 +38,15 @@ import path from "node:path";
 // pm's extension command runtime only treats a thrown error as a cleanly
 // handled non-zero exit when the error carries a numeric `exitCode` property.
 // A plain `Error` makes the runtime fall through to its "unhandled" path, which
-// re-invokes the handler and exits with a generic code. Standalone-installed
-// extensions only load their own `dist/`, so `@unbrained/pm-cli` is not
-// resolvable at runtime — mirror the SDK contract here instead of importing it.
+// re-invokes the handler and exits with a generic code.
+//
+// Installed copies of this package receive a `node_modules/@unbrained/pm-cli`
+// link to the exact running host CLI, so the public SDK imports below resolve
+// after `pm package install` (npm, GitHub, bundled, or local source); a raw
+// standalone entry outside `node_modules` needs that host SDK link created
+// before any runtime SDK import. The small expected-error contract is mirrored
+// here — instead of importing the SDK's equivalent helper — so the command
+// error paths stay declared next to the code that throws them.
 // ---------------------------------------------------------------------------
 const EXIT_CODE = {
     GENERIC_FAILURE: 1,
