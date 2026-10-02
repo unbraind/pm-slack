@@ -52,8 +52,11 @@ async function releaseCorpusResources(
     }
   } catch (error) {
     failure ??= error;
-  } finally {
+  }
+  try {
     rmSync(directory, { recursive: true, force: true });
+  } catch (error) {
+    failure ??= error;
   }
   if (failure !== undefined) {
     throw failure;
@@ -228,4 +231,32 @@ test("slack digest command comment describes the public SDK read", () => {
   const block = source.slice(start, end);
   assert.match(block, /public SDK/);
   assert.doesNotMatch(block, /Reads the pm store directly/);
+});
+
+test("corpus teardown preserves the first rejection when directory removal also fails", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "pm-slack-teardown-remove-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const marker = join(directory, "marker");
+  writeFileSync(marker, "a file cannot contain a child directory");
+  const failure = new Error("first teardown failure");
+  let closed = false;
+  const server = {
+    close(callback: (error?: Error | null) => void) {
+      closed = true;
+      callback(new Error("second teardown failure"));
+    },
+  } as Server;
+  await assert.rejects(releaseCorpusResources({
+    harness: { deactivate: async () => { throw failure; } } as unknown as ExtensionHarness,
+    server,
+  }, `${marker}\0`), (error: unknown) => error === failure);
+  assert.equal(closed, true);
+});
+
+test("corpus teardown reports a directory removal failure when earlier cleanup succeeds", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "pm-slack-teardown-remove-only-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const marker = join(directory, "marker");
+  writeFileSync(marker, "a file cannot contain a child directory");
+  await assert.rejects(releaseCorpusResources({}, `${marker}\0`), { code: "ERR_INVALID_ARG_VALUE" });
 });
