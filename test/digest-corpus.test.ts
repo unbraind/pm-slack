@@ -1,6 +1,6 @@
 /** Real SDK tracker regressions for complete, observational Slack digests. */
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import http from "node:http";
@@ -24,16 +24,53 @@ interface CorpusFixture {
 }
 
 /**
+ * Release one corpus fixture's harness, webhook server, and directory.
+ *
+ * Steps run in that order. A rejection from an earlier step must not skip a
+ * later one: a failed deactivate still has to close the server, and a failed
+ * close still has to delete the tracker directory. The original rejection is
+ * preserved after every step has been attempted.
+ *
+ * @param resources - Harness and server recorded before the owning test exited.
+ * @param directory - Temporary tracker directory created for that test.
+ */
+async function releaseCorpusResources(
+  resources: { harness?: ExtensionHarness; server?: Server },
+  directory: string,
+): Promise<void> {
+  let failure: unknown;
+  try {
+    await resources.harness?.deactivate();
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    if (resources.server) {
+      await new Promise<void>((resolve, reject) => {
+        resources.server?.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  } catch (error) {
+    failure ??= error;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  if (failure !== undefined) {
+    throw failure;
+  }
+}
+
+/**
  * Create the disposable tracker directory for one corpus test and register its
  * full teardown on the owning test's lifecycle before any other setup runs.
  *
- * The registered hook runs even when a later setup step or an assertion fails,
- * and it performs the same sequence the per-test `finally` blocks used —
- * harness deactivation, webhook server close, directory removal — for whichever
- * resources exist at that point. Registering the hook immediately after the
- * directory is created, instead of entering `try`/`finally` only after the
- * harness and server are already up, is what keeps a rejected harness creation
- * or server listen from leaking the resources already made.
+ * The registered hook runs even when a later setup step or an assertion fails.
+ * It asks {@link releaseCorpusResources} to deactivate the harness, close the
+ * webhook server, and remove the directory, attempting each step even when an
+ * earlier one rejects. Registering the hook immediately after the directory is
+ * created, instead of entering `try`/`finally` only after the harness and server
+ * are already up, is what keeps a rejected harness creation or server listen
+ * from leaking the resources already made.
  *
  * @param context - Owning test lifecycle, so cleanup runs on every exit path.
  * @param prefix - `mkdtempSync` prefix identifying this corpus test in tmpdir().
@@ -43,13 +80,7 @@ function createCorpusFixture(context: TestContext, prefix: string): CorpusFixtur
   const directory = mkdtempSync(join(tmpdir(), prefix));
   const resources: { harness?: ExtensionHarness; server?: Server } = {};
   context.after(async () => {
-    await resources.harness?.deactivate();
-    if (resources.server) {
-      await new Promise<void>((resolve, reject) => {
-        resources.server?.close((error) => (error ? reject(error) : resolve()));
-      });
-    }
-    rmSync(directory, { recursive: true, force: true });
+    await releaseCorpusResources(resources, directory);
   });
   return {
     directory,
@@ -123,7 +154,14 @@ test("digest refuses malformed tracker records instead of previewing an incomple
   // Deliberate corruption of an isolated fixture tests the unsafe read boundary.
   writeFileSync(join(pmRoot, "tasks", "broken.toon"), "not a valid item document");
   await assert.rejects(harness.runCommand({ command: "slack digest", pmRoot,
-    options: { "dry-run": true }, global: { json: true } }), /complete|read|unreadable/i);
+    options: { "dry-run": true }, global: { json: true } }), (error: unknown) => {
+    assert.match(String((error as { message?: unknown }).message), /complete|read|unreadable/i);
+    // listAllComplete already throws PmCliError with a numeric exitCode. The
+    // host rethrows that class of error instead of taking the unhandled path,
+    // so wrapping it would only hide the SDK's exit code.
+    assert.equal(typeof (error as { exitCode?: unknown }).exitCode, "number");
+    return true;
+  });
 });
 
 test("corpus fixture removes the tracker directory when later setup never runs", async (t) => {
@@ -145,4 +183,49 @@ test("no corpus directory leaks when setup failed before harness creation", () =
     !existsSync(setupFailureDirectory),
     "the registered teardown must remove the tracker directory even when later setup never runs",
   );
+});
+
+test("corpus teardown still closes the server and deletes the directory when deactivate rejects", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "pm-slack-teardown-deactivate-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "marker"), "present");
+  let closed = false;
+  const server = {
+    close(callback: (error?: Error | null) => void) {
+      closed = true;
+      callback();
+    },
+  } as Server;
+  await assert.rejects(
+    releaseCorpusResources({
+      harness: { deactivate: async () => { throw new Error("deactivate failed"); } } as unknown as ExtensionHarness,
+      server,
+    }, directory),
+    /deactivate failed/,
+  );
+  assert.equal(closed, true, "a rejected deactivate must not skip server shutdown");
+  assert.equal(existsSync(directory), false, "a rejected deactivate must not skip directory removal");
+});
+
+test("corpus teardown still deletes the directory when server close rejects", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "pm-slack-teardown-close-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "marker"), "present");
+  const server = {
+    close(callback: (error?: Error | null) => void) {
+      callback(new Error("close failed"));
+    },
+  } as Server;
+  await assert.rejects(releaseCorpusResources({ server }, directory), /close failed/);
+  assert.equal(existsSync(directory), false, "a rejected server.close must not skip directory removal");
+});
+
+test("slack digest command comment describes the public SDK read", () => {
+  const source = readFileSync(join(import.meta.dirname, "..", "index.ts"), "utf8");
+  const start = source.indexOf("command \u2014 \`pm slack digest\`");
+  const end = source.indexOf('name: "slack digest"', start);
+  assert.ok(start >= 0 && end > start, "the digest command block comment must exist");
+  const block = source.slice(start, end);
+  assert.match(block, /public SDK/);
+  assert.doesNotMatch(block, /Reads the pm store directly/);
 });

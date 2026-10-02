@@ -1893,8 +1893,8 @@ export default defineExtension({
             // ---------------------------------------------------------------------
             // command — `pm slack digest` : summarize recent activity (created /
             // closed / blocked / in-progress) over a --since/--days window into a
-            // single notification. Reads the pm store directly; --dry-run prints
-            // without posting.
+            // single notification. Reads the complete tracker through the public SDK
+            // listAllComplete() operation; --dry-run prints without posting.
             // ---------------------------------------------------------------------
             api.registerCommand({
                 name: "slack digest",
