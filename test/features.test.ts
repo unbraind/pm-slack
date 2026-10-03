@@ -20,7 +20,6 @@ const {
   SLACK_SECTION_FIELD_TEXT_MAX,
   SLACK_SECTION_FIELDS_MAX,
   SLACK_HEADER_TEXT_MAX,
-  parseStoredItem,
   resolveWindow,
   aggregateDigest,
   buildDigestText,
@@ -178,44 +177,6 @@ test("selectRoute: first match wins, falls back to defaults, null when nothing",
   // matching rule with its own webhook works even with no default webhook
   const t4 = selectRoute("block", { id: "4", title: "z", type: "Feature" }, [{ match: "block", webhook: "https://h/b" }], "", undefined);
   assert.deepEqual(t4, { webhookUrl: "https://h/b", channel: undefined });
-});
-
-// ---------------------------------------------------------------------------
-// parseStoredItem
-// ---------------------------------------------------------------------------
-
-test("parseStoredItem: toon scalar parsing, ignores nested blocks", () => {
-  const toon = [
-    "id: pm-abc",
-    'title: "Hello: world"',
-    "type: Task",
-    "status: closed",
-    "priority: 2",
-    'created_at: "2026-06-01T00:00:00.000Z"',
-    'close_reason: "done"',
-    'notes[1]{created_at,author,text}:',
-    '  "2026-06-01T00:00:00.000Z",me,"ignored"',
-    'body: ""',
-  ].join("\n");
-  const item = parseStoredItem(toon, ".toon");
-  assert.ok(item);
-  assert.equal(item!.id, "pm-abc");
-  assert.equal(item!.title, "Hello: world");
-  assert.equal(item!.status, "closed");
-  assert.equal(item!.priority, 2);
-  assert.equal(item!.created_at, "2026-06-01T00:00:00.000Z");
-  // nested note text must not leak into scalar fields
-  assert.notEqual((item as any).text, "ignored");
-});
-
-test("parseStoredItem: json form and {item:...} wrapper, null when no id", () => {
-  const j1 = parseStoredItem('{"id":"pm-x","title":"T","status":"open"}', ".json");
-  assert.equal(j1!.id, "pm-x");
-  const j2 = parseStoredItem('{"item":{"id":"pm-y","title":"U"}}', ".json");
-  assert.equal(j2!.id, "pm-y");
-  assert.equal(parseStoredItem("{}", ".json"), null);
-  assert.equal(parseStoredItem("garbage", ".json"), null);
-  assert.equal(parseStoredItem("title: no id here", ".toon"), null);
 });
 
 // ---------------------------------------------------------------------------

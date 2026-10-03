@@ -32,7 +32,7 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import https from "node:https";
 import http from "node:http";
-import fs from "node:fs";
+import { listAllComplete } from "@unbrained/pm-cli/sdk";
 import path from "node:path";
 import type {
   AfterCommandHookContext,
@@ -45,9 +45,15 @@ import type {
 // pm's extension command runtime only treats a thrown error as a cleanly
 // handled non-zero exit when the error carries a numeric `exitCode` property.
 // A plain `Error` makes the runtime fall through to its "unhandled" path, which
-// re-invokes the handler and exits with a generic code. Standalone-installed
-// extensions only load their own `dist/`, so `@unbrained/pm-cli` is not
-// resolvable at runtime — mirror the SDK contract here instead of importing it.
+// re-invokes the handler and exits with a generic code.
+//
+// Installed copies of this package receive a `node_modules/@unbrained/pm-cli`
+// link to the exact running host CLI, so the public SDK imports below resolve
+// after `pm package install` (npm, GitHub, bundled, or local source); a raw
+// standalone entry outside `node_modules` needs that host SDK link created
+// before any runtime SDK import. The small expected-error contract is mirrored
+// here — instead of importing the SDK's equivalent helper — so the command
+// error paths stay declared next to the code that throws them.
 // ---------------------------------------------------------------------------
 
 const EXIT_CODE = {
@@ -1405,91 +1411,21 @@ async function postToSlack(webhookUrl: string, payload: SlackPayload): Promise<v
 }
 
 // ---------------------------------------------------------------------------
-// Digest: reading the pm store + activity aggregation
-//
-// The digest reads items directly from the pm store (`<pm_root>/<dir>/*.toon`
-// and `*.json`) using a tiny scalar parser — we only need a handful of
-// top-level fields (id/title/type/status/priority/timestamps/reasons). This
-// avoids a runtime dependency on the pm SDK service layer (registerService is
-// limited and corrupts output, #96) and keeps the package dependency-free.
+// Digest: complete SDK reads + activity aggregation
 // ---------------------------------------------------------------------------
 
-/** Directories under a pm root that hold items, by convention. */
-const ITEM_DIRS = ["tasks", "features", "issues", "epics", "stories", "bugs", "decisions", "items"];
-
-/** Fields we read off each stored item for digest purposes. */
-interface DigestItem extends PmItem {
+/** Metadata used for digest aggregation and item lines, independent of notification priorities. */
+interface DigestItem {
+  /** Stable SDK item identity. */
+  id: string;
+  /** Decoded display title, with an untitled fallback for legacy fixtures. */
+  title?: string;
+  /** Persisted lifecycle status used by the existing digest buckets. */
+  status?: string;
+  /** Creation timestamp determining membership in the created bucket. */
   created_at?: string;
+  /** Last mutation timestamp determining status bucket membership. */
   updated_at?: string;
-}
-
-/**
- * Minimal parser for a stored pm item file. Handles the toon scalar form
- * (`key: value`, optionally quoted) and JSON. Only top-level scalar fields are
- * extracted; nested/array sections are ignored. Returns null when no id found.
- */
-function parseStoredItem(content: string, ext: string): DigestItem | null {
-  if (ext === ".json") {
-    try {
-      const obj = JSON.parse(content) as Record<string, unknown>;
-      const node = (obj.item ?? obj) as Record<string, unknown>;
-      if (typeof node.id !== "string") return null;
-      return node as unknown as DigestItem;
-    } catch {
-      return null;
-    }
-  }
-  // toon: line-oriented `key: value`. Stop reading a key when it introduces a
-  // block/array (e.g. `notes[1]{...}:`); we only want flat scalars.
-  const out: Record<string, unknown> = {};
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine;
-    if (!line || /^\s/.test(line)) continue; // skip indented (nested) lines
-    const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
-    if (!m) continue;
-    const key = m[1];
-    let value = m[2].trim();
-    if (value === "" || value === '""') {
-      out[key] = "";
-      continue;
-    }
-    // Strip surrounding double quotes (toon quotes strings with embedded chars).
-    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
-      value = value.slice(1, -1).replace(/\\"/g, '"');
-    }
-    out[key] = value;
-  }
-  if (typeof out.id !== "string") return null;
-  if (typeof out.priority === "string" && /^\d+$/.test(out.priority)) {
-    out.priority = parseInt(out.priority, 10);
-  }
-  return out as unknown as DigestItem;
-}
-
-/** Read all items from a pm root. Best-effort: unreadable files are skipped. */
-function readStoreItems(pmRoot: string): DigestItem[] {
-  const items: DigestItem[] = [];
-  for (const dir of ITEM_DIRS) {
-    const full = path.join(pmRoot, dir);
-    let entries: string[];
-    try {
-      entries = fs.readdirSync(full);
-    } catch {
-      continue;
-    }
-    for (const name of entries) {
-      const ext = path.extname(name);
-      if (ext !== ".toon" && ext !== ".json") continue;
-      try {
-        const content = fs.readFileSync(path.join(full, name), "utf8");
-        const item = parseStoredItem(content, ext);
-        if (item) items.push(item);
-      } catch {
-        // skip unreadable item
-      }
-    }
-  }
-  return items;
 }
 
 /**
@@ -2281,8 +2217,8 @@ export default defineExtension({
       // ---------------------------------------------------------------------
       // command — `pm slack digest` : summarize recent activity (created /
       // closed / blocked / in-progress) over a --since/--days window into a
-      // single notification. Reads the pm store directly; --dry-run prints
-      // without posting.
+      // single notification. Reads the complete tracker through the public SDK
+      // listAllComplete() operation; --dry-run prints without posting.
       // ---------------------------------------------------------------------
       api.registerCommand({
         name: "slack digest",
@@ -2335,7 +2271,10 @@ export default defineExtension({
 
           const pmRoot = ctx.pm_root ?? path.join(process.cwd(), ".agents", "pm");
           const { cutoffMs, label } = resolveWindow(since, days);
-          const items = readStoreItems(pmRoot);
+          // Certify all statuses, custom item directories, unique IDs and a full
+          // unbounded strict read before constructing or posting any payload.
+          // Disable nested extension hooks: this is an observational read.
+          const { items } = await listAllComplete({}, { pmRoot, noExtensions: true });
           const summary = aggregateDigest(items, cutoffMs, label);
           const payload = { ...buildDigestPayload(summary, format, channel), ...(threadTs ? { thread_ts: threadTs } : {}) };
 
@@ -2415,7 +2354,6 @@ export const __test__ = {
   resolveItemUrl,
   isHttpUrl,
   EVENT_META,
-  parseStoredItem,
   resolveWindow,
   aggregateDigest,
   buildDigestText,

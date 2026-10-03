@@ -256,8 +256,12 @@ Flags: `--format blockkit|text`, `--on create|close|block`, `--title`,
 ### `pm slack digest`
 
 Produce a single summary of recent activity (created / closed / blocked /
-in-progress) over a time window, as Block Kit or text. Reads the pm store
-directly. Use `--dry-run` to preview without posting.
+in-progress) over a time window, as Block Kit or text. Requires pm CLI/SDK
+2026.9.29 or newer. Reads the complete tracker through the public SDK, including
+configured custom item types and terminal items. Unreadable or malformed records
+refuse the digest before posting, rather than silently omitting activity. Nested
+extension hooks are disabled during the observational read. Use `--dry-run` to
+preview without posting; it still requires a complete, readable tracker.
 
 ```bash
 pm slack digest --days 7 --dry-run
