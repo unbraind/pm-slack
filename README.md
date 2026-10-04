@@ -385,3 +385,15 @@ itself lists each affected stream in its output; `pm history --verify <id>` spot
 content, so `reconcile` only re-greens the hash chain (no data loss) — see the authoritative
 [pm-cli merge-safety guide](https://github.com/unbraind/pm-cli/blob/main/docs/MERGE_SAFETY.md). The
 older blunt `pm history-repair --all` remains available as a lower-level primitive.
+
+
+## Certification tracker GitHub preview
+
+Install the managed extension in a fresh clone before running its read-only preview:
+
+```sh
+npx pm package install npm:pm-github@2026.10.4 --project
+npx pm github sync --repo unbraind/pm-slack --dry-run
+```
+
+The tracked managed manifest records the extension; installed files are ignored. This preview does not enable scheduled sync. See `docs/certification-2026.10.4.md` for package gates and packed real-tracker command evidence.
