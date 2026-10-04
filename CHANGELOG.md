@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Auto-merge green Dependabot updates and group the pm toolchain into one daily PR ([pm-slack-nra8](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-nra8.toon))
+
 ## 2026.9.26 - 2026-09-26
 
 ### Other
