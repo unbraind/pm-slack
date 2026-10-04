@@ -133,7 +133,7 @@ test("a pm-ops directory without package.json fails instead of skipping", () => 
 test("a dangling pm-ops link fails instead of skipping", () => {
   const directory = checkout("dangling-package", "absent");
   mkdirSync(join(directory, "node_modules"));
-  symlinkSync(join(directory, "missing-package"), join(directory, "node_modules", "pm-ops"), "dir");
+  symlinkSync(join(directory, "missing-package"), join(directory, "node_modules", "pm-ops"), process.platform === "win32" ? "junction" : "dir");
   const result = prepare(directory, hostPath);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /MODULE_NOT_FOUND/);

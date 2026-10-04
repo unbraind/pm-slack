@@ -537,3 +537,5 @@ npm/npx and native Bun (`bunx --bun`) both passed offline test, notify dry-run a
 ```
 
 The pm items remain open for orchestrator verification. CI and substantive bot reviews are assessed separately on the final PR head.
+
+Review follow-up: the dangling-link fixture uses a Windows junction and a POSIX directory link, following [Node filesystem APIs](https://nodejs.org/api/fs.html#fssymlinksynctarget-path-type). Scoped launcher tests pass 9/9 on Linux. Native Windows execution has not been verified. No skip guards were added; the canonical launcher is unchanged.
