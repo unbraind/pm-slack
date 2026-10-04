@@ -119,3 +119,32 @@ test("an installer killed by a signal fails the install instead of reporting suc
   const result = prepare(checkout("killed", "pinned"), stubPm("killed", 0, "kill -9 $PPID"));
   assert.equal(result.status, 1, result.stderr);
 });
+
+
+test("a pm-ops directory without package.json fails instead of skipping", () => {
+  const directory = checkout("broken-package", "absent");
+  mkdirSync(join(directory, "node_modules", "pm-ops"), { recursive: true });
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /MODULE_NOT_FOUND/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install/);
+});
+
+test("a dangling pm-ops link fails instead of skipping", () => {
+  const directory = checkout("dangling-package", "absent");
+  mkdirSync(join(directory, "node_modules"));
+  symlinkSync(join(directory, "missing-package"), join(directory, "node_modules", "pm-ops"), process.platform === "win32" ? "junction" : "dir");
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /MODULE_NOT_FOUND/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install/);
+});
+
+test("an inconclusive lookup preserves the original installer resolution failure", () => {
+  const directory = checkout("invalid-lookup", "absent");
+  writeFileSync(join(directory, "node_modules"), "a file blocks this lookup directory");
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /MODULE_NOT_FOUND/);
+  assert.doesNotMatch(result.stderr, /ENOTDIR|skipping merge-driver install/);
+});

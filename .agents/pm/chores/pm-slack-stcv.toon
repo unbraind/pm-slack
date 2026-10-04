@@ -1,0 +1,15 @@
+id: pm-slack-stcv
+title: Independently measure statement coverage in the pm-slack release gate
+description: The existing coverage gate equates statement coverage with lines and enforces only lines/branches/functions. Add independent raw V8 block statement measurement and meaningful regression fixtures without narrowing source inventory or lowering thresholds. Certification pm-slack-c104 reports only the measured dimensions.
+type: Chore
+status: open
+priority: 2
+tags: []
+created_at: "2026-10-04T10:55:43.334Z"
+updated_at: "2026-10-04T11:06:04.922Z"
+author: codex-sol
+files[1]{path,scope,note}:
+  package.json,project,Existing source inventory and enforced thresholds
+docs[1]{path,scope,note}:
+  scripts/coverage-gate.ts,project,Existing three-dimension gate and statement-equivalence documentation
+body: ""

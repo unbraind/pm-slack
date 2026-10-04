@@ -1,0 +1,29 @@
+id: pm-slack-c104
+title: Certify pm-slack on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates
+description: ""
+type: Chore
+status: in_progress
+priority: 1
+tags[2]: certification,dependencies
+created_at: "2026-10-04T10:55:41.070Z"
+updated_at: "2026-10-04T11:54:25.840Z"
+author: codex-sol
+actual_result: "Exact CLI/SDK, pm-ops and pm-changelog 2026.10.4 with current exact dev pins. Dependabot #119 #122 #123 and exact CodeQL SHA consolidated. Locked release:check PASS 273/273 zero skipped; 100% lines/branches/functions for one enforced runtime source, independent statements unmeasured (pm-slack-stcv). Docstrings 7 files/51 declarations. npm audits zero; strict health exit zero with inherited advisories; tracked dist matches build. Packed copied-real-tracker npx/native Bun test, notify dry-run, digest dry-run PASS: identical created=82 closed=72 blocked=2 in_progress=3 total=159 activity counts. Scratch deleted. Managed GitHub preview planned zero writes. Exact evidence docs/certification-2026.10.4.md. Final-head CI/reviews remain separate; no merge/item closure."
+comments[4]{created_at,author,text}:
+  "2026-10-04T10:55:42.734Z",codex-sol,"Worktree based on origin/main 47089f0. Consolidate Dependabot #119 #122 #123 including exact CodeQL action SHA, exact PM 2026.10.4/latest fleet pins, both locks, canonical template, full serialized CI gate, packed real-tracker dry-run npm/native Bun commands and managed GitHub sync preview. Security alerts: none. Existing gate independently measures only lines/branches/functions; do not claim statements."
+  "2026-10-04T11:01:49.500Z",codex-sol,npm audit and npm audit --omit=dev both report zero vulnerabilities. Managed pm-github 2026.10.4 install succeeded; read-only sync preview planned zero writes because no local items have GitHub provenance. Strict pinned health exits zero with inherited stale-item and legacy provenance advisories. Linked snapshot launcher suite passes all nine tests. Full gate and native Bun dogfood queued on shared heavy lock.
+  "2026-10-04T11:06:01.307Z",codex-sol,"Locked full release:check passed 273/273 tests, zero skipped; 100% lines/branches/functions for runtime index.ts (one enforced source), independent statements unmeasured and follow-up pm-slack-stcv open. Docstring gate covers seven files/51 declarations. Fresh dist build has zero diff from tracked output. Audit/pack/changelog/publish attestation/release date verification all pass. Packed copied-real-tracker previews queued next."
+  "2026-10-04T11:54:24.773Z",codex-sol,"Review follow-up: Greptile pm-slack#124 finding 4177259636 correctly flags privileged Windows directory symlink creation. Shared dangling-link fixture now requests a junction on Windows and a directory link on POSIX without adding skips. Targeted launcher suite passes 9/9 on this Linux host; native Windows execution is unverified. Canonical launcher bytes and production behavior are unchanged. Initial substantive review remains unavailable from CodeRabbit automatic-skip/Sourcery quota and silent reviewers; request one explicit re-review after this push, retain open readiness boundary."
+files[6]{path,scope,note}:
+  .github/workflows/codeql.yml,project,Dependabot #119 exact action SHA
+  bun.lock,project,Exact native Bun dependency resolution
+  package-lock.json,project,Updated npm resolution
+  package.json,project,Exact PM CLI/SDK and fleet tool pins
+  scripts/prepare-merge-driver.ts,project,Published canonical launcher
+  test/prepare-merge-driver.test.ts,project,Broken-install and lookup failure regressions
+tests[2]{command,scope,timeout_seconds,pm_context_mode,workspace_context_mode,provenance{author,created_at,source_kind,source_ref}}:
+  "flock /tmp/claude-1000/heavy-gate.lock npm run release:check",project,1200,none,snapshot,codex-sol,"2026-10-04T10:57:15.662Z",local_mutation,chore/pm-slack-pm-cli-2026-10-4
+  node --test test/prepare-merge-driver.test.ts,project,180,none,snapshot,codex-sol,"2026-10-04T10:57:16.831Z",local_mutation,chore/pm-slack-pm-cli-2026-10-4
+docs[1]{path,scope,note}:
+  docs/certification-2026.10.4.md,project,Exact validation and real tracker preview commands/results
+body: ""
