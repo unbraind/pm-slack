@@ -6,10 +6,10 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-10-21T20:00:45.908Z"
-updated_at: "2026-10-21T20:32:34.536Z"
+updated_at: "2026-10-21T22:09:18.875Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
-comments[8]{created_at,author,text}:
+comments[10]{created_at,author,text}:
   "2026-10-21T20:01:09.181Z",codex-agent,"Overlap recheck: CLI lifecycle hooks expose successful command results but no Slack-specific durable delivery acknowledgment. pm-slack currently retries immediate HTTP attempts only. pm-observer src/delivery.ts and src/store.ts own idempotent PM evidence notes, and pm-slack-standup owns digests. This feature owns Slack delivery intents and receipts only. Plan: opt-in durable storage, atomic claims and idempotency, persisted uncertain outcomes with explicit reconciliation, bounded SDK and CLI inspection/drain, real no-git tracker regressions and public tracker-copy validation. Reconciliation PR items remain untouched."
   "2026-10-21T20:09:32.697Z",codex-agent,"Implemented SQLite FULL-synchronous durable delivery with atomic cross-process claims and frozen history-revision identities, explicit enable boundary, verified SDK history recovery for commits missed by hooks, bounded structured inspection, safe destination fingerprints, and explicit reconciliation of uncertain sends. Targeted lifecycle/corpus/transport tests: 215 passed, 0 failed; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Typecheck and docstring gate passed. Full unchanged release gates will run under npm and Bun in CI because local CPU is saturated."
   "2026-10-21T20:16:31.480Z",codex-agent,"Real-data validation used a read-only non-git archive of the public pm-slack tracker at f4dce1dcf2b291a99d6c9e3f99fb529b104c707f: 85 items, 515 history entries, 177 immutable source files. Scan inspected all 515 entries and queued zero pre-enable events. Real-data snapshot intents produced 85 acknowledged localhost sends, zero duplicate sends after reopening and re-draining, with all source bytes unchanged. Bounded inspection returned 10 rows and omitted 75. Native Bun acceptance also recovered one lifecycle event with one acknowledged send and zero duplicates without git. Receipt pagination now makes every retained key reachable."
@@ -18,8 +18,11 @@ comments[8]{created_at,author,text}:
   "2026-10-21T20:26:28.966Z",codex-agent,"Final targeted production-source coverage: 216 passed, zero failed, skipped or canceled; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Current typecheck, test typecheck and docstring lint passed (76 documented declarations). All five behavioral reverts fail independently, including restoring the Node-only SQLite loader under native Bun; every function and emitted artifact was restored. Native Bun acceptance passes with git absent. CLI refusals now preserve producer codes and remedies in structured nonzero results. Full npm and Bun release gates remain delegated to CI at unchanged thresholds."
   "2026-10-21T20:29:56.376Z",codex-agent,"Implementation committed as 0403120189a39ffb76d495324b24ffe4b7334a90 and proposed in https://github.com/unbraind/pm-slack/pull/147. Initial CI is https://github.com/unbraind/pm-slack/actions/runs/39670707658 and runs unchanged npm and Bun release gates on Node 22 and 26 plus native Bun acceptance. Awaiting full-gate completion; tracker reconciliation items remain byte-for-byte untouched."
   "2026-10-21T20:32:32.416Z",codex-agent,"Full implementation CI passed: https://github.com/unbraind/pm-slack/actions/runs/39670707658 at 0403120189a39ffb76d495324b24ffe4b7334a90. Node 22 and 26 each passed npm run release:check and bun run release:check: 283 tests per gate, zero failed/skipped/canceled, and 100 percent lines/branches/functions. Native Bun acceptance passed in both jobs. Documentation in docs/outbox-validation.md records measured public-data validation and five revert proofs. PR https://github.com/unbraind/pm-slack/pull/147 will retain final-head CI evidence. Automated review remains missing: Greptile trial expired, Sourcery budget-limited, CodeRabbit skipped, cubic neutral. Releasing the claim for orchestrator verification; item remains open, with no merge or release."
-files[10]{path,scope}:
+  "2026-10-21T22:08:33.230Z",codex-agent,"PR #147 follow-up: copy pm-starter .hound.yml verbatim to disable jshint on deliberately committed ES2022 dist output. Branch already contains origin/main. Latest CodeRabbit body (comment 6325847600) reports automatic review skipped because the repository has fewer than 10 stars; no review findings or inline CodeRabbit comments exist. No behavioral fix or revert regression is required for this configuration-only change. Targeted checks run locally; CI remains the full npm/Bun release gate. The package currently has typecheck and docstring checks but no standalone ESLint script."
+  "2026-10-21T22:09:17.080Z",codex-agent,"Added .hound.yml byte-for-byte from pm-starter, retaining its rationale comment and jshint.enabled=false. Local validation: reference byte comparison passed; npm run docstring passed (8 files, 76 declarations); git diff --check passed; node_modules/.bin/pm test pm-slack-3e7d --run --progress passed both linked commands: node --test test/outbox.test.ts (10 passed, zero failed/skipped/canceled) and npm run typecheck. Initial linked run refused the inherited command because this fresh checkout has a detached ref; after inspecting and acknowledging the existing commands in this clone, rerun passed. Existing policy disables stored test-run receipts, so results are recorded here. No function changed; behavioral revert proof is not applicable. CI will run the unchanged full npm and Bun release gates on Node 22 and 26. Claim released for orchestrator verification; item remains nonterminal."
+files[11]{path,scope}:
   .github/workflows/ci.yml,project
+  .hound.yml,project
   index.ts,project
   manifest.json,project
   outbox.ts,project
@@ -29,10 +32,23 @@ files[10]{path,scope}:
   test/digest-corpus.test.ts,project
   test/outbox.test.ts,project
   test/smoke.test.ts,project
-tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  node --test test/outbox.test.ts,project,codex-agent,"2026-10-21T20:13:09.588Z",local_mutation,feat/durable-notification-outbox
-docs[3]{path,scope}:
+tests[2]:
+  - command: node --test test/outbox.test.ts
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T20:13:09.588Z"
+      source_kind: local_mutation
+      source_ref: feat/durable-notification-outbox
+  - command: npm run typecheck
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T22:08:46.469Z"
+      source_kind: local_mutation
+docs[4]{path,scope}:
   docs/outbox-example.md,project
   docs/outbox-validation.md,project
+  "https://github.com/unbraind/pm-slack/issues/147#issuecomment-6325847600",project
   README.md,project
 body: ""
