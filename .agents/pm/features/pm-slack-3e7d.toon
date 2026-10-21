@@ -1,0 +1,37 @@
+id: pm-slack-3e7d
+title: Keep enabled Slack lifecycle notifications durable across restarts
+description: "Persist Slack-only delivery intents, idempotency identities and acknowledgments. Existing immediate retry/backoff remains transport logic; pm-observer owns evidence-note delivery into PM only. CLI lifecycle hooks currently send without a durable receipt; sibling pm-slack-standup builds digests rather than delivering lifecycle intents. No duplicate open outbox item found; tracker-reconciliation items are excluded."
+type: Feature
+status: in_progress
+priority: 1
+tags: []
+created_at: "2026-10-21T20:00:45.908Z"
+updated_at: "2026-10-21T20:26:28.966Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
+comments[6]{created_at,author,text}:
+  "2026-10-21T20:01:09.181Z",codex-agent,"Overlap recheck: CLI lifecycle hooks expose successful command results but no Slack-specific durable delivery acknowledgment. pm-slack currently retries immediate HTTP attempts only. pm-observer src/delivery.ts and src/store.ts own idempotent PM evidence notes, and pm-slack-standup owns digests. This feature owns Slack delivery intents and receipts only. Plan: opt-in durable storage, atomic claims and idempotency, persisted uncertain outcomes with explicit reconciliation, bounded SDK and CLI inspection/drain, real no-git tracker regressions and public tracker-copy validation. Reconciliation PR items remain untouched."
+  "2026-10-21T20:09:32.697Z",codex-agent,"Implemented SQLite FULL-synchronous durable delivery with atomic cross-process claims and frozen history-revision identities, explicit enable boundary, verified SDK history recovery for commits missed by hooks, bounded structured inspection, safe destination fingerprints, and explicit reconciliation of uncertain sends. Targeted lifecycle/corpus/transport tests: 215 passed, 0 failed; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Typecheck and docstring gate passed. Full unchanged release gates will run under npm and Bun in CI because local CPU is saturated."
+  "2026-10-21T20:16:31.480Z",codex-agent,"Real-data validation used a read-only non-git archive of the public pm-slack tracker at f4dce1dcf2b291a99d6c9e3f99fb529b104c707f: 85 items, 515 history entries, 177 immutable source files. Scan inspected all 515 entries and queued zero pre-enable events. Real-data snapshot intents produced 85 acknowledged localhost sends, zero duplicate sends after reopening and re-draining, with all source bytes unchanged. Bounded inspection returned 10 rows and omitted 75. Native Bun acceptance also recovered one lifecycle event with one acknowledged send and zero duplicates without git. Receipt pagination now makes every retained key reachable."
+  "2026-10-21T20:16:33.696Z",codex-agent,"Behavioral revert proof: independently removing enqueue persistence, forgetting durable acknowledgment, removing verified history recovery, or bypassing durable hook integration makes the corresponding outbox regression fail. Source functions were restored after each proof. No dependency pin was changed; the declared compatibility floor is aligned to the pinned 2026.10.15 SDK used for verified history recovery. Local strict health has pre-existing global-extension version skew and installer fence drift; CI checks a clean clone after installation. Linked tests passed 9 of 9; test-result tracking is disabled by existing project policy, so results are recorded here without changing that policy."
+  "2026-10-21T20:25:41.778Z",codex-agent,"Installed CLI validation in a plain scratch tracker confirmed compact TOON (217 bytes for empty status), JSON (255 bytes), operation without a git executable, and typed disabled refusals exiting 2 with an explicit enable remedy. The pinned host generic renderer omitted null fields and appended generic output after direct printing; a renderer scoped only to slack outbox now owns TOON. The pinned host generic thrown-error path reduced extension errors to command_failed, so this command returns typed structured nonzero refusal receipts. These host UX gaps were worked around without changing the CLI repository. Native Bun uses its own synchronous SQLite API; Node uses node:sqlite. No standalone lint script exists: local lint evidence is the docstring gate plus git diff --check."
+  "2026-10-21T20:26:28.966Z",codex-agent,"Final targeted production-source coverage: 216 passed, zero failed, skipped or canceled; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Current typecheck, test typecheck and docstring lint passed (76 documented declarations). All five behavioral reverts fail independently, including restoring the Node-only SQLite loader under native Bun; every function and emitted artifact was restored. Native Bun acceptance passes with git absent. CLI refusals now preserve producer codes and remedies in structured nonzero results. Full npm and Bun release gates remain delegated to CI at unchanged thresholds."
+files[10]{path,scope}:
+  .github/workflows/ci.yml,project
+  index.ts,project
+  manifest.json,project
+  outbox.ts,project
+  package.json,project
+  test/bun-outbox.acceptance.ts,project
+  test/coverage.test.ts,project
+  test/digest-corpus.test.ts,project
+  test/outbox.test.ts,project
+  test/smoke.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/outbox.test.ts,project,codex-agent,"2026-10-21T20:13:09.588Z",local_mutation,feat/durable-notification-outbox
+docs[2]{path,scope}:
+  docs/outbox-example.md,project
+  README.md,project
+body: ""

@@ -4,8 +4,8 @@
  * Two surfaces:
  *   1. afterCommand hook — posts a Slack notification when an item is created,
  *      closed, or blocked (only if PM_SLACK_WEBHOOK is set; otherwise a silent
- *      no-op). The hook NEVER throws and NEVER blocks the command: all work is
- *      wrapped in try/catch and Slack posting is fire-and-forget.
+ *      no-op). The hook catches delivery errors after the item is committed.
+ *      An explicitly enabled outbox retains delivery receipts across restarts.
  *   2. `pm slack notify` command — manual posting of a rich Slack Block Kit
  *      message (sections, fields, context) with a plain-text fallback.
  *
@@ -29,6 +29,10 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+import { SlackOutbox } from "./outbox.ts";
+import type { OutboxEvent } from "./outbox.ts";
+export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
+export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -72,7 +76,7 @@ interface PmItem {
     sourceUrl?: string;
     link?: string;
 }
-type EventKind = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
+type EventKind = OutboxEvent;
 type MessageFormat = "blockkit" | "text" | "custom";
 /** A single routing rule parsed from PM_SLACK_ROUTES. */
 interface RouteRule {
@@ -210,7 +214,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -583,6 +587,22 @@ declare function detectEvent(ctx: AfterCommandHookContext): EventKind | null;
  * @returns The touched item, or `null` when the result carries none.
  */
 declare function extractItem(ctx: AfterCommandHookContext): PmItem | null;
+/** Preserve typed operational refusals across the host's structured nonzero command-result boundary. */
+declare function outboxFailure(error: unknown): {
+    ok: boolean;
+    exit_code: number;
+    code: import("./outbox.ts").OutboxRefusalCode;
+    remediation: string;
+};
+/**
+ * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
+ * History and items are read only. A malformed stream refuses the scan before any network delivery.
+ * Existing receipts win over later environment changes; frozen intents are never reformatted.
+ */
+export declare function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<{
+    inspected: number;
+    queued: number;
+}>;
 declare const _default: {
     name: string;
     version: string;
@@ -598,6 +618,7 @@ export default _default;
  * supported extension API.
  */
 export declare const __test__: {
+    outboxFailure: typeof outboxFailure;
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;
@@ -628,7 +649,7 @@ export declare const __test__: {
     __resetWarnState: () => void;
     resolveItemUrl: typeof resolveItemUrl;
     isHttpUrl: typeof isHttpUrl;
-    EVENT_META: Record<EventKind, {
+    EVENT_META: Record<OutboxEvent, {
         verb: string;
         emoji: string;
     }>;

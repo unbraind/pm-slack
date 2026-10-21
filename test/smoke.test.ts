@@ -19,7 +19,7 @@ import extension, { isSlackOfflineCommand, isSlackPostingCommand } from "../inde
 async function harness() {
   const created = await createExtensionTestHarness(extension, {
     name: "pm-slack",
-    capabilities: ["commands", "hooks", "schema", "preflight"],
+    capabilities: ["commands", "hooks", "schema", "preflight", "renderers"],
   });
   assert.deepEqual(created.activation.failed, [], "activation must not fail");
   return created;
