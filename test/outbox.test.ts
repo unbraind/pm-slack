@@ -276,6 +276,39 @@ test("CLI enable, drain, status and resolution use bounded structured receipts a
   await assert.rejects(command({ action: "drain" }), refusal("destination_changed"));
 });
 
+test("pre-request route refusals preserve pending receipts and attempts until configuration is repaired", async (t) => {
+  let sends = 0;
+  const server = http.createServer((_req, response) => { sends += 1; response.end("ok"); });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  t.after(() => new Promise<void>((done) => server.close(() => done())));
+  environment(t, `http://127.0.0.1:${(server.address() as { port: number }).port}/webhook`);
+  const { pmRoot, client } = await fixture(t);
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  box.enable();
+  await create({ title: "Queued before route configuration changed", priority: 1 }, client);
+  assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 1);
+  const original = box.status().rows[0]!;
+  assert.equal(original.state, "pending");
+  assert.equal(original.attempts, 0);
+  const ext = await harness(t);
+  process.env.PM_SLACK_ROUTES = JSON.stringify([{ match: "close", webhook: "ftp://invalid.example/webhook" }]);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+    assert.equal(response.exitCode, 2);
+    assert.equal(response.errorCode, "invalid_input");
+    assert.deepEqual(box.status().rows, [original], "pre-request refusals must preserve the pending receipt and zero attempts");
+    assert.equal(sends, 0, "invalid unrelated routing must refuse before any HTTP request");
+  }
+  delete process.env.PM_SLACK_ROUTES;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+    assert.equal(response.exitCode ?? 0, 0);
+    assert.deepEqual(box.status().rows.map((row) => ({ ...row })), [{ ...original, state: "acknowledged", attempts: 1 }]);
+    assert.equal(sends, 1, "repairing routing must acknowledge exactly one send without manual reconciliation");
+  }
+});
+
 test("storage and corrupt history refuse safely; notification failure never changes a committed item", async (t) => {
   assert.equal(__test__.outboxFailure(new Error("Opaque underlying storage failure")).code, "storage_unavailable");
   environment(t);

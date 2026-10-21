@@ -195,7 +195,7 @@ export class SlackOutbox {
       next_cursor: page.length > limit ? rows[rows.length - 1]!.sequence : null };
   }
 
-  /** Claim pending rows once; destination_changed may be thrown only before a remote request starts. */
+  /** Claim pending rows once; typed OutboxError refusals must occur before a remote request starts. */
   async drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit = 20): Promise<OutboxReport> {
     limitValue(limit);
     if (!this.since()) throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
@@ -208,7 +208,7 @@ export class SlackOutbox {
         const outcome = await send(String(row.destination), JSON.parse(String(row.payload)) as OutboxPayload);
         state = outcome === "retry" ? "pending" : outcome;
       } catch (error) {
-        if (error instanceof OutboxError && error.code === "destination_changed") {
+        if (error instanceof OutboxError) {
           this.db.prepare("UPDATE delivery SET state='pending',owner=0,attempts=attempts-1 WHERE key=?").run(candidate.key!);
           throw error;
         }

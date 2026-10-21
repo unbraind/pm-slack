@@ -115,7 +115,7 @@ export class SlackOutbox {
         return { enabled_since: this.since(), counts, rows, omitted: Object.values(counts).reduce((sum, n) => sum + n, 0) - rows.length,
             next_cursor: page.length > limit ? rows[rows.length - 1].sequence : null };
     }
-    /** Claim pending rows once; destination_changed may be thrown only before a remote request starts. */
+    /** Claim pending rows once; typed OutboxError refusals must occur before a remote request starts. */
     async drain(send, limit = 20) {
         limitValue(limit);
         if (!this.since())
@@ -131,7 +131,7 @@ export class SlackOutbox {
                 state = outcome === "retry" ? "pending" : outcome;
             }
             catch (error) {
-                if (error instanceof OutboxError && error.code === "destination_changed") {
+                if (error instanceof OutboxError) {
                     this.db.prepare("UPDATE delivery SET state='pending',owner=0,attempts=attempts-1 WHERE key=?").run(candidate.key);
                     throw error;
                 }

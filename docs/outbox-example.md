@@ -43,6 +43,8 @@ try {
 ```
 
 Thrown transport failures become `ambiguous`; they are not automatically retried.
+Throw `OutboxError` only for refusals before a request starts; these leave the
+receipt pending without counting a remote attempt and are rethrown to the caller.
 Use `pm slack outbox --action drain` for the built-in transport and bounded TOON/JSON.
 After checking Slack, reconcile uncertainty with the receipt key and an explicit
 `acknowledged` or `retry` decision. Preserve runtime receipts and retained history

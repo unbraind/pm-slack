@@ -6,10 +6,10 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-10-21T20:00:45.908Z"
-updated_at: "2026-10-21T22:09:18.875Z"
+updated_at: "2026-10-21T22:17:54.045Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
-comments[10]{created_at,author,text}:
+comments[12]{created_at,author,text}:
   "2026-10-21T20:01:09.181Z",codex-agent,"Overlap recheck: CLI lifecycle hooks expose successful command results but no Slack-specific durable delivery acknowledgment. pm-slack currently retries immediate HTTP attempts only. pm-observer src/delivery.ts and src/store.ts own idempotent PM evidence notes, and pm-slack-standup owns digests. This feature owns Slack delivery intents and receipts only. Plan: opt-in durable storage, atomic claims and idempotency, persisted uncertain outcomes with explicit reconciliation, bounded SDK and CLI inspection/drain, real no-git tracker regressions and public tracker-copy validation. Reconciliation PR items remain untouched."
   "2026-10-21T20:09:32.697Z",codex-agent,"Implemented SQLite FULL-synchronous durable delivery with atomic cross-process claims and frozen history-revision identities, explicit enable boundary, verified SDK history recovery for commits missed by hooks, bounded structured inspection, safe destination fingerprints, and explicit reconciliation of uncertain sends. Targeted lifecycle/corpus/transport tests: 215 passed, 0 failed; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Typecheck and docstring gate passed. Full unchanged release gates will run under npm and Bun in CI because local CPU is saturated."
   "2026-10-21T20:16:31.480Z",codex-agent,"Real-data validation used a read-only non-git archive of the public pm-slack tracker at f4dce1dcf2b291a99d6c9e3f99fb529b104c707f: 85 items, 515 history entries, 177 immutable source files. Scan inspected all 515 entries and queued zero pre-enable events. Real-data snapshot intents produced 85 acknowledged localhost sends, zero duplicate sends after reopening and re-draining, with all source bytes unchanged. Bounded inspection returned 10 rows and omitted 75. Native Bun acceptance also recovered one lifecycle event with one acknowledged send and zero duplicates without git. Receipt pagination now makes every retained key reachable."
@@ -20,6 +20,8 @@ comments[10]{created_at,author,text}:
   "2026-10-21T20:32:32.416Z",codex-agent,"Full implementation CI passed: https://github.com/unbraind/pm-slack/actions/runs/39670707658 at 0403120189a39ffb76d495324b24ffe4b7334a90. Node 22 and 26 each passed npm run release:check and bun run release:check: 283 tests per gate, zero failed/skipped/canceled, and 100 percent lines/branches/functions. Native Bun acceptance passed in both jobs. Documentation in docs/outbox-validation.md records measured public-data validation and five revert proofs. PR https://github.com/unbraind/pm-slack/pull/147 will retain final-head CI evidence. Automated review remains missing: Greptile trial expired, Sourcery budget-limited, CodeRabbit skipped, cubic neutral. Releasing the claim for orchestrator verification; item remains open, with no merge or release."
   "2026-10-21T22:08:33.230Z",codex-agent,"PR #147 follow-up: copy pm-starter .hound.yml verbatim to disable jshint on deliberately committed ES2022 dist output. Branch already contains origin/main. Latest CodeRabbit body (comment 6325847600) reports automatic review skipped because the repository has fewer than 10 stars; no review findings or inline CodeRabbit comments exist. No behavioral fix or revert regression is required for this configuration-only change. Targeted checks run locally; CI remains the full npm/Bun release gate. The package currently has typecheck and docstring checks but no standalone ESLint script."
   "2026-10-21T22:09:17.080Z",codex-agent,"Added .hound.yml byte-for-byte from pm-starter, retaining its rationale comment and jshint.enabled=false. Local validation: reference byte comparison passed; npm run docstring passed (8 files, 76 declarations); git diff --check passed; node_modules/.bin/pm test pm-slack-3e7d --run --progress passed both linked commands: node --test test/outbox.test.ts (10 passed, zero failed/skipped/canceled) and npm run typecheck. Initial linked run refused the inherited command because this fresh checkout has a detached ref; after inspecting and acknowledging the existing commands in this clone, rerun passed. Existing policy disables stored test-run receipts, so results are recorded here. No function changed; behavioral revert proof is not applicable. CI will run the unchanged full npm and Bun release gates on Node 22 and 26. Claim released for orchestrator verification; item remains nonterminal."
+  "2026-10-21T22:16:00.488Z",codex-agent,"CodeRabbit completed full review 5606899987 on 801fcf8 and posted one valid finding (discussion_r4342530828): sendOutbox validates every route before sending, so an invalid unrelated route raises invalid_input before a request, but drain currently marks the row ambiguous. Plan: reset every typed OutboxError pre-request refusal to pending, clear owner, undo attempts and rethrow; retain ambiguity for ordinary transport errors. Add a real non-git tracker and localhost HTTP regression for malformed unrelated routing, prove it fails with only drain reverted, then rerun targeted checks and final-head CI. Earlier Hound-only head passed full npm/Bun CI: https://github.com/unbraind/pm-slack/actions/runs/39684455606 (283 tests per gate on Node 22 and 26)."
+  "2026-10-21T22:17:52.248Z",codex-agent,"Fixed the valid CodeRabbit pre-request refusal finding: every typed OutboxError resets the claimed row to pending with owner cleared and attempts decremented before rethrow; ordinary transport exceptions remain ambiguous. Documented the send callback contract and rebuilt committed dist output. New real non-git tracker/localhost integration regression checks two invalid unrelated-route drains send zero requests and preserve the pending receipt at zero attempts, then routing repair acknowledges exactly one request without manual reconciliation or duplicates. Behavioral revert proof: reverting only drain's condition to the original destination_changed-only handling makes the new regression fail (missing invalid_input refusal); restored code passes. node_modules/.bin/pm test pm-slack-3e7d --run --progress passed all 3 linked commands: outbox suite 11/11, typecheck, and isolated regression 1/1. npm run build, npm run build:test, npm run docstring (76 declarations), native Bun acceptance (1 recovered, 1 acknowledged, 0 duplicates, no git), and git diff --check passed. Full unchanged npm/Bun gates remain delegated to final-head CI. Claim released for orchestrator verification; item stays nonterminal."
 files[11]{path,scope}:
   .github/workflows/ci.yml,project
   .hound.yml,project
@@ -32,7 +34,7 @@ files[11]{path,scope}:
   test/digest-corpus.test.ts,project
   test/outbox.test.ts,project
   test/smoke.test.ts,project
-tests[2]:
+tests[3]:
   - command: node --test test/outbox.test.ts
     scope: project
     provenance:
@@ -46,9 +48,16 @@ tests[2]:
       author: codex-agent
       created_at: "2026-10-21T22:08:46.469Z"
       source_kind: local_mutation
-docs[4]{path,scope}:
+  - command: "node --test --test-name-pattern=\"pre-request route refusals\" test/outbox.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T22:17:03.099Z"
+      source_kind: local_mutation
+docs[5]{path,scope}:
   docs/outbox-example.md,project
   docs/outbox-validation.md,project
   "https://github.com/unbraind/pm-slack/issues/147#issuecomment-6325847600",project
+  "https://github.com/unbraind/pm-slack/pull/147#discussion_r4342530828",project
   README.md,project
 body: ""
