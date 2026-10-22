@@ -47,7 +47,7 @@
     "@unbrained/pm-cli": ">=2026.10.15"
   },
   "devDependencies": {
-    "@toon-format/toon": "4.1.1",
+    "@toon-format/toon": "4.4.0",
     "@types/node": "26.6.5",
     "@unbrained/pm-cli": "2026.10.15",
     "pm-changelog": "2026.10.16",
