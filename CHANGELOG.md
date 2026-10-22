@@ -12,13 +12,12 @@
 - Propagate the docstring gate entry guard fix ([pm-slack-5icn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-5icn.toon))
 - Fix release publish ordering before protected main push ([pm-slack-1aeu](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-1aeu.toon))
 - Shell scalar assignments are read from raw text, so a comment can flag an unattested publish ([pm-slack-cxyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-cxyv.toon))
-- Read Slack digests through the complete SDK corpus and refuse unreadable records ([pm-slack-fitn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fitn.toon))
 - The release job authenticated with a stored npm token that expired, so publishing stopped while every other gate stayed green ([pm-slack-280u](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-280u.toon))
 - A release run bumped and committed a new version every night while publishing was impossible, because the only externally-failable step runs last ([pm-slack-0jzg](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-0jzg.toon))
 
 ### Other
 
-- Independently measure statement coverage in the pm-slack release gate ([pm-slack-stcv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-stcv.toon))
+- Record statement coverage as duplicate of blocked pm-slack-5fb5 ([pm-slack-stcv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-stcv.toon))
 - Certify pm-slack on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates ([pm-slack-c104](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-c104.toon))
 
 ## 2026.10.5 - 2026-10-05

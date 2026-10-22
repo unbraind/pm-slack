@@ -1,19 +1,20 @@
 id: pm-slack-stcv
-title: Independently measure statement coverage in the pm-slack release gate
+title: Record statement coverage as duplicate of blocked pm-slack-5fb5
 description: The existing coverage gate equates statement coverage with lines and enforces only lines/branches/functions. Add independent raw V8 block statement measurement and meaningful regression fixtures without narrowing source inventory or lowering thresholds. Certification pm-slack-c104 reports only the measured dimensions.
 type: Chore
 status: closed
 priority: 2
 tags: []
 created_at: "2026-10-04T10:55:43.334Z"
-updated_at: "2026-10-21T19:00:25.240Z"
+updated_at: "2026-10-22T10:23:53.008Z"
 closed_at: "2026-10-21T19:00:20.208Z"
 completed_at: "2026-10-21T19:00:20.208Z"
 author: codex-sol
 dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-slack-5fb5,related,"2026-10-21T18:59:04.321Z",codex-agent,"cli:update:dep",detected
-comments[1]{created_at,author,text}:
+comments[2]{created_at,author,text}:
   "2026-10-21T18:57:51.641Z",codex-agent,"Authorized tracker reconciliation, audit 2026-10-21. Owner-authorized takeover of any historical assignment for this verified terminal transition. Reverified current main f4dce1dcf2b2: canonical pm-slack-5fb5 exists and audit overlap remains unchanged; source tree exactly matches the audited snapshot. **Independently measure statement coverage in the pm-slack release gate.** Canonical id: pm-slack-5fb5. The independent statement metric is one explicitly required part of that broader all-source/four-metric/documentation requirement. Canonical item: pm-slack-5fb5 (https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-5fb5.toon)."
+  "2026-10-22T10:23:53.008Z",codex-agent,"PRRT_kwDOSYpJkM6vDvnH verified against main f4dce1dcf2b291a99d6c9e3f99fb529b104c707f: scripts/coverage-gate.ts measures only lines, branches and functions and excludes operational scripts. This item remains a closed duplicate; canonical pm-slack-5fb5 remains blocked and no independent statement metric was delivered. Corrected the title used by the existing changelog generator so the duplicate closure is reported as tracker consolidation, then regenerate CHANGELOG.md. The original request, duplicate link, closure reason and history are retained."
 files[1]{path,scope,note}:
   package.json,project,Existing source inventory and enforced thresholds
 docs[1]{path,scope,note}:
