@@ -30,9 +30,9 @@
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { SlackOutbox } from "./outbox.ts";
-import type { OutboxOutcome, OutboxEvent } from "./outbox.ts";
+import type { OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
-export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode } from "./outbox.ts";
+export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -611,13 +611,10 @@ declare function outboxFailure(error: unknown): {
 declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
 /**
  * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
- * History and items are read only. A malformed stream refuses the scan before any network delivery.
+ * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
-export declare function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<{
-    inspected: number;
-    queued: number;
-}>;
+export declare function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<OutboxRecoveryReport>;
 declare const _default: {
     name: string;
     version: string;

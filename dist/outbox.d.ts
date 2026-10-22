@@ -20,7 +20,7 @@ export declare class OutboxError extends Error {
     constructor(code: OutboxRefusalCode, remedy: string);
 }
 /** Persisted lifecycle delivery state; sending after a crash must be reconciled explicitly. */
-export type OutboxState = "pending" | "sending" | "acknowledged" | "ambiguous" | "rejected";
+export type OutboxState = "pending" | "sending" | "acknowledged" | "ambiguous" | "rejected" | "refused" | "skipped";
 /** Lifecycle transitions owned by Slack delivery, independent of command aliases. */
 export type OutboxEvent = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
 /** Minimal webhook body supported by durable lifecycle delivery. */
@@ -78,6 +78,29 @@ export interface OutboxReport {
     /** Resume status after this sequence, or null when the page is complete. */
     next_cursor: number | null;
 }
+/** Credential-free eligibility snapshot for future lifecycle recovery. */
+export interface OutboxRecoveryFilter {
+    /** Lifecycle events enabled at the snapshot boundary. */
+    events: readonly OutboxEvent[];
+    /** Least urgent eligible priority, from one to four. */
+    minPriority: number;
+}
+/** Persisted eligibility epoch; changing environment variables does not rewrite older decisions. */
+export interface OutboxRecoveryPolicy extends OutboxRecoveryFilter {
+    /** First eligible history timestamp for this policy. */
+    since: string;
+}
+/** Complete recovery totals; failed item histories never authorize partial intents. */
+export interface OutboxRecoveryReport {
+    /** Verified history entries inspected. */
+    inspected: number;
+    /** New delivery intents queued. */
+    queued: number;
+    /** Item-history or global recovery failures, without exposing contents or local paths. */
+    failed: number;
+}
+/** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
+export type OutboxDecision = "acknowledged" | "retry" | "skip";
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 /** Hash a destination without persisting a webhook credential. */
@@ -89,8 +112,16 @@ export declare class SlackOutbox {
     constructor(pmRoot: string);
     /** Release the database handle; committed receipts survive process exit. */
     close(): void;
-    /** Opt in once; repeated enable calls preserve the original recovery boundary. */
-    enable(): string;
+    /** Opt in once and optionally snapshot eligibility; legacy policy adoption starts with future history. */
+    enable(filter?: OutboxRecoveryFilter): string;
+    /** Record an explicit future-only filter change; retained history keeps its earlier eligibility. */
+    configureRecovery(filter: OutboxRecoveryFilter): void;
+    /** Read eligibility epochs newest first; unsnapshotted SDK trackers must opt in explicitly. */
+    recoveryPolicies(): OutboxRecoveryPolicy[];
+    /** Resolve one entry's policy by its timestamp, including configurations committed during a recovery scan. */
+    recoveryPolicyAt(timestamp: string): OutboxRecoveryPolicy | undefined;
+    /** Persist a validated policy without storing routing credentials or replacing previous epochs. */
+    private saveRecoveryPolicy;
     /** Return the durable opt-in boundary without reading message bodies. */
     since(): string | null;
     /** Persist an intent once; conflicting reuse refuses instead of silently changing a message. */
@@ -101,13 +132,17 @@ export declare class SlackOutbox {
     status(limit?: number, after?: number): OutboxReport;
     /**
      * Claim pending rows once. Typed OutboxError refusals occur before a remote
-     * request starts and restore the row without counting an attempt. A retry
+     * request starts. Destination changes park a refused row and continue; other
+     * typed refusals restore pending without counting an attempt. An ambiguous
+     * outcome holds later rows for that destination in this drain. A retry
      * outcome stops this drain so a rate limit is not hit again immediately.
      * The next drain prefers fewer attempts, then older rows, so one refused
      * destination cannot block every other notification.
      */
     drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit?: number): Promise<OutboxReport>;
-    /** Reconcile uncertain remote outcomes explicitly; active senders cannot be reset. */
-    resolve(key: string, decision: "acknowledged" | "retry"): void;
+    /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
+    resolve(key: string, decision: OutboxDecision, options?: {
+        force?: boolean;
+    }): void;
 }
 //# sourceMappingURL=outbox.d.ts.map

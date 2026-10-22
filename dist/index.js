@@ -1581,7 +1581,8 @@ function outboxToon(report, recovered) {
         ...report.rows.map((row) => `  ${[row.sequence, row.key, row.item, row.event, row.state, row.attempts].map((value) => JSON.stringify(value)).join(",")}`),
         `omitted: ${report.omitted}`,
         `next_cursor: ${report.next_cursor}`,
-        "recovered:", `  inspected: ${recovered.inspected}`, `  queued: ${recovered.queued}`,
+        "recovered:", `  inspected: ${recovered.inspected}`, `  queued: ${recovered.queued}`, `  failed: ${recovered.failed}`,
+        ...(recovered.failed ? ['ok: false', 'exit_code: 2', 'code: history_unavailable', 'remediation: "Repair retained history; healthy queued receipts were drained."'] : []),
     ].join("\n");
 }
 /** Preserve typed operational refusals across the host's structured nonzero command-result boundary. */
@@ -1630,7 +1631,7 @@ async function sendOutbox(destination, payload) {
 }
 /**
  * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
- * History and items are read only. A malformed stream refuses the scan before any network delivery.
+ * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
 export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
@@ -1642,55 +1643,69 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
         throw new OutboxError("destination_changed", "Restore notification configuration before recovering lifecycle history.");
     let inspected = 0;
     let queued = 0;
+    let failed = 0;
     try {
-        const files = readdirSync(path.join(pmRoot, "history")).filter((file) => file.endsWith(".jsonl") && !file.startsWith("_"));
+        outbox.recoveryPolicies();
+        const files = readdirSync(path.join(pmRoot, "history")).filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).sort();
         for (const file of files) {
             const id = file.slice(0, -6);
             if (itemIds && !itemIds.includes(id))
                 continue;
-            const entries = await readHistoryEntries(path.join(pmRoot, "history", file), id);
-            if (!verifyHistoryEntries(entries).ok)
-                throw new OutboxError("history_unavailable", "Restore valid retained lifecycle history, then drain again.");
-            let previous;
-            for (const [index, entry] of entries.entries()) {
-                inspected += 1;
-                const statusPatch = entry.patch.find((patch) => patch.path === "/metadata/status" || patch.path === "/front_matter/status");
-                const status = statusPatch && "value" in statusPatch ? String(statusPatch.value) : undefined;
-                const prior = previous;
-                if (status)
-                    previous = status;
-                if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior))
-                    continue;
-                const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
-                if (!event || !config.events.has(event) || outbox.has(id, event, entry.after_hash))
-                    continue;
-                const { metadata } = replayHistoryToTarget(entries, index);
-                if (metadata.id !== id || typeof metadata.title !== "string")
-                    throw new OutboxError("history_unavailable", "Restore complete item history before recovering notifications.");
-                const item = metadata;
-                if (!meetsMinPriority(item, config.minPriority))
-                    continue;
-                const target = selectRoute(event, item, config.routes, config.webhookUrl, config.channel);
-                if (!target)
-                    throw new OutboxError("destination_changed", "Restore a webhook for the retained lifecycle event.");
-                if (!isHttpUrl(target.webhookUrl))
-                    throw new OutboxError("invalid_input", "Restore an HTTP or HTTPS webhook before recovering notifications.");
-                const payload = buildItemPayload(item, event, config.format, {
-                    channel: target.channel,
-                    mention: config.mentionAssignee ? resolveAssigneeMention(item, config.assigneeMap) : undefined,
-                    link: resolveItemUrl(item),
-                });
-                outbox.enqueue({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload });
-                queued += 1;
+            try {
+                const entries = await readHistoryEntries(path.join(pmRoot, "history", file), id);
+                if (!verifyHistoryEntries(entries).ok)
+                    throw new OutboxError("history_unavailable", "Restore valid retained lifecycle history, then drain again.");
+                const intents = [];
+                let previous;
+                for (const [index, entry] of entries.entries()) {
+                    inspected += 1;
+                    const statusPatch = entry.patch.find((patch) => patch.path === "/metadata/status" || patch.path === "/front_matter/status");
+                    const status = statusPatch && "value" in statusPatch ? String(statusPatch.value) : undefined;
+                    const prior = previous;
+                    if (status)
+                        previous = status;
+                    if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior))
+                        continue;
+                    const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
+                    const policy = outbox.recoveryPolicyAt(entry.ts);
+                    if (!event || !policy || !policy.events.includes(event) || outbox.has(id, event, entry.after_hash))
+                        continue;
+                    const { metadata } = replayHistoryToTarget(entries, index);
+                    if (metadata.id !== id || typeof metadata.title !== "string")
+                        throw new OutboxError("history_unavailable", "Restore complete item history before recovering notifications.");
+                    const item = metadata;
+                    if (!meetsMinPriority(item, policy.minPriority))
+                        continue;
+                    const target = selectRoute(event, item, config.routes, config.webhookUrl, config.channel);
+                    if (!target)
+                        throw new OutboxError("destination_changed", "Restore a webhook for the retained lifecycle event.");
+                    if (!isHttpUrl(target.webhookUrl))
+                        throw new OutboxError("invalid_input", "Restore an HTTP or HTTPS webhook before recovering notifications.");
+                    const payload = buildItemPayload(item, event, config.format, {
+                        channel: target.channel,
+                        mention: config.mentionAssignee ? resolveAssigneeMention(item, config.assigneeMap) : undefined,
+                        link: resolveItemUrl(item),
+                    });
+                    intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload });
+                }
+                for (const intent of intents) {
+                    outbox.enqueue(intent);
+                    queued += 1;
+                }
+            }
+            catch (error) {
+                if (error instanceof OutboxError && error.code !== "history_unavailable")
+                    throw error;
+                failed += 1;
             }
         }
     }
     catch (error) {
         if (error instanceof OutboxError)
             throw error;
-        throw new OutboxError("history_unavailable", "Restore readable, verified lifecycle history; queued receipts are retained and no delivery was attempted.");
+        throw new OutboxError("history_unavailable", "Restore readable, verified lifecycle history; existing queued receipts can still drain.");
     }
-    return { inspected, queued };
+    return { inspected, queued, failed };
 }
 export default defineExtension({
     name: "pm-slack",
@@ -1724,9 +1739,15 @@ export default defineExtension({
                         try {
                             if (outbox.since()) {
                                 const item = extractItem(ctx);
-                                if (item) {
-                                    await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
-                                    await outbox.drain(sendOutbox);
+                                if (item && detectEvent(ctx)) {
+                                    try {
+                                        await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
+                                    }
+                                    catch (error) {
+                                        if (outboxFailure(error).code !== "history_unavailable")
+                                            throw error;
+                                    }
+                                    await outbox.drain(sendOutbox, 1);
                                 }
                                 return;
                             }
@@ -1836,11 +1857,12 @@ export default defineExtension({
                 intent: "Recover opted-in lifecycle delivery after a restart with explicit uncertainty receipts",
                 examples: ["pm slack outbox --action enable", "pm slack outbox --action drain --limit 20 --json", "pm slack outbox --action status"],
                 flags: [
-                    { long: "--action", value_name: "action", description: "status (default), enable, drain, or resolve" },
+                    { long: "--action", value_name: "action", description: "status (default), enable, configure, drain, or resolve" },
                     { long: "--limit", value_name: "count", description: "Receipt and delivery bound, 1..100 (default 20)" },
                     { long: "--after", value_name: "cursor", description: "Resume status after next_cursor from the previous page" },
                     { long: "--key", value_name: "key", description: "Receipt idempotency key to reconcile" },
-                    { long: "--decision", value_name: "decision", description: "acknowledged or retry; retry can duplicate an uncertain send" },
+                    { long: "--decision", value_name: "decision", description: "acknowledged, retry, or skip; retry can duplicate an uncertain send" },
+                    { long: "--force-reconcile", description: "Override PID reuse only after verifying no sender is active; duplicates are possible" },
                 ],
                 async run(ctx) {
                     try {
@@ -1848,28 +1870,40 @@ export default defineExtension({
                         const action = readStrOption(options, "action") ?? "status";
                         const limit = Number(readStrOption(options, "limit") ?? "20");
                         const after = Number(readStrOption(options, "after") ?? "0");
-                        if (!["status", "enable", "drain", "resolve"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0) {
-                            throw new OutboxError("invalid_input", "Choose status, enable, drain or resolve and a limit from 1 to 100.");
+                        if (!["status", "enable", "configure", "drain", "resolve"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0) {
+                            throw new OutboxError("invalid_input", "Choose status, enable, configure, drain or resolve and a limit from 1 to 100.");
                         }
                         const outbox = new SlackOutbox(ctx.pm_root);
                         try {
-                            if (action === "enable") {
+                            if (action === "enable" || action === "configure") {
                                 outboxTargets();
-                                outbox.enable();
+                                const config = loadConfig();
+                                const filter = { events: [...config.events], minPriority: config.minPriority };
+                                if (action === "enable")
+                                    outbox.enable(filter);
+                                else
+                                    outbox.configureRecovery(filter);
                             }
                             if (action === "resolve") {
                                 const key = readStrOption(options, "key");
                                 const decision = readStrOption(options, "decision");
-                                if (!key || (decision !== "acknowledged" && decision !== "retry"))
-                                    throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry after checking Slack delivery.");
-                                outbox.resolve(key, decision);
+                                if (!key || (decision !== "acknowledged" && decision !== "retry" && decision !== "skip"))
+                                    throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry|skip after checking Slack delivery.");
+                                outbox.resolve(key, decision, { force: readBoolOption(options, "force-reconcile") });
                             }
-                            let recovered = { inspected: 0, queued: 0 };
+                            let recovered = { inspected: 0, queued: 0, failed: 0 };
                             if (action === "drain") {
-                                recovered = await captureSlackOutbox(ctx.pm_root, outbox);
+                                try {
+                                    recovered = await captureSlackOutbox(ctx.pm_root, outbox);
+                                }
+                                catch (error) {
+                                    if (outboxFailure(error).code !== "history_unavailable")
+                                        throw error;
+                                    recovered.failed = 1;
+                                }
                             }
                             const report = action === "drain" ? await outbox.drain(sendOutbox, limit) : outbox.status(limit, after);
-                            return { ...report, recovered };
+                            return { ...report, recovered, ...(recovered.failed ? outboxFailure(new OutboxError("history_unavailable", "Repair retained history; healthy queued receipts were drained.")) : {}) };
                         }
                         finally {
                             outbox.close();

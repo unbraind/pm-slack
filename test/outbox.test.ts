@@ -41,6 +41,11 @@ function environment(t: TestContext, webhook = "http://127.0.0.1:1/webhook") {
   process.env.PM_SLACK_MIN_PRIORITY = "4";
 }
 
+/** Snapshot the test's explicit recovery filters when enabling its real local outbox. */
+function enableRecovery(box: SlackOutbox): string {
+  return box.enable({ events: [...__test__.parseEvents(process.env.PM_SLACK_EVENTS)], minPriority: __test__.loadConfig()?.minPriority ?? 1 });
+}
+
 /** Return a frozen synthetic delivery intent without any live credentials. */
 function intent(revision = "revision-1"): OutboxIntent {
   return { item: "outbox-task", event: "close", revision, destination: slackDestination("http://127.0.0.1:1/webhook"), payload: { text: "Synthetic closed task" } };
@@ -65,8 +70,8 @@ test("durable intents deduplicate across handles, refuse conflicts and expose bo
   assert.equal(box.status().rows.length, 0);
   assert.throws(() => box.enqueue(intent()), refusal("disabled"));
   await assert.rejects(box.drain(async () => "acknowledged"), refusal("disabled"));
-  const since = box.enable();
-  assert.equal(box.enable(), since);
+  const since = enableRecovery(box);
+  assert.equal(enableRecovery(box), since);
   assert.throws(() => box.enqueue({ ...intent(), revision: "" }), refusal("invalid_input"));
   assert.throws(() => box.enqueue({ ...intent(), event: "unknown" as "close" }), refusal("invalid_input"));
   const key = box.enqueue(intent());
@@ -108,7 +113,7 @@ test("uncertainty is held, active senders refuse reconciliation and changed dest
   const { pmRoot } = await fixture(t);
   const box = new SlackOutbox(pmRoot);
   t.after(() => box.close());
-  box.enable();
+  enableRecovery(box);
   const key = box.enqueue(intent());
   const other = new SlackOutbox(pmRoot);
   t.after(() => other.close());
@@ -123,8 +128,9 @@ test("uncertainty is held, active senders refuse reconciliation and changed dest
   assert.equal(sends, 0);
   box.resolve(key, "acknowledged");
   const second = box.enqueue(intent("retry"));
-  await assert.rejects(box.drain(async () => { throw new OutboxError("destination_changed", "Restore the original route."); }), refusal("destination_changed"));
+  assert.equal((await box.drain(async () => { throw new OutboxError("destination_changed", "Restore the original route."); })).counts.refused, 1);
   assert.equal(box.status().rows[1]!.attempts, 0);
+  box.resolve(second, "retry");
   await box.drain(async () => "rejected");
   box.resolve(second, "retry");
   await box.drain(async () => "ambiguous");
@@ -146,7 +152,7 @@ test("a real process crash after remote acceptance remains sending and cannot re
   t.after(() => new Promise<void>((done) => server.close(() => done())));
   const webhook = `http://127.0.0.1:${(server.address() as { port: number }).port}/fixture`;
   const box = new SlackOutbox(pmRoot);
-  box.enable();
+  enableRecovery(box);
   const key = box.enqueue({ ...intent(), destination: slackDestination(webhook) });
   box.close();
   const moduleUrl = new URL("../outbox.ts", import.meta.url).href;
@@ -180,7 +186,7 @@ test("concurrent process drains acknowledge one local HTTP send after restarting
   const address = server.address() as { port: number };
   const webhook = `http://127.0.0.1:${address.port}/webhook`;
   const box = new SlackOutbox(pmRoot);
-  box.enable(); box.enqueue({ ...intent(), destination: slackDestination(webhook) }); box.close();
+  enableRecovery(box); box.enqueue({ ...intent(), destination: slackDestination(webhook) }); box.close();
   const moduleUrl = new URL("../outbox.ts", import.meta.url).href;
   const source = `import {SlackOutbox} from ${JSON.stringify(moduleUrl)}; const box=new SlackOutbox(process.argv[1]); await box.drain(async(_destination,payload)=>{const r=await fetch(process.argv[2],{method:'POST',body:JSON.stringify(payload)});return r.ok?'acknowledged':'rejected';});box.close();`;
   const run = () => new Promise<void>((done, reject) => {
@@ -203,7 +209,7 @@ test("SDK recovery captures committed changes whose hook never ran, with stable 
   const box = new SlackOutbox(pmRoot);
   t.after(() => box.close());
   await assert.rejects(captureSlackOutbox(pmRoot, box), refusal("disabled"));
-  box.enable();
+  enableRecovery(box);
   const created = await create({ title: "Committed before crash", priority: 1, assignee: "agent" }, client);
   await notes(created.item.id, { add: "Annotation must not notify" }, client);
   await update(created.item.id, { status: "blocked" }, client);
@@ -274,7 +280,7 @@ test("CLI enable, drain, status and resolution use bounded structured receipts a
   const box = new SlackOutbox(pmRoot);
   await captureSlackOutbox(pmRoot, box); box.close();
   process.env.PM_SLACK_WEBHOOK += "/changed";
-  await assert.rejects(command({ action: "drain" }), refusal("destination_changed"));
+  assert.ok((await command({ action: "drain" })).counts.refused > 0);
 });
 
 test("pre-request route refusals preserve pending receipts and attempts until configuration is repaired", async (t) => {
@@ -286,7 +292,7 @@ test("pre-request route refusals preserve pending receipts and attempts until co
   const { pmRoot, client } = await fixture(t);
   const box = new SlackOutbox(pmRoot);
   t.after(() => box.close());
-  box.enable();
+  enableRecovery(box);
   await create({ title: "Queued before route configuration changed", priority: 1 }, client);
   assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 1);
   const original = box.status().rows[0]!;
@@ -322,7 +328,7 @@ test("storage and corrupt history refuse safely; notification failure never chan
   writeFileSync(database, "corrupt database");
   assert.throws(() => new SlackOutbox(pmRoot), refusal("storage_unavailable"));
   rmSync(database);
-  const box = new SlackOutbox(pmRoot); box.enable();
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
   const created = await create({ title: "Keep this committed", priority: 1 }, client);
   const ext = await harness(t);
   const itemFile = resolve(pmRoot, "tasks", `${created.item.id}.toon`);
@@ -334,13 +340,13 @@ test("storage and corrupt history refuse safely; notification failure never chan
   const historyFile = join(pmRoot, "history", `${created.item.id}.jsonl`);
   const original = readFileSync(historyFile, "utf8");
   writeFileSync(historyFile, original.replace(/"after_hash":"[a-f0-9]+"/, '"after_hash":"invalid-hash"'));
-  await assert.rejects(captureSlackOutbox(pmRoot, box), refusal("history_unavailable"));
+  assert.equal((await captureSlackOutbox(pmRoot, box)).failed, 1);
   writeFileSync(historyFile, original);
   const other = await create({ title: "Other valid history", priority: 1 }, client);
   writeFileSync(historyFile, readFileSync(join(pmRoot, "history", `${other.item.id}.jsonl`)));
-  await assert.rejects(captureSlackOutbox(pmRoot, box, [created.item.id]), refusal("history_unavailable"));
+  assert.equal((await captureSlackOutbox(pmRoot, box, [created.item.id])).failed, 1);
   writeFileSync(historyFile, "{corrupt\n");
-  await assert.rejects(captureSlackOutbox(pmRoot, box), refusal("history_unavailable"));
+  assert.equal((await captureSlackOutbox(pmRoot, box)).failed, 1);
   await ext.runHook({ kind: "after_command", context: { command: "create", args: [], pm_root: pmRoot, ok: true, result: created } });
   assert.equal(readFileSync(itemFile, "utf8"), before);
   box.close();
@@ -349,10 +355,10 @@ test("storage and corrupt history refuse safely; notification failure never chan
 test("history recovery honors priority, event filters, route-only configuration and assignee mentions", async (t) => {
   environment(t);
   const { pmRoot, client } = await fixture(t);
-  const box = new SlackOutbox(pmRoot); box.enable();
-  t.after(() => box.close());
   process.env.PM_SLACK_MIN_PRIORITY = "1";
   process.env.PM_SLACK_EVENTS = "close";
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  t.after(() => box.close());
   const high = await create({ title: "High priority", priority: 1, assignee: "agent" }, client);
   const low = await create({ title: "Low priority", priority: 4 }, client);
   await update(high.item.id, { status: "draft" }, client);
@@ -363,8 +369,9 @@ test("history recovery honors priority, event filters, route-only configuration 
   assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 1);
   const ext = await harness(t);
   await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
-  const next = await create({ title: "Only route", priority: 1 }, client);
   process.env.PM_SLACK_EVENTS = "create";
+  box.configureRecovery({ events: ["create"], minPriority: 1 });
+  const next = await create({ title: "Only route", priority: 1 }, client);
   delete process.env.PM_SLACK_WEBHOOK;
   process.env.PM_SLACK_ROUTES = JSON.stringify([{ match: "close", webhook: "http://127.0.0.1:1/close" }]);
   await assert.rejects(captureSlackOutbox(pmRoot, box, [next.item.id]), refusal("destination_changed"));
@@ -385,7 +392,7 @@ test("a pre-enable status inspection does not change the legacy hook behavior", 
 
 test("default CLI output is one compact decodable TOON report with all receipt keys", async (t) => {
   const { pmRoot } = await fixture(t);
-  const box = new SlackOutbox(pmRoot); box.enable(); box.enqueue(intent()); box.close();
+  const box = new SlackOutbox(pmRoot); enableRecovery(box); box.enqueue(intent()); box.close();
   const ext = await harness(t);
   const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: {}, global: { json: false } });
   const output = await ext.runRendererOverride({ command: "slack outbox", format: "toon", result: response.result });
@@ -495,7 +502,7 @@ test("pre-request transport codes stay pending and response text cannot force a 
   const { pmRoot } = await fixture(t);
   const box = new SlackOutbox(pmRoot);
   t.after(() => box.close());
-  box.enable();
+  enableRecovery(box);
   const ext = await harness(t);
   const drain = async (limit = "20") => {
     const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain", limit }, global: { json: true } });
@@ -524,7 +531,7 @@ test("a retry outcome stops the current drain and the next drain is not stuck be
   const { pmRoot } = await fixture(t);
   const box = new SlackOutbox(pmRoot);
   t.after(() => box.close());
-  box.enable();
+  enableRecovery(box);
   const first = box.enqueue({ ...intent("first"), payload: { text: "first" } });
   const second = box.enqueue({ ...intent("second"), payload: { text: "second" } });
   const seen: string[] = [];
@@ -539,7 +546,7 @@ test("a retry outcome stops the current drain and the next drain is not stuck be
   assert.equal(box.status().rows.find((row) => row.key === first)?.state, "pending");
   const thrown: string[] = [];
   box.enqueue({ ...intent("dropped"), payload: { text: "dropped" } });
-  box.enqueue({ ...intent("kept"), payload: { text: "kept" } });
+  box.enqueue({ ...intent("kept"), destination: "other-destination", payload: { text: "kept" } });
   await box.drain(async (_destination, payload) => {
     thrown.push(payload.text);
     if (payload.text === "dropped") throw new Error("connection dropped after accept");
@@ -589,7 +596,7 @@ test("the published SDK example keeps a connection refused before transmission p
   const webhook = `http://127.0.0.1:${(refused.address() as { port: number }).port}/webhook`;
   await new Promise<void>((done) => refused.close(() => done()));
   const box = new SlackOutbox(pmRoot);
-  box.enable();
+  enableRecovery(box);
   box.enqueue({ ...intent("example-refused"), destination: slackDestination(webhook) });
   box.close();
   const result = await runPublishedExample(directory, exampleEnv(directory, webhook));
@@ -606,7 +613,7 @@ test("receipt existence uses indexed lookup and shares persisted revision keys",
   const { pmRoot } = await fixture(t);
   const box = new SlackOutbox(pmRoot);
   t.after(() => box.close());
-  box.enable();
+  enableRecovery(box);
   for (let index = 0; index < 64; index += 1) {
     const key = box.enqueue({ ...intent(`indexed-${index}`), event: index % 2 ? "block" : "close" });
     if (index === 0) assert.equal(key, "433b6669d8557bf868294a1070f78a68bb158383695aa580e09ce15a24aa355d");
@@ -638,4 +645,249 @@ test("receipt existence uses indexed lookup and shares persisted revision keys",
     assert.doesNotMatch(plan, /\bSCAN\b/);
   }
   assert.deepEqual(box.status(100), before, "existence lookup must not alter durable receipts");
+});
+
+test("route refusals park ahead of healthy receipts and can be skipped or explicitly retried", async (t) => {
+  for (const change of ["channel", "webhook"]) await t.test(change, async (child) => {
+    let sends = 0;
+    const original = await listen(child, (_request, response) => { sends += 1; response.end("ok"); });
+    const rotated = await listen(child, (_request, response) => { sends += 1; response.end("ok"); });
+    environment(child, original);
+    const { pmRoot } = await fixture(child);
+    const box = new SlackOutbox(pmRoot);
+    child.after(() => box.close());
+    const ext = await harness(child);
+    await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
+    const refusedKey = box.enqueue({ ...intent("refused"), destination: slackDestination(original) });
+    if (change === "channel") process.env.PM_SLACK_CHANNEL = "#eng";
+    else process.env.PM_SLACK_WEBHOOK = rotated;
+    const webhook = process.env.PM_SLACK_WEBHOOK!;
+    const channel = process.env.PM_SLACK_CHANNEL;
+    const healthyKey = box.enqueue({ ...intent("healthy"), destination: slackDestination(webhook, channel), payload: { text: "Healthy queued row", channel } });
+    for (let drain = 0; drain < 3; drain += 1) {
+      const result = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+      assert.equal(result.exitCode ?? 0, 0);
+      assert.equal(box.status().counts.refused, 1);
+      assert.equal(box.status().rows.find((row) => row.key === refusedKey)?.attempts, 0);
+      assert.equal(box.status().rows.find((row) => row.key === healthyKey)?.state, "acknowledged");
+      assert.equal(sends, 1, "the refused oldest row must not starve a healthy destination");
+    }
+    const skipped = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "resolve", key: refusedKey, decision: "skip" } });
+    assert.equal(skipped.exitCode ?? 0, 0);
+    assert.equal(box.status().counts.skipped, 1);
+    const retryKey = box.enqueue({ ...intent("restore-route"), destination: slackDestination(original) });
+    await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" } });
+    assert.equal(box.status().rows.find((row) => row.key === retryKey)?.state, "refused");
+    delete process.env.PM_SLACK_CHANNEL;
+    process.env.PM_SLACK_WEBHOOK = original;
+    box.resolve(retryKey, "retry");
+    await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" } });
+    assert.equal(sends, 2);
+    assert.equal(box.status().rows.find((row) => row.key === retryKey)?.state, "acknowledged");
+  });
+});
+
+test("ambiguous outcomes hold later rows for the same destination but allow another destination", async (t) => {
+  const { pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  t.after(() => box.close());
+  const first = box.enqueue({ ...intent("outage-first"), destination: "outage" });
+  const held = box.enqueue({ ...intent("outage-later"), destination: "outage" });
+  box.enqueue({ ...intent("healthy-other"), destination: "healthy" });
+  const attempts: string[] = [];
+  await box.drain(async (destination) => {
+    attempts.push(destination);
+    if (destination === "outage") throw new Error("Remote outcome unknown");
+    return "acknowledged";
+  });
+  assert.deepEqual(attempts, ["outage", "healthy"]);
+  assert.equal(box.status().rows.find((row) => row.key === first)?.state, "ambiguous");
+  assert.equal(box.status().rows.find((row) => row.key === held)?.state, "pending");
+  assert.equal(box.status().rows.find((row) => row.key === held)?.attempts, 0);
+});
+
+test("outbox hooks never drain on reads and attempt at most one send per lifecycle command", async (t) => {
+  let sends = 0;
+  const webhook = await listen(t, (_request, response) => { sends += 1; response.end("ok"); });
+  environment(t, webhook);
+  const { pmRoot, client } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  t.after(() => box.close());
+  for (let index = 0; index < 20; index += 1) box.enqueue({ ...intent(`hook-${index}`), destination: slackDestination(webhook) });
+  const created = await create({ title: "Read must not send", priority: 1 }, client);
+  const ext = await harness(t);
+  await ext.runHook({ kind: "after_command", context: { command: "get", args: [], pm_root: pmRoot, ok: true, result: created } });
+  assert.equal(sends, 0, "reading an item must never drain an outage backlog");
+  await ext.runHook({ kind: "after_command", context: { command: "create", args: [], pm_root: pmRoot, ok: true, result: created } });
+  assert.equal(sends, 1, "a lifecycle hook must not spend twenty transport timeouts draining the backlog");
+  assert.equal(box.status(100).counts.acknowledged, 1);
+  assert.equal(box.status(100).counts.pending, 20);
+});
+
+test("reused sender PIDs require explicit force reconciliation through both SDK and CLI", async (t) => {
+  const { pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  t.after(() => box.close());
+  const database = new DatabaseSync(join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+  t.after(() => database.close());
+  const sdkKey = box.enqueue(intent("reused-sdk"));
+  database.prepare("UPDATE delivery SET state='sending',owner=? WHERE key=?").run(process.pid, sdkKey);
+  assert.throws(() => box.resolve(sdkKey, "retry"), refusal("in_flight"));
+  box.resolve(sdkKey, "skip", { force: true });
+  assert.equal(box.status().rows.find((row) => row.key === sdkKey)?.state, "skipped");
+  const cliKey = box.enqueue(intent("reused-cli"));
+  database.prepare("UPDATE delivery SET state='sending',owner=? WHERE key=?").run(process.pid, cliKey);
+  const ext = await harness(t);
+  const refused = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "resolve", key: cliKey, decision: "acknowledged" }, global: { json: true } });
+  assert.equal(refused.errorCode, "in_flight");
+  const reconciled = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "resolve", key: cliKey, decision: "acknowledged", forceReconcile: true }, global: { json: true } });
+  assert.equal(reconciled.exitCode ?? 0, 0);
+  assert.equal(box.status().rows.find((row) => row.key === cliKey)?.state, "acknowledged");
+});
+
+test("corrupt item history is isolated while healthy queued receipts drain with a visible partial refusal", async (t) => {
+  let sends = 0;
+  const webhook = await listen(t, (_request, response) => { sends += 1; response.end("ok"); });
+  environment(t, webhook);
+  const { pmRoot, client } = await fixture(t);
+  const ext = await harness(t);
+  await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  box.enqueue({ ...intent("already-verified"), destination: slackDestination(webhook) });
+  const candidates = [await create({ title: "First history", priority: 1 }, client), await create({ title: "Second history", priority: 1 }, client)]
+    .sort((left, right) => left.item.id.localeCompare(right.item.id));
+  const bad = candidates[0]!;
+  const good = candidates[1]!;
+  const historyFile = join(pmRoot, "history", `${bad.item.id}.jsonl`);
+  const original = readFileSync(historyFile, "utf8");
+  writeFileSync(historyFile, "{corrupt\n");
+  const result = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+  assert.equal(result.errorCode, "history_unavailable");
+  const report = result.result as OutboxReport & { recovered: { failed: number } };
+  assert.equal(report.recovered.failed, 1);
+  assert.equal(report.counts.acknowledged, 2);
+  assert.equal(sends, 2, "healthy queued and recovered receipts must drain despite an unrelated corrupt file");
+  assert.equal(report.rows.some((row) => row.item === bad.item.id), false);
+  assert.equal(report.rows.some((row) => row.item === good.item.id), true);
+  const output = await ext.runRendererOverride({ command: "slack outbox", format: "toon", result: result.result });
+  const decoded = decode(output.rendered!) as { ok: boolean; code: string; recovered: { failed: number } };
+  assert.equal(decoded.ok, false);
+  assert.equal(decoded.code, "history_unavailable");
+  assert.equal(decoded.recovered.failed, 1);
+  writeFileSync(historyFile, original);
+  const repaired = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" } });
+  assert.equal(repaired.exitCode ?? 0, 0);
+  assert.equal(sends, 3, "repairing the history must not duplicate previously acknowledged messages");
+});
+
+test("queued receipts drain when history recovery has no readable root or no saved filters", async (t) => {
+  let sends = 0;
+  const webhook = await listen(t, (_request, response) => { sends += 1; response.end("ok"); });
+  environment(t, webhook);
+  const { pmRoot, client } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); box.enable();
+  t.after(() => box.close());
+  assert.throws(() => box.recoveryPolicies(), refusal("history_unavailable"));
+  box.enqueue({ ...intent("legacy-queue"), destination: slackDestination(webhook) });
+  const ext = await harness(t);
+  const created = await create({ title: "Legacy recovery needs configuration", priority: 1 }, client);
+  await ext.runHook({ kind: "after_command", context: { command: "create", args: [], pm_root: pmRoot, ok: true, result: created } });
+  assert.equal(sends, 1, "a missing recovery snapshot must not block existing verified receipts in hooks");
+  delete process.env.PM_SLACK_WEBHOOK;
+  const missingConfig = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+  assert.equal(missingConfig.errorCode, "destination_changed");
+  await ext.runHook({ kind: "after_command", context: { command: "create", args: [], pm_root: pmRoot, ok: true, result: created } });
+  assert.equal(sends, 1);
+  process.env.PM_SLACK_WEBHOOK = webhook;
+  box.configureRecovery({ events: ["create"], minPriority: 1 });
+  box.enqueue({ ...intent("history-root-missing"), destination: slackDestination(webhook) });
+  rmSync(join(pmRoot, "history"), { recursive: true });
+  const result = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+  assert.equal(result.errorCode, "history_unavailable");
+  assert.equal(sends, 2);
+  assert.equal(box.status().counts.acknowledged, 2);
+});
+
+test("filter widening never backfills stale events and explicit configuration applies only to future history", async (t) => {
+  let sends = 0;
+  const webhook = await listen(t, (_request, response) => { sends += 1; response.end("ok"); });
+  environment(t, webhook);
+  process.env.PM_SLACK_EVENTS = "close";
+  process.env.PM_SLACK_MIN_PRIORITY = "1";
+  const { pmRoot, client } = await fixture(t);
+  const ext = await harness(t);
+  await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
+  const high = await create({ title: "Eligible before restart", priority: 1 }, client);
+  const stale = await create({ title: "Previously excluded", priority: 4 }, client);
+  await close(high.item.id, "Closed", {}, client);
+  await close(stale.item.id, "Closed", {}, client);
+  process.env.PM_SLACK_EVENTS = "create,close";
+  process.env.PM_SLACK_MIN_PRIORITY = "4";
+  const first = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
+  assert.equal(first.exitCode ?? 0, 0);
+  assert.equal((first.result as OutboxReport).counts.acknowledged, 1, "widening before the first scan must not flood stale notifications");
+  assert.equal(sends, 1);
+  const configured = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "configure" } });
+  assert.equal(configured.exitCode ?? 0, 0);
+  const future = await create({ title: "New policy applies", priority: 4 }, client);
+  await close(future.item.id, "Closed", {}, client);
+  const second = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" } });
+  assert.equal(second.exitCode ?? 0, 0);
+  assert.equal(sends, 3);
+  const reopened = new SlackOutbox(pmRoot);
+  t.after(() => reopened.close());
+  assert.equal(reopened.recoveryPolicies().length, 2);
+  assert.equal(reopened.status().rows.some((row) => row.item === stale.item.id), false);
+  await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
+  assert.equal(reopened.recoveryPolicies().length, 2, "idempotent enable must not silently reconfigure past eligibility");
+});
+
+test("recovery configuration validates filters and upgrades legacy enable without backfill", async (t) => {
+  environment(t);
+  const { pmRoot, client } = await fixture(t);
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  assert.throws(() => box.configureRecovery({ events: ["create"], minPriority: 1 }), refusal("disabled"));
+  assert.throws(() => box.enable({ events: ["create"], minPriority: 0 }), refusal("invalid_input"));
+  assert.equal(box.since(), null, "invalid eligibility must not enable an outbox");
+  box.enable();
+  for (const minPriority of [0, 5, 1.5]) assert.throws(() => box.configureRecovery({ events: ["create"], minPriority }), refusal("invalid_input"));
+  assert.throws(() => box.configureRecovery({ events: ["unknown" as "create"], minPriority: 1 }), refusal("invalid_input"));
+  const old = await create({ title: "Before legacy policy configured", priority: 1 }, client);
+  const ext = await harness(t);
+  await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
+  await create({ title: "After legacy policy configured", priority: 1 }, client);
+  const recovered = await captureSlackOutbox(pmRoot, box);
+  assert.equal(recovered.queued, 1);
+  assert.equal(box.status().rows.some((row) => row.item === old.item.id), false);
+});
+
+test("the published SDK example exits nonzero for parked routing refusals", async (t) => {
+  const { directory, pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  box.enqueue(intent("example-refused"));
+  box.close();
+  const result = await runPublishedExample(directory, exampleEnv(directory, "http://127.0.0.1:2/rotated"));
+  assert.equal(result.code, 2, result.stderr);
+  const check = new SlackOutbox(pmRoot);
+  t.after(() => check.close());
+  assert.equal(check.status().counts.refused, 1);
+  assert.equal(check.status().rows[0]?.attempts, 0);
+});
+
+test("the published SDK example drains verified receipts while reporting incomplete history", async (t) => {
+  let sends = 0;
+  const webhook = await listen(t, (_request, response) => { sends += 1; response.end("ok"); });
+  const { directory, pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  box.enqueue({ ...intent("example-partial-history"), destination: slackDestination(webhook) });
+  box.close();
+  rmSync(join(pmRoot, "history"), { recursive: true });
+  const result = await runPublishedExample(directory, exampleEnv(directory, webhook));
+  assert.equal(result.code, 2, result.stderr);
+  assert.equal(sends, 1);
+  const check = new SlackOutbox(pmRoot);
+  t.after(() => check.close());
+  assert.equal(check.status().counts.acknowledged, 1);
 });

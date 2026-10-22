@@ -129,3 +129,48 @@ acceptance (one recovered event, one acknowledged send, zero duplicates, no git)
 Clean-clone strict tracker health under isolated HOME passes all ten checks with
 only the existing stale-work and historical provenance advisories. No gate retry
 was needed. Exact installed dependency pins are unchanged and verified.
+
+## Refusal isolation and bounded recovery
+
+This follow-up supersedes the earlier pending-refusal and whole-scan refusal
+behavior. Destination mismatches park a `refused` receipt without counting a
+network attempt, then continue to healthy pending rows. Explicit `skip` records
+`skipped` without claiming delivery; restoring the original route permits retry.
+An ambiguous outcome holds subsequent rows for the same destination during that
+drain. Reads never drain, and lifecycle hooks attempt at most one delivery.
+
+Explicit force reconciliation supports reused sender PIDs while default
+reconciliation still protects active processes. Force requires an operator to
+verify that no sender remains active; otherwise duplicate delivery is possible.
+
+Recovery stages each verified history stream before publishing its intents. Bad
+streams are counted independently, and existing queued receipts still drain when
+history is unavailable. Partial recovery reports `history_unavailable`, failed
+counts and exit status 2 in JSON and TOON. SDK examples preserve this signal and
+still deliver healthy frozen receipts. Eligibility snapshots recorded at enable
+and explicit future-only configuration prevent wider current filters from
+backfilling stale history, including before the first recovery scan. Legacy
+queues remain drainable; adopting a policy starts future history recovery.
+
+Eleven independent behavioral reverts failed as expected: destination parking,
+per-destination ambiguity hold, read-hook suppression, one-attempt hook bound,
+SDK force reconciliation, CLI force wiring, per-stream history isolation,
+CLI progress despite global history failure, historical eligibility epochs,
+and SDK example handling of refused receipts and incomplete history. Every
+mutation was restored before builds. Detailed expected/actual outcomes and
+regression commands are retained on the package PM item. Tests use real SQLite,
+non-git SDK trackers and localhost sinks; no live Slack delivery is claimed.
+
+Final follow-up gates: `npm run release:check` and `bun run release:check`
+each passed 302 tests with zero failures, skips or cancellations. Both production
+modules retain 100% lines, branches and functions at unchanged thresholds. All
+nine tracker-linked commands pass, including 29 outbox tests, 14 focused
+regressions and native Bun acceptance (one recovered lifecycle, one acknowledged
+send, zero duplicates, no git). The linked full outbox suite timed out twice at
+120 seconds during parallel host load; a focused retry with a per-run 300-second
+window passed in 83.282 seconds. Assertions, stored test metadata and thresholds
+were unchanged. Both full release gates passed without retry. Clean-clone strict
+PM health passed all ten checks, with one existing historical provenance
+advisory. The docstring gate covers 81 declarations; production audit reports
+zero vulnerabilities and package validation includes 14 files. Existing policy
+disables persisted linked-run receipts; results are recorded on the PM item.

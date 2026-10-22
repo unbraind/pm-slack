@@ -32,7 +32,7 @@ export class OutboxError extends Error {
 }
 
 /** Persisted lifecycle delivery state; sending after a crash must be reconciled explicitly. */
-export type OutboxState = "pending" | "sending" | "acknowledged" | "ambiguous" | "rejected";
+export type OutboxState = "pending" | "sending" | "acknowledged" | "ambiguous" | "rejected" | "refused" | "skipped";
 
 /** Lifecycle transitions owned by Slack delivery, independent of command aliases. */
 export type OutboxEvent = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
@@ -95,6 +95,33 @@ export interface OutboxReport {
   next_cursor: number | null;
 }
 
+/** Credential-free eligibility snapshot for future lifecycle recovery. */
+export interface OutboxRecoveryFilter {
+  /** Lifecycle events enabled at the snapshot boundary. */
+  events: readonly OutboxEvent[];
+  /** Least urgent eligible priority, from one to four. */
+  minPriority: number;
+}
+
+/** Persisted eligibility epoch; changing environment variables does not rewrite older decisions. */
+export interface OutboxRecoveryPolicy extends OutboxRecoveryFilter {
+  /** First eligible history timestamp for this policy. */
+  since: string;
+}
+
+/** Complete recovery totals; failed item histories never authorize partial intents. */
+export interface OutboxRecoveryReport {
+  /** Verified history entries inspected. */
+  inspected: number;
+  /** New delivery intents queued. */
+  queued: number;
+  /** Item-history or global recovery failures, without exposing contents or local paths. */
+  failed: number;
+}
+
+/** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
+export type OutboxDecision = "acknowledged" | "retry" | "skip";
+
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 
@@ -123,6 +150,13 @@ function openDatabase(file: string): DatabaseSync {
   return new sqlite[constructor]!(file);
 }
 
+/** Validate eligibility before enabling storage or recording a future-only policy. */
+function recoveryFilterValue(filter: OutboxRecoveryFilter): void {
+  if (!Number.isInteger(filter.minPriority) || filter.minPriority < 1 || filter.minPriority > 4 || !filter.events.every((event) => lifecycleEvents.includes(event))) {
+    throw new OutboxError("invalid_input", "Use canonical lifecycle events and a recovery priority from 1 to 4.");
+  }
+}
+
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export class SlackOutbox {
   private readonly db: DatabaseSync;
@@ -144,7 +178,9 @@ export class SlackOutbox {
           key TEXT PRIMARY KEY, item TEXT NOT NULL, event TEXT NOT NULL, revision TEXT NOT NULL,
           destination TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
           attempts INTEGER NOT NULL DEFAULT 0, owner INTEGER NOT NULL DEFAULT 0);
-        CREATE INDEX IF NOT EXISTS delivery_pending ON delivery(state);`);
+        CREATE INDEX IF NOT EXISTS delivery_pending ON delivery(state);
+        CREATE TABLE IF NOT EXISTS recovery_policy (since TEXT NOT NULL, events TEXT NOT NULL, min_priority INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS recovery_policy_since ON recovery_policy(since);`);
     } catch {
       database?.close();
       throw new OutboxError("storage_unavailable", "Restore writable local runtime storage; committed items are unchanged. Then drain again.");
@@ -154,10 +190,40 @@ export class SlackOutbox {
   /** Release the database handle; committed receipts survive process exit. */
   close(): void { this.db.close(); }
 
-  /** Opt in once; repeated enable calls preserve the original recovery boundary. */
-  enable(): string {
+  /** Opt in once and optionally snapshot eligibility; legacy policy adoption starts with future history. */
+  enable(filter?: OutboxRecoveryFilter): string {
+    if (filter) recoveryFilterValue(filter);
+    const previous = this.since();
     this.db.prepare("INSERT OR IGNORE INTO settings VALUES (1, ?)").run(new Date().toISOString());
-    return this.since() as string;
+    const since = this.since() as string;
+    if (filter) this.saveRecoveryPolicy(filter, previous === null ? since : new Date().toISOString(), true);
+    return since;
+  }
+
+  /** Record an explicit future-only filter change; retained history keeps its earlier eligibility. */
+  configureRecovery(filter: OutboxRecoveryFilter): void {
+    if (!this.since()) throw new OutboxError("disabled", "Enable the outbox before configuring recovery.");
+    this.saveRecoveryPolicy(filter, new Date().toISOString(), false);
+  }
+
+  /** Read eligibility epochs newest first; unsnapshotted SDK trackers must opt in explicitly. */
+  recoveryPolicies(): OutboxRecoveryPolicy[] {
+    const rows = this.db.prepare("SELECT since,events,min_priority FROM recovery_policy ORDER BY rowid DESC").all();
+    if (!rows.length) throw new OutboxError("history_unavailable", "Configure recovery filters before future lifecycle changes; existing queued receipts can still drain.");
+    return rows.map((row) => ({ since: String(row.since), events: JSON.parse(String(row.events)) as OutboxEvent[], minPriority: Number(row.min_priority) }));
+  }
+
+  /** Resolve one entry's policy by its timestamp, including configurations committed during a recovery scan. */
+  recoveryPolicyAt(timestamp: string): OutboxRecoveryPolicy | undefined {
+    const row = this.db.prepare("SELECT since,events,min_priority FROM recovery_policy WHERE since<=? ORDER BY since DESC,rowid DESC LIMIT 1").get(timestamp);
+    return row ? { since: String(row.since), events: JSON.parse(String(row.events)) as OutboxEvent[], minPriority: Number(row.min_priority) } : undefined;
+  }
+
+  /** Persist a validated policy without storing routing credentials or replacing previous epochs. */
+  private saveRecoveryPolicy(filter: OutboxRecoveryFilter, since: string, onlyIfEmpty: boolean): void {
+    recoveryFilterValue(filter);
+    this.db.prepare("INSERT INTO recovery_policy SELECT ?,?,? WHERE ?=0 OR NOT EXISTS (SELECT 1 FROM recovery_policy)")
+      .run(since, JSON.stringify(filter.events), filter.minPriority, Number(onlyIfEmpty));
   }
 
   /** Return the durable opt-in boundary without reading message bodies. */
@@ -192,7 +258,7 @@ export class SlackOutbox {
   status(limit = 20, after = 0): OutboxReport {
     limitValue(limit);
     if (!Number.isSafeInteger(after) || after < 0) throw new OutboxError("invalid_input", "Use a nonnegative integer status cursor.");
-    const counts: Record<OutboxState, number> = { pending: 0, sending: 0, acknowledged: 0, ambiguous: 0, rejected: 0 };
+    const counts: Record<OutboxState, number> = { pending: 0, sending: 0, acknowledged: 0, ambiguous: 0, rejected: 0, refused: 0, skipped: 0 };
     for (const row of this.db.prepare("SELECT state,COUNT(*) AS n FROM delivery GROUP BY state").all()) counts[row.state as OutboxState] = Number(row.n);
     const page = this.db.prepare("SELECT rowid AS sequence,key,item,event,state,attempts FROM delivery WHERE rowid>? ORDER BY rowid LIMIT ?").all(after, limit + 1) as unknown as OutboxReceipt[];
     const rows = page.slice(0, limit);
@@ -202,7 +268,9 @@ export class SlackOutbox {
 
   /**
    * Claim pending rows once. Typed OutboxError refusals occur before a remote
-   * request starts and restore the row without counting an attempt. A retry
+   * request starts. Destination changes park a refused row and continue; other
+   * typed refusals restore pending without counting an attempt. An ambiguous
+   * outcome holds later rows for that destination in this drain. A retry
    * outcome stops this drain so a rate limit is not hit again immediately.
    * The next drain prefers fewer attempts, then older rows, so one refused
    * destination cannot block every other notification.
@@ -210,8 +278,10 @@ export class SlackOutbox {
   async drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit = 20): Promise<OutboxReport> {
     limitValue(limit);
     if (!this.since()) throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
-    const candidates = this.db.prepare("SELECT key FROM delivery WHERE state='pending' ORDER BY attempts, rowid LIMIT ?").all(limit);
+    const candidates = this.db.prepare("SELECT key,destination FROM delivery WHERE state='pending' ORDER BY attempts, rowid LIMIT ?").all(limit);
+    const uncertain = new Set<string>();
     for (const candidate of candidates) {
+      if (uncertain.has(String(candidate.destination))) continue;
       const row = this.db.prepare("UPDATE delivery SET state='sending',owner=?,attempts=attempts+1 WHERE key=? AND state='pending' RETURNING destination,payload").get(process.pid, candidate.key!);
       if (!row) continue;
       let state: OutboxState;
@@ -220,32 +290,35 @@ export class SlackOutbox {
         state = outcome === "retry" ? "pending" : outcome;
       } catch (error) {
         if (error instanceof OutboxError) {
-          this.db.prepare("UPDATE delivery SET state='pending',owner=0,attempts=attempts-1 WHERE key=?").run(candidate.key!);
+          const refused = error.code === "destination_changed";
+          this.db.prepare("UPDATE delivery SET state=?,owner=0,attempts=attempts-1 WHERE key=?").run(refused ? "refused" : "pending", candidate.key!);
+          if (refused) continue;
           throw error;
         }
         state = "ambiguous";
       }
       this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(state, candidate.key!);
+      if (state === "ambiguous") uncertain.add(String(candidate.destination));
       if (state === "pending") break;
     }
     return this.status(limit);
   }
 
-  /** Reconcile uncertain remote outcomes explicitly; active senders cannot be reset. */
-  resolve(key: string, decision: "acknowledged" | "retry"): void {
-    if (decision !== "acknowledged" && decision !== "retry") throw new OutboxError("invalid_input", "Choose acknowledged after verifying delivery, or retry after verifying absence (duplicates are possible).");
+  /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
+  resolve(key: string, decision: OutboxDecision, options: { force?: boolean } = {}): void {
+    if (decision !== "acknowledged" && decision !== "retry" && decision !== "skip") throw new OutboxError("invalid_input", "Choose acknowledged, retry after verifying absence, or skip to discard without claiming delivery.");
     // One transaction fences concurrent reconciliation and claims across processes.
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db.prepare("SELECT state,owner FROM delivery WHERE key=?").get(key);
       if (!row) throw new OutboxError("not_found", "Inspect status and use an existing receipt key.");
-      if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected") throw new OutboxError("not_ambiguous", "Only reconcile sending, ambiguous, or rejected receipts.");
-      if (row.state === "sending") {
+      if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected" && row.state !== "refused") throw new OutboxError("not_ambiguous", "Only reconcile sending, ambiguous, rejected, or refused receipts.");
+      if (row.state === "sending" && options.force !== true) {
         let active = true;
         try { process.kill(Number(row.owner), 0); } catch (error) { active = (error as NodeJS.ErrnoException).code !== "ESRCH"; }
-        if (active) throw new OutboxError("in_flight", "Wait for the sending process to exit before reconciling; a live or reused process id is held conservatively.");
+        if (active) throw new OutboxError("in_flight", "Verify that no sender is active; only then use force reconciliation for a reused process id (duplicates are possible).");
       }
-      this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(decision === "retry" ? "pending" : decision, key);
+      this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(decision === "retry" ? "pending" : decision === "skip" ? "skipped" : decision, key);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

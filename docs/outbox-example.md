@@ -6,14 +6,20 @@ environment variables; keep credentials outside source control.
 ```ts
 import {
   SlackOutbox, captureSlackOutbox, OutboxError, slackDestination,
-  type OutboxOutcome,
+  type OutboxOutcome, type OutboxRecoveryReport,
 } from "pm-slack";
 
 const tracker = ".agents/pm";
 const outbox = new SlackOutbox(tracker);
 try {
-  outbox.enable(); // Call before the lifecycle changes you want to retain.
-  const recovered = await captureSlackOutbox(tracker, outbox);
+  outbox.enable({ events: ["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"], minPriority: 1 }); // Snapshot before lifecycle changes.
+  let recovered: OutboxRecoveryReport;
+  try { recovered = await captureSlackOutbox(tracker, outbox); }
+  catch (error) {
+    if (!(error instanceof OutboxError) || error.code !== "history_unavailable") throw error;
+    recovered = { inspected: 0, queued: 0, failed: 1 };
+  }
+  if (recovered.failed) process.exitCode = 2;
   console.log({ recovered, status: outbox.status(10) });
   // To supply your own transport, implement one attempt with explicit outcomes:
   const result = await outbox.drain(async (_destination, payload): Promise<OutboxOutcome> => {
@@ -41,6 +47,7 @@ try {
     }
   }, 10);
   console.log(result);
+  if (result.counts.refused) process.exitCode = 2;
 } catch (error) {
   if (error instanceof OutboxError) {
     console.error({ code: error.code, remedy: error.remedy });
@@ -54,8 +61,18 @@ try {
 DNS and connection-refused failures return `retry` because the request never
 left; classify them by the socket error code, not by error text. Other thrown
 transport failures become `ambiguous` and are not automatically retried.
-Throw `OutboxError` only for refusals before a request starts; these leave the
-receipt pending without counting a remote attempt and are rethrown to the caller.
+Throw `OutboxError` only before a request starts. `destination_changed` parks the
+receipt as `refused` and allows later destinations to proceed; other typed
+refusals leave it pending and rethrow. No refused row counts a remote attempt.
+Use `resolve(key, "skip")` to discard a refused row, or restore its original route
+and explicitly resolve it for retry. Ambiguity holds later rows for that
+destination during the current drain. A reused sender PID requires independent
+verification before `resolve(key, decision, { force: true })`.
+
+The enable filter is snapshotted once. Call `configureRecovery(filter)` before
+future lifecycle changes to adopt new eligibility without backfilling stale
+messages. Failed histories are counted separately; healthy queued receipts can
+still drain. The example exits nonzero for incomplete recovery or parked refusals.
 The example records a caught refusal as a nonzero process status so a scheduled
 script does not report success.
 Use `pm slack outbox --action drain` for the built-in transport and bounded TOON/JSON.
