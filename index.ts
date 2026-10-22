@@ -1899,13 +1899,22 @@ async function sendOutbox(destination: string, payload: OutboxPayload): Promise<
   }
 }
 
+/** Preserve typed refusals and give receipt database failures a storage-specific recovery action. */
+function outboxStorage<T>(operation: () => T): T {
+  try { return operation(); }
+  catch (error) {
+    if (error instanceof OutboxError) throw error;
+    throw new OutboxError("storage_unavailable", "Restore readable and writable local runtime storage, then drain again.");
+  }
+}
+
 /**
  * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
 export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<OutboxRecoveryReport> {
-  const since = outbox.since();
+  const since = outboxStorage(() => outbox.since());
   if (!since) throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
   const config = loadConfig();
   if (!config) throw new OutboxError("destination_changed", "Restore notification configuration before recovering lifecycle history.");
@@ -1913,7 +1922,7 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
   let queued = 0;
   let failed = 0;
   try {
-    outbox.recoveryPolicies();
+    outboxStorage(() => outbox.recoveryPolicies());
     const files = readdirSync(path.join(pmRoot, "history")).filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).sort();
     for (const file of files) {
       const id = file.slice(0, -6);
@@ -1931,8 +1940,8 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
           if (status) previous = status;
           if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior)) continue;
           const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
-          const policy = outbox.recoveryPolicyAt(entry.ts);
-          if (!event || !policy || !policy.events.includes(event) || outbox.has(id, event, entry.after_hash)) continue;
+          const policy = outboxStorage(() => outbox.recoveryPolicyAt(entry.ts));
+          if (!event || !policy || !policy.events.includes(event) || outboxStorage(() => outbox.has(id, event, entry.after_hash))) continue;
           const { metadata } = replayHistoryToTarget(entries, index);
           if (metadata.id !== id || typeof metadata.title !== "string") throw new OutboxError("history_unavailable", "Restore complete item history before recovering notifications.");
           const item = metadata as unknown as PmItem;
@@ -1947,7 +1956,7 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
           });
           intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload });
         }
-        for (const intent of intents) { outbox.enqueue(intent); queued += 1; }
+        for (const intent of intents) { outboxStorage(() => outbox.enqueue(intent)); queued += 1; }
       } catch (error) {
         if (error instanceof OutboxError && error.code !== "history_unavailable") throw error;
         failed += 1;

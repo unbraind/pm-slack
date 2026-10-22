@@ -76,9 +76,12 @@ uncertainty can duplicate a post. Keep runtime receipts and retained lifecycle
 history durable on local storage. Remote tracker backends and network-shared
 SQLite files are outside this local outbox contract.
 
-Automated reviewer availability is separate from passing CI: Greptile reported an
-expired trial, Sourcery reported a budget limit, CodeRabbit skipped automatic
-review, and cubic returned neutral. These are missing review evidence. The PM
+Initial-run reviewer availability (2026-10-21): Greptile reported an expired trial,
+Sourcery reported a budget limit, CodeRabbit skipped automatic review, and cubic
+returned neutral. Those initial-run outcomes supplied no completed review
+evidence. Later rounds on 2026-10-22 include completed CodeRabbit reviews and
+findings, with fixes and validation recorded below and on the PM item; the
+initial availability statement does not describe those later rounds. The PM
 item stays nonterminal and unclaimed for orchestrator verification; this change is not merged or released.
 
 ## Review follow-up
@@ -174,3 +177,33 @@ PM health passed all ten checks, with one existing historical provenance
 advisory. The docstring gate covers 81 declarations; production audit reports
 zero vulnerabilities and package validation includes 14 files. Existing policy
 disables persisted linked-run receipts; results are recorded on the PM item.
+
+## Redirect and storage-error follow-up
+
+The SDK example refuses fetch redirects, leaving the original POST ambiguous
+even when a redirected endpoint would refuse its connection. A real localhost
+307 regression checks the persisted ambiguity, attempt count and absence of an
+automatic resend. Recovery now distinguishes receipt database exceptions from
+retained-history failures at each database boundary, preserving typed refusals.
+Real SQLite missing-table, busy-write and read-only-write regressions require
+`storage_unavailable` with a runtime storage remedy. Clearing each storage fault
+recovers the same byte-identical retained history.
+
+All five focused tests pass. Four independent behavioral reverts fail: removing
+redirect refusal, restoring only the previous recovery function, removing only
+the receipt lookup guard, and removing only the enqueue guard. Every mutation
+was restored before builds and gates. The initial reviewer-availability paragraph
+is dated to its 2026-10-21 introduction and explicitly distinguished from the
+completed CodeRabbit reviews and findings on 2026-10-22. Detailed thread mappings,
+commands and expected/actual revert outcomes are retained on the PM item.
+
+Final validation after reserving the redirect target port to prevent fixture
+port reuse: both `npm run release:check` and `bun run release:check` passed
+307 tests with zero failures, skips or cancellations. Both production modules
+retain 100% lines, branches and functions at unchanged thresholds. The docstring
+gate covers 82 declarations, production audit reports zero vulnerabilities, and
+package validation contains 14 files. All ten linked commands passed, including
+34 outbox tests and native Bun acceptance; the final five-test linked regression
+command passed again after the deterministic fixture change. No test timeout or
+failure retry was needed in this round. All four behavioral revert proofs were
+rechecked after that fixture change and restored before the final gates.

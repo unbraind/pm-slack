@@ -1629,13 +1629,24 @@ async function sendOutbox(destination, payload) {
         return classifyOutboxSendError(error);
     }
 }
+/** Preserve typed refusals and give receipt database failures a storage-specific recovery action. */
+function outboxStorage(operation) {
+    try {
+        return operation();
+    }
+    catch (error) {
+        if (error instanceof OutboxError)
+            throw error;
+        throw new OutboxError("storage_unavailable", "Restore readable and writable local runtime storage, then drain again.");
+    }
+}
 /**
  * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
 export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
-    const since = outbox.since();
+    const since = outboxStorage(() => outbox.since());
     if (!since)
         throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
     const config = loadConfig();
@@ -1645,7 +1656,7 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
     let queued = 0;
     let failed = 0;
     try {
-        outbox.recoveryPolicies();
+        outboxStorage(() => outbox.recoveryPolicies());
         const files = readdirSync(path.join(pmRoot, "history")).filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).sort();
         for (const file of files) {
             const id = file.slice(0, -6);
@@ -1667,8 +1678,8 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
                     if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior))
                         continue;
                     const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
-                    const policy = outbox.recoveryPolicyAt(entry.ts);
-                    if (!event || !policy || !policy.events.includes(event) || outbox.has(id, event, entry.after_hash))
+                    const policy = outboxStorage(() => outbox.recoveryPolicyAt(entry.ts));
+                    if (!event || !policy || !policy.events.includes(event) || outboxStorage(() => outbox.has(id, event, entry.after_hash)))
                         continue;
                     const { metadata } = replayHistoryToTarget(entries, index);
                     if (metadata.id !== id || typeof metadata.title !== "string")
@@ -1689,7 +1700,7 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
                     intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload });
                 }
                 for (const intent of intents) {
-                    outbox.enqueue(intent);
+                    outboxStorage(() => outbox.enqueue(intent));
                     queued += 1;
                 }
             }

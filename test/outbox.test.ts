@@ -891,3 +891,66 @@ test("the published SDK example drains verified receipts while reporting incompl
   t.after(() => check.close());
   assert.equal(check.status().counts.acknowledged, 1);
 });
+
+test("the published SDK example holds redirects as ambiguous even when the target refuses connection", async (t) => {
+  const refused = http.createServer();
+  await new Promise<void>((done) => refused.listen(0, "127.0.0.1", done));
+  const target = `http://127.0.0.1:${(refused.address() as { port: number }).port}/redirected`;
+  let sends = 0;
+  const webhook = await listen(t, (_request, response) => {
+    sends += 1;
+    response.writeHead(307, { location: target });
+    response.end();
+  });
+  // Reserve the target until the source binds, so ephemeral port reuse cannot turn this into a redirect loop.
+  await new Promise<void>((done) => refused.close(() => done()));
+  const { directory, pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot); enableRecovery(box);
+  box.enqueue({ ...intent("example-redirect"), destination: slackDestination(webhook) });
+  box.close();
+  const result = await runPublishedExample(directory, exampleEnv(directory, webhook));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(sends, 1, "the original endpoint received the POST before redirect handling");
+  const check = new SlackOutbox(pmRoot);
+  t.after(() => check.close());
+  assert.equal(check.status().counts.ambiguous, 1);
+  assert.equal(check.status().counts.pending, 0, "a redirected connection failure must not authorize safe retry");
+  assert.equal(check.status().rows[0]?.attempts, 1);
+  await check.drain(async () => { assert.fail("a redirected request must not resend automatically"); });
+});
+
+test("recovery reports actual SQLite receipt faults as storage failures without blaming history", async (t) => {
+  environment(t);
+  for (const fault of ["missing receipt table", "busy receipt write", "read-only receipt write"] as const) await t.test(fault, async (t) => {
+    const { pmRoot, client } = await fixture(t);
+    const box = new SlackOutbox(pmRoot); enableRecovery(box);
+    t.after(() => box.close());
+    const created = await create({ title: "Verified history survives storage failure", priority: 1 }, client);
+    const historyFile = join(pmRoot, "history", `${created.item.id}.jsonl`);
+    const historyBefore = readFileSync(historyFile, "utf8");
+    const database = new DatabaseSync(join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+    t.after(() => database.close());
+    // Faults come from real SQLite operations, not replacement SDK or database methods.
+    const connection = (box as unknown as { db: DatabaseSync }).db;
+    if (fault === "missing receipt table") database.exec("ALTER TABLE delivery RENAME TO retained_delivery");
+    else if (fault === "busy receipt write") database.exec("BEGIN; SELECT * FROM delivery");
+    else connection.exec("PRAGMA query_only=ON");
+    try {
+      await assert.rejects(captureSlackOutbox(pmRoot, box), (error: unknown) => {
+        assert.ok(error instanceof OutboxError);
+        assert.equal(error.code, "storage_unavailable");
+        assert.equal(error.exitCode, 2);
+        assert.match(error.remedy, /readable and writable local runtime storage/);
+        assert.doesNotMatch(error.remedy, /history/i);
+        return true;
+      });
+    } finally {
+      if (fault === "missing receipt table") database.exec("ALTER TABLE retained_delivery RENAME TO delivery");
+      else if (fault === "busy receipt write") database.exec("ROLLBACK");
+      else connection.exec("PRAGMA query_only=OFF");
+    }
+    assert.equal(readFileSync(historyFile, "utf8"), historyBefore);
+    assert.equal(box.status().counts.pending, 0);
+    assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 1, "repairing storage must recover the unchanged history");
+  });
+});

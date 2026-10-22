@@ -35,6 +35,7 @@ try {
       const response = await fetch(webhook, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000),
+        redirect: "error",
       });
       if (response.ok) return "acknowledged";
       if (response.status === 429) return "retry";
@@ -61,6 +62,8 @@ try {
 DNS and connection-refused failures return `retry` because the request never
 left; classify them by the socket error code, not by error text. Other thrown
 transport failures become `ambiguous` and are not automatically retried.
+Redirects are refused without following their target and remain ambiguous because
+the original endpoint already received the request.
 Throw `OutboxError` only before a request starts. `destination_changed` parks the
 receipt as `refused` and allows later destinations to proceed; other typed
 refusals leave it pending and rethrow. No refused row counts a remote attempt.
