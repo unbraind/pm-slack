@@ -80,3 +80,28 @@ Automated reviewer availability is separate from passing CI: Greptile reported a
 expired trial, Sourcery reported a budget limit, CodeRabbit skipped automatic
 review, and cubic returned neutral. These are missing review evidence. The PM
 item stays nonterminal and unclaimed for orchestrator verification; this change is not merged or released.
+
+## Review follow-up
+
+The three remaining review findings are valid. The published SDK example now
+returns the typed refusal's nonzero exit status. The built-in transport preserves
+socket error codes and retries only pre-request DNS/connection refusals; HTTP
+response text cannot force a retry. A retry ends the drain, and the next drain
+prefers fewer-attempt intents before older rows so another destination can proceed.
+The example uses the same pre-request classification. A partial response reset
+rejects the transport attempt and retains an ambiguous receipt.
+
+Real non-git trackers and localhost HTTP regressions cover these paths. Individual
+behavioral reverts fail for the example exit status, example fetch classification,
+transport cause, outcome classification, drain stopping, next-drain ordering, and
+partial-response error handling. Every mutation is restored before gates/builds.
+
+Follow-up validation: `npm ci` passed; both `npm run release:check` and
+`bun run release:check` passed 288 tests with zero failures, skips or cancellations.
+Both production modules retain 100% lines, branches and functions at unchanged
+thresholds. The docstring gate covers 77 declarations. All seven tracker-linked
+commands pass, including native Bun acceptance with one recovered lifecycle,
+one acknowledged send, zero duplicates and no git. Clean-clone strict tracker
+health with installed merge drivers passes all ten checks under isolated HOME;
+remaining telemetry queue, stale-work and historical provenance notices are
+advisory. Local/global extension version skew was isolated from that result.

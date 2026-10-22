@@ -40,10 +40,15 @@ retaining acknowledgments prevents old events from being delivered again.
 
 Each intent moves from `pending` to `sending` before a request starts. HTTP success
 becomes `acknowledged`; explicit 429 refusals remain `pending` for a later drain;
-other 4xx responses become `rejected`. A timeout, dropped response or 5xx becomes
-`ambiguous`. A crash leaves `sending` visible. Those uncertain states are never
-automatically resent because incoming webhooks provide no transactional exactly-once
-guarantee. Existing immediate retry/backoff for non-outbox commands is unchanged.
+other 4xx responses become `rejected`. A timeout, reset, dropped response or 5xx
+becomes `ambiguous`, including a response body that mentions a DNS failure.
+Connection refused and DNS errors that occur before the request is transmitted
+stay `pending` for a later drain; classification uses the socket error code, not
+the error text. A retry stops the current drain. The next drain tries fewer-attempt
+intents first, so one refused destination cannot block every other notification.
+A crash leaves `sending` visible. Uncertain states are never automatically resent
+because incoming webhooks provide no transactional exactly-once guarantee.
+Existing immediate retry/backoff for non-outbox commands is unchanged.
 
 Inspect Slack before reconciling an uncertain receipt:
 
@@ -75,7 +80,8 @@ The package root exports `SlackOutbox`, `captureSlackOutbox`, `slackDestination`
 `OutboxError`, and their intent/receipt/report/outcome types. The low-level
 `drain(send, limit)` callback must make one attempt and report `acknowledged`
 only on explicit success, `retry` only on a confirmed refusal, and `ambiguous`
-whenever remote acceptance is uncertain. See the [SDK example](docs/outbox-example.md).
+whenever remote acceptance is uncertain. A `retry` ends the current drain; call
+it again later. See the [SDK example](docs/outbox-example.md).
 Raise `destination_changed` only before starting a remote request; this refusal
 returns the intent to pending without counting a send attempt.
 

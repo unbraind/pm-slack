@@ -25,26 +25,39 @@ try {
     if (slackDestination(webhook, payload.channel) !== _destination) {
       throw new OutboxError("destination_changed", "Restore the original webhook and channel.");
     }
-    const response = await fetch(webhook, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000),
-    });
-    if (response.ok) return "acknowledged";
-    if (response.status === 429) return "retry";
-    return response.status < 500 ? "rejected" : "ambiguous";
+    try {
+      const response = await fetch(webhook, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) return "acknowledged";
+      if (response.status === 429) return "retry";
+      return response.status < 500 ? "rejected" : "ambiguous";
+    } catch (error) {
+      const cause = error instanceof Error ? error.cause : undefined;
+      const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
+      if (code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "ECONNREFUSED") return "retry";
+      throw error;
+    }
   }, 10);
   console.log(result);
 } catch (error) {
-  if (error instanceof OutboxError) console.error({ code: error.code, remedy: error.remedy });
-  else throw error;
+  if (error instanceof OutboxError) {
+    console.error({ code: error.code, remedy: error.remedy });
+    process.exitCode = error.exitCode;
+  } else throw error;
 } finally {
   outbox.close();
 }
 ```
 
-Thrown transport failures become `ambiguous`; they are not automatically retried.
+DNS and connection-refused failures return `retry` because the request never
+left; classify them by the socket error code, not by error text. Other thrown
+transport failures become `ambiguous` and are not automatically retried.
 Throw `OutboxError` only for refusals before a request starts; these leave the
 receipt pending without counting a remote attempt and are rethrown to the caller.
+The example records a caught refusal as a nonzero process status so a scheduled
+script does not report success.
 Use `pm slack outbox --action drain` for the built-in transport and bounded TOON/JSON.
 After checking Slack, reconcile uncertainty with the receipt key and an explicit
 `acknowledged` or `retry` decision. Preserve runtime receipts and retained history

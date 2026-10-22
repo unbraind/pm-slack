@@ -30,7 +30,7 @@
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { SlackOutbox } from "./outbox.ts";
-import type { OutboxEvent } from "./outbox.ts";
+import type { OutboxOutcome, OutboxEvent } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
@@ -471,8 +471,10 @@ declare function isRetryableSlackError(err: unknown): boolean;
  * sends a JSON body with a 10-second timeout, and resolves on a 2xx response.
  * A non-2xx status rejects with a {@link SlackHttpError} carrying the status, a
  * snippet of the body, and the parsed `Retry-After`; a transport failure or
- * timeout rejects with a plain `Error`. The single attempt is the building
- * block {@link postToSlack} retries around.
+ * timeout rejects with a plain `Error` whose `cause` is the socket or timeout
+ * error. Callers classify that cause by its code, never by text in the message,
+ * because a response body can mention a DNS code after the request was sent.
+ * The single attempt is the building block {@link postToSlack} retries around.
  *
  * @param webhookUrl - The Slack incoming-webhook URL to post to.
  * @param payload - The Slack message payload to JSON-encode and send.
@@ -595,6 +597,19 @@ declare function outboxFailure(error: unknown): {
     remediation: string;
 };
 /**
+ * Classify one failed outbox attempt without reading the error message.
+ *
+ * HTTP 429 is a confirmed refusal. Other 4xx statuses are permanent. A 5xx,
+ * timeout, reset or dropped response stays uncertain because Slack may already
+ * have accepted the webhook. DNS and connection-refused failures are retried
+ * only when the socket error's own code says the request never left; a sent
+ * response body that mentions those codes cannot force a retry.
+ *
+ * @param error - Rejection from one webhook attempt.
+ * @returns The durable outcome to store for that attempt.
+ */
+declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
+/**
  * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
  * History and items are read only. A malformed stream refuses the scan before any network delivery.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
@@ -619,6 +634,7 @@ export default _default;
  */
 export declare const __test__: {
     outboxFailure: typeof outboxFailure;
+    classifyOutboxSendError: typeof classifyOutboxSendError;
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;

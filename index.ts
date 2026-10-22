@@ -1324,8 +1324,10 @@ function isRetryableSlackError(err: unknown): boolean {
  * sends a JSON body with a 10-second timeout, and resolves on a 2xx response.
  * A non-2xx status rejects with a {@link SlackHttpError} carrying the status, a
  * snippet of the body, and the parsed `Retry-After`; a transport failure or
- * timeout rejects with a plain `Error`. The single attempt is the building
- * block {@link postToSlack} retries around.
+ * timeout rejects with a plain `Error` whose `cause` is the socket or timeout
+ * error. Callers classify that cause by its code, never by text in the message,
+ * because a response body can mention a DNS code after the request was sent.
+ * The single attempt is the building block {@link postToSlack} retries around.
  *
  * @param webhookUrl - The Slack incoming-webhook URL to post to.
  * @param payload - The Slack message payload to JSON-encode and send.
@@ -1353,6 +1355,9 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
       res.on("data", (chunk: Buffer) => {
         data += chunk.toString();
       });
+      res.on("error", (err: Error) => {
+        reject(new Error(`Slack webhook response failed: ${err.message}`, { cause: err }));
+      });
       res.on("end", () => {
         // A ClientRequest response always carries statusCode; the `undefined`
         // in IncomingMessage's type exists only for server-side requests.
@@ -1370,7 +1375,7 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
     });
 
     req.on("error", (err: Error) => {
-      reject(new Error(`Slack webhook request failed: ${err.message}`));
+      reject(new Error(`Slack webhook request failed: ${err.message}`, { cause: err }));
     });
 
     req.setTimeout(10_000, () => {
@@ -1857,7 +1862,31 @@ function outboxFailure(error: unknown) {
   return { ok: false, exit_code: refusal.exitCode, code: refusal.code, remediation: refusal.remedy };
 }
 
-/** Send once: only explicit 429 refusals are safe automatic retries; transport errors remain uncertain. */
+/**
+ * Classify one failed outbox attempt without reading the error message.
+ *
+ * HTTP 429 is a confirmed refusal. Other 4xx statuses are permanent. A 5xx,
+ * timeout, reset or dropped response stays uncertain because Slack may already
+ * have accepted the webhook. DNS and connection-refused failures are retried
+ * only when the socket error's own code says the request never left; a sent
+ * response body that mentions those codes cannot force a retry.
+ *
+ * @param error - Rejection from one webhook attempt.
+ * @returns The durable outcome to store for that attempt.
+ */
+function classifyOutboxSendError(error: unknown): OutboxOutcome {
+  if (error instanceof SlackHttpError) {
+    if (error.status === 429) return "retry";
+    return error.status < 500 ? "rejected" : "ambiguous";
+  }
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause === null || typeof cause !== "object" || !("code" in cause)) return "ambiguous";
+  const code = cause.code;
+  if (typeof code !== "string" || (code !== "ENOTFOUND" && code !== "EAI_AGAIN" && code !== "ECONNREFUSED")) return "ambiguous";
+  return "retry";
+}
+
+/** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
 async function sendOutbox(destination: string, payload: OutboxPayload): Promise<OutboxOutcome> {
   const target = outboxTargets().find((candidate) => slackDestination(candidate.webhookUrl, payload.channel ?? candidate.channel) === destination);
   if (!target) throw new OutboxError("destination_changed", "Restore the original routing destination before draining; no message was posted.");
@@ -1865,11 +1894,7 @@ async function sendOutbox(destination: string, payload: OutboxPayload): Promise<
     await postToSlackOnce(target.webhookUrl, payload);
     return "acknowledged";
   } catch (error) {
-    if (error instanceof SlackHttpError) {
-      if (error.status === 429) return "retry";
-      if (error.status < 500) return "rejected";
-    }
-    return "ambiguous";
+    return classifyOutboxSendError(error);
   }
 }
 
@@ -2487,6 +2512,7 @@ export default defineExtension({
  */
 export const __test__ = {
   outboxFailure,
+  classifyOutboxSendError,
   buildItemBlockKit,
   buildItemPayload,
   buildTextMessage,

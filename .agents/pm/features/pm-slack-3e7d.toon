@@ -6,10 +6,10 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-10-21T20:00:45.908Z"
-updated_at: "2026-10-21T22:17:54.045Z"
+updated_at: "2026-10-22T10:16:55.097Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
-comments[12]{created_at,author,text}:
+comments[20]{created_at,author,text}:
   "2026-10-21T20:01:09.181Z",codex-agent,"Overlap recheck: CLI lifecycle hooks expose successful command results but no Slack-specific durable delivery acknowledgment. pm-slack currently retries immediate HTTP attempts only. pm-observer src/delivery.ts and src/store.ts own idempotent PM evidence notes, and pm-slack-standup owns digests. This feature owns Slack delivery intents and receipts only. Plan: opt-in durable storage, atomic claims and idempotency, persisted uncertain outcomes with explicit reconciliation, bounded SDK and CLI inspection/drain, real no-git tracker regressions and public tracker-copy validation. Reconciliation PR items remain untouched."
   "2026-10-21T20:09:32.697Z",codex-agent,"Implemented SQLite FULL-synchronous durable delivery with atomic cross-process claims and frozen history-revision identities, explicit enable boundary, verified SDK history recovery for commits missed by hooks, bounded structured inspection, safe destination fingerprints, and explicit reconciliation of uncertain sends. Targeted lifecycle/corpus/transport tests: 215 passed, 0 failed; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Typecheck and docstring gate passed. Full unchanged release gates will run under npm and Bun in CI because local CPU is saturated."
   "2026-10-21T20:16:31.480Z",codex-agent,"Real-data validation used a read-only non-git archive of the public pm-slack tracker at f4dce1dcf2b291a99d6c9e3f99fb529b104c707f: 85 items, 515 history entries, 177 immutable source files. Scan inspected all 515 entries and queued zero pre-enable events. Real-data snapshot intents produced 85 acknowledged localhost sends, zero duplicate sends after reopening and re-draining, with all source bytes unchanged. Bounded inspection returned 10 rows and omitted 75. Native Bun acceptance also recovered one lifecycle event with one acknowledged send and zero duplicates without git. Receipt pagination now makes every retained key reachable."
@@ -22,19 +22,30 @@ comments[12]{created_at,author,text}:
   "2026-10-21T22:09:17.080Z",codex-agent,"Added .hound.yml byte-for-byte from pm-starter, retaining its rationale comment and jshint.enabled=false. Local validation: reference byte comparison passed; npm run docstring passed (8 files, 76 declarations); git diff --check passed; node_modules/.bin/pm test pm-slack-3e7d --run --progress passed both linked commands: node --test test/outbox.test.ts (10 passed, zero failed/skipped/canceled) and npm run typecheck. Initial linked run refused the inherited command because this fresh checkout has a detached ref; after inspecting and acknowledging the existing commands in this clone, rerun passed. Existing policy disables stored test-run receipts, so results are recorded here. No function changed; behavioral revert proof is not applicable. CI will run the unchanged full npm and Bun release gates on Node 22 and 26. Claim released for orchestrator verification; item remains nonterminal."
   "2026-10-21T22:16:00.488Z",codex-agent,"CodeRabbit completed full review 5606899987 on 801fcf8 and posted one valid finding (discussion_r4342530828): sendOutbox validates every route before sending, so an invalid unrelated route raises invalid_input before a request, but drain currently marks the row ambiguous. Plan: reset every typed OutboxError pre-request refusal to pending, clear owner, undo attempts and rethrow; retain ambiguity for ordinary transport errors. Add a real non-git tracker and localhost HTTP regression for malformed unrelated routing, prove it fails with only drain reverted, then rerun targeted checks and final-head CI. Earlier Hound-only head passed full npm/Bun CI: https://github.com/unbraind/pm-slack/actions/runs/39684455606 (283 tests per gate on Node 22 and 26)."
   "2026-10-21T22:17:52.248Z",codex-agent,"Fixed the valid CodeRabbit pre-request refusal finding: every typed OutboxError resets the claimed row to pending with owner cleared and attempts decremented before rethrow; ordinary transport exceptions remain ambiguous. Documented the send callback contract and rebuilt committed dist output. New real non-git tracker/localhost integration regression checks two invalid unrelated-route drains send zero requests and preserve the pending receipt at zero attempts, then routing repair acknowledges exactly one request without manual reconciliation or duplicates. Behavioral revert proof: reverting only drain's condition to the original destination_changed-only handling makes the new regression fail (missing invalid_input refusal); restored code passes. node_modules/.bin/pm test pm-slack-3e7d --run --progress passed all 3 linked commands: outbox suite 11/11, typecheck, and isolated regression 1/1. npm run build, npm run build:test, npm run docstring (76 declarations), native Bun acceptance (1 recovered, 1 acknowledged, 0 duplicates, no git), and git diff --check passed. Full unchanged npm/Bun gates remain delegated to final-head CI. Claim released for orchestrator verification; item stays nonterminal."
-files[11]{path,scope}:
+  "2026-10-22T09:39:18.674Z",pi-agent,"Review round on PR 147: three unresolved CodeRabbit threads remain after the pre-request refusal fix. Latest CodeRabbit review body has no outside-diff findings. Plan: verify each thread against the current drain and transport code, fix the valid ones with regressions that fail on behavioural revert, then rerun the unchanged npm and Bun release gates."
+  "2026-10-22T09:53:27.878Z",pi-agent,"Verified the three unresolved CodeRabbit threads against the current head. No outside-diff findings were in the latest CodeRabbit review body.\n\nPRRT_kwDOSYpJkM6vA2RC is valid: the published SDK example caught OutboxError and exited 0. The example now sets process.exitCode from the refusal. The same example also treated a pre-request fetch failure as an uncertain throw; it now returns retry for ENOTFOUND, EAI_AGAIN and ECONNREFUSED by socket code.\n\nPRRT_kwDOSYpJkM6vA2RG is valid: postToSlackOnce dropped the socket error code, and sendOutbox marked every non-HTTP failure ambiguous. Classification now uses the preserved cause code. A 503 body containing ENOTFOUND stays ambiguous. Timeouts, resets and other response errors stay ambiguous.\n\nPRRT_kwDOSYpJkM6vA2RJ is valid: a retry continued posting later rows in the same drain. drain now stops after a retry. A blanket stop would leave every later destination behind a persistently refused oldest row, so the next drain orders by attempts, then rowid. One refused destination cannot block every other notification on the following drain.\n\nBehavioural revert proof, each function restored after the failure:\n- classifyOutboxSendError pre-request branch reverted: transport regression failed, actual ambiguous, expected retry.\n- postToSlackOnce cause removed: transport regression failed, actual cause code undefined, expected ECONNREFUSED.\n- drain break removed: retry regression failed, actual sends first and second, expected first only.\n- drain order reverted to rowid: retry regression failed, next drain sent first, expected second.\n- example exitCode removed: example regression failed, actual exit 0, expected 2.\n- example fetch classification removed: example regression failed, pending count actual 0, expected 1."
+  "2026-10-22T10:04:14.269Z",codex-agent,"Continuation audit: remote head pulled and main is already contained. Read every comment on all three unresolved threads and the latest CodeRabbit review (no outside-diff findings). Retaining the reviewed draft fixes; independently verifying regressions, behavioral reverts and unchanged full npm/Bun gates. Earlier draft evidence remains append-only."
+  "2026-10-22T10:05:43.454Z",codex-agent,"Independent continuation verification: all 15 outbox tests pass. Six individual behavioral reverts each fail their targeted regression: retry classification, preserved transport cause, stop after retry, fair next-drain ordering, example refusal exit status, and example pre-request classification. Each source was restored in a finally block. Whole-PR self-review found a related gap: a response reset after headers had no response error listener. Added a real partial-response/reset regression and reject that error conservatively as ambiguous so the drain can finish and continue later rows."
+  "2026-10-22T10:08:21.725Z",codex-agent,"Partial-response behavioral revert proof: removing only postToSlackOnce response error handling leaves the actual HTTP reset pending indefinitely; node --test --test-force-exit --test-timeout=15000 --test-name-pattern=\"pre-request transport codes\" test/outbox.test.ts exits 1 with one canceled timeout. Restored code completes the same regression successfully (1 passed). This timeout is the deliberately reverted defect, not a host-load gate failure. Seven individual reverts have now demonstrated the regressions. All mutations restored."
+  "2026-10-22T10:13:30.717Z",codex-agent,"Unchanged npm release gate passed under isolated HOME with git global/system config disabled: 288 tests passed, zero failed/skipped/canceled; index.ts and outbox.ts each 100% lines/branches/functions; 77 documented declarations, audit 0 vulnerabilities, pack 14 files, changelog and both release workflow checks passed. Pinned pm test --run --progress passed all 7 linked commands, including 15/15 outbox tests and native Bun acceptance (1 recovered event, 1 acknowledged send, zero duplicates, no git). Linked result persistence remains disabled by existing policy; the CLI reports tracking_disabled. Full Bun release gate is running. Local pm health found ignored/global pm-github host-version skew plus installer fence drift; verifying clean-checkout health with isolated HOME to exclude local extension state."
+  "2026-10-22T10:14:09.429Z",codex-agent,"Clean-checkout tracker health passed: pm health --strict-exit --require-merge-drivers returned exit 0 with all 10 checks ok after installing the pinned merge mappings under isolated HOME. Remaining telemetry-queue, stale-work and historical provenance notices are advisory; history and integrity passed. No history rewrites, extension changes or telemetry configuration changes were made."
+  "2026-10-22T10:16:47.787Z",codex-agent,"Final review-round gates passed: npm run release:check and bun run release:check each 288 passed, zero failed/skipped/canceled, 100% lines/branches/functions for both production modules at unchanged thresholds. Both commands ran with isolated HOME and disabled git global/system configuration. npm ci, all 7 linked commands, native Bun acceptance, clean-clone strict health (10 checks ok), generated dist, and diff checks passed. No host-load gate retries were needed. Seven independent behavioral revert proofs are recorded above; no deliberately reverted source remains. All three thread findings are fixed, latest review has no outside-diff findings, and whole-PR review added the partial-response fix. No thread replies/resolutions, merge or release. Releasing the claim; item remains in_progress for orchestrator verification."
+files[14]{path,scope}:
   .github/workflows/ci.yml,project
   .hound.yml,project
+  docs/outbox-example.md,project
+  docs/outbox-validation.md,project
   index.ts,project
   manifest.json,project
   outbox.ts,project
   package.json,project
+  README.md,project
   test/bun-outbox.acceptance.ts,project
   test/coverage.test.ts,project
   test/digest-corpus.test.ts,project
   test/outbox.test.ts,project
   test/smoke.test.ts,project
-tests[3]:
+tests[7]:
   - command: node --test test/outbox.test.ts
     scope: project
     provenance:
@@ -54,6 +65,34 @@ tests[3]:
       author: codex-agent
       created_at: "2026-10-21T22:17:03.099Z"
       source_kind: local_mutation
+  - command: "node --test --test-name-pattern=\"pre-request transport codes\" test/outbox.test.ts"
+    scope: project
+    provenance:
+      author: pi-agent
+      created_at: "2026-10-22T09:54:30.585Z"
+      source_kind: local_mutation
+      source_ref: feat/durable-notification-outbox
+  - command: "node --test --test-name-pattern=\"retry outcome stops\" test/outbox.test.ts"
+    scope: project
+    provenance:
+      author: pi-agent
+      created_at: "2026-10-22T09:54:30.585Z"
+      source_kind: local_mutation
+      source_ref: feat/durable-notification-outbox
+  - command: "node --test --test-name-pattern=\"published SDK example\" test/outbox.test.ts"
+    scope: project
+    provenance:
+      author: pi-agent
+      created_at: "2026-10-22T09:54:30.585Z"
+      source_kind: local_mutation
+      source_ref: feat/durable-notification-outbox
+  - command: bun test/bun-outbox.acceptance.ts
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-22T10:06:27.025Z"
+      source_kind: local_mutation
+      source_ref: feat/durable-notification-outbox
 docs[5]{path,scope}:
   docs/outbox-example.md,project
   docs/outbox-validation.md,project

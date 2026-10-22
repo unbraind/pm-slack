@@ -99,7 +99,13 @@ export declare class SlackOutbox {
     has(item: string, event: OutboxEvent, revision: string): boolean;
     /** Inspect a bounded receipt page while preserving exact totals and omission evidence. */
     status(limit?: number, after?: number): OutboxReport;
-    /** Claim pending rows once; typed OutboxError refusals must occur before a remote request starts. */
+    /**
+     * Claim pending rows once. Typed OutboxError refusals occur before a remote
+     * request starts and restore the row without counting an attempt. A retry
+     * outcome stops this drain so a rate limit is not hit again immediately.
+     * The next drain prefers fewer attempts, then older rows, so one refused
+     * destination cannot block every other notification.
+     */
     drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit?: number): Promise<OutboxReport>;
     /** Reconcile uncertain remote outcomes explicitly; active senders cannot be reset. */
     resolve(key: string, decision: "acknowledged" | "retry"): void;

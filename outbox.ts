@@ -195,11 +195,17 @@ export class SlackOutbox {
       next_cursor: page.length > limit ? rows[rows.length - 1]!.sequence : null };
   }
 
-  /** Claim pending rows once; typed OutboxError refusals must occur before a remote request starts. */
+  /**
+   * Claim pending rows once. Typed OutboxError refusals occur before a remote
+   * request starts and restore the row without counting an attempt. A retry
+   * outcome stops this drain so a rate limit is not hit again immediately.
+   * The next drain prefers fewer attempts, then older rows, so one refused
+   * destination cannot block every other notification.
+   */
   async drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit = 20): Promise<OutboxReport> {
     limitValue(limit);
     if (!this.since()) throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
-    const candidates = this.db.prepare("SELECT key FROM delivery WHERE state='pending' ORDER BY rowid LIMIT ?").all(limit);
+    const candidates = this.db.prepare("SELECT key FROM delivery WHERE state='pending' ORDER BY attempts, rowid LIMIT ?").all(limit);
     for (const candidate of candidates) {
       const row = this.db.prepare("UPDATE delivery SET state='sending',owner=?,attempts=attempts+1 WHERE key=? AND state='pending' RETURNING destination,payload").get(process.pid, candidate.key!);
       if (!row) continue;
@@ -215,6 +221,7 @@ export class SlackOutbox {
         state = "ambiguous";
       }
       this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(state, candidate.key!);
+      if (state === "pending") break;
     }
     return this.status(limit);
   }

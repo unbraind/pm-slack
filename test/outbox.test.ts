@@ -327,7 +327,8 @@ test("storage and corrupt history refuse safely; notification failure never chan
   const itemFile = resolve(pmRoot, "tasks", `${created.item.id}.toon`);
   const before = readFileSync(itemFile, "utf8");
   await ext.runHook({ kind: "after_command", context: { command: "create", args: [], pm_root: pmRoot, ok: true, result: created } });
-  assert.equal(box.status().counts.ambiguous, 1);
+  assert.equal(box.status().counts.pending, 1, "connection refused before transmission stays pending");
+  assert.equal(box.status().counts.ambiguous, 0);
   assert.equal(readFileSync(itemFile, "utf8"), before);
   const historyFile = join(pmRoot, "history", `${created.item.id}.jsonl`);
   const original = readFileSync(historyFile, "utf8");
@@ -398,4 +399,182 @@ test("default CLI output is one compact decodable TOON report with all receipt k
   for (const result of [null, {}, { rows: [] }]) {
     assert.equal((await ext.runRendererOverride({ command: "slack outbox", format: "toon", result })).overridden, false);
   }
+});
+
+/** Read the socket error code preserved on a wrapped webhook rejection. */
+function causeCode(error: unknown): string | undefined {
+  if (!(error instanceof Error) || error.cause === null || typeof error.cause !== "object" || !("code" in error.cause)) return undefined;
+  return typeof error.cause.code === "string" ? error.cause.code : undefined;
+}
+
+/** Open a localhost sink and return its webhook URL. */
+async function listen(t: TestContext, onRequest: http.RequestListener): Promise<string> {
+  const server = http.createServer(onRequest);
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  t.after(() => new Promise<void>((done) => server.close(() => done())));
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}/webhook`;
+}
+
+test("pre-request transport codes stay pending and response text cannot force a retry", async (t) => {
+  const { classifyOutboxSendError, SlackHttpError, postToSlackOnce } = __test__;
+  assert.equal(classifyOutboxSendError(new SlackHttpError(429, "limited")), "retry");
+  assert.equal(classifyOutboxSendError(new SlackHttpError(400, "body mentions ENOTFOUND")), "rejected");
+  assert.equal(classifyOutboxSendError(new SlackHttpError(503, "upstream ENOTFOUND")), "ambiguous");
+  assert.equal(classifyOutboxSendError("not-an-error"), "ambiguous");
+  assert.equal(classifyOutboxSendError(new Error("getaddrinfo ENOTFOUND example.invalid")), "ambiguous");
+  assert.equal(classifyOutboxSendError(new Error("wrapped", { cause: null })), "ambiguous");
+  assert.equal(classifyOutboxSendError(new Error("wrapped", { cause: "ENOTFOUND" })), "ambiguous");
+  assert.equal(classifyOutboxSendError(new Error("wrapped", { cause: { errno: 1 } })), "ambiguous");
+  assert.equal(classifyOutboxSendError(new Error("wrapped", { cause: { code: 429 } })), "ambiguous");
+  assert.equal(classifyOutboxSendError(new Error("wrapped", { cause: { code: "ECONNRESET" } })), "ambiguous");
+  for (const code of ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED"]) {
+    assert.equal(classifyOutboxSendError(new Error("wrapped", { cause: { code } })), "retry");
+  }
+
+  let failureRequests = 0;
+  let healthyRequests = 0;
+  const failureUrl = await listen(t, (_req, response) => {
+    failureRequests += 1;
+    response.writeHead(503);
+    response.end("upstream ENOTFOUND");
+  });
+  const healthyUrl = await listen(t, (_req, response) => { healthyRequests += 1; response.end("ok"); });
+  const partialUrl = await listen(t, (_req, response) => {
+    response.writeHead(200, { "content-length": "100" });
+    response.write("partial");
+    setImmediate(() => response.destroy());
+  });
+  await assert.rejects(postToSlackOnce(partialUrl, { text: "probe" }), (error: unknown) => {
+    assert.equal(causeCode(error), "ECONNRESET");
+    assert.equal(classifyOutboxSendError(error), "ambiguous");
+    return true;
+  });
+  const refused = http.createServer();
+  await new Promise<void>((done) => refused.listen(0, "127.0.0.1", done));
+  const refusedUrl = `http://127.0.0.1:${(refused.address() as { port: number }).port}/webhook`;
+  await new Promise<void>((done) => refused.close(() => done()));
+  const missingUrl = "http://pm-slack-outbox.invalid/webhook";
+  await assert.rejects(postToSlackOnce(refusedUrl, { text: "probe" }), (error: unknown) => {
+    assert.equal(causeCode(error), "ECONNREFUSED");
+    return true;
+  });
+  await assert.rejects(postToSlackOnce(missingUrl, { text: "probe" }), (error: unknown) => {
+    assert.equal(causeCode(error), "ENOTFOUND");
+    return true;
+  });
+
+  environment(t, healthyUrl);
+  process.env.PM_SLACK_ROUTES = JSON.stringify([
+    { match: "close", webhook: refusedUrl },
+    { match: "block", webhook: missingUrl },
+    { match: "cancel", webhook: failureUrl },
+    { match: "start", webhook: partialUrl },
+  ]);
+  const { pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  box.enable();
+  const ext = await harness(t);
+  const drain = async (limit = "20") => {
+    const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain", limit }, global: { json: true } });
+    assert.equal(response.exitCode ?? 0, 0, JSON.stringify(response.result));
+    return response.result as OutboxReport;
+  };
+  const refusedKey = box.enqueue({ ...intent("refused"), destination: slackDestination(refusedUrl) });
+  assert.equal((await drain("1")).rows.find((row) => row.key === refusedKey)?.state, "pending");
+  assert.equal(box.status().rows.find((row) => row.key === refusedKey)?.attempts, 1);
+  const missingKey = box.enqueue({ ...intent("missing"), destination: slackDestination(missingUrl) });
+  await drain("1");
+  assert.equal(box.status().rows.find((row) => row.key === missingKey)?.state, "pending");
+  assert.equal(box.status().rows.find((row) => row.key === missingKey)?.attempts, 1);
+  const failureKey = box.enqueue({ ...intent("failure"), destination: slackDestination(failureUrl) });
+  const partialKey = box.enqueue({ ...intent("partial"), destination: slackDestination(partialUrl) });
+  const healthyKey = box.enqueue({ ...intent("healthy"), destination: slackDestination(healthyUrl) });
+  await drain("20");
+  assert.equal(failureRequests, 1, "a sent 5xx is one uncertain attempt, not a pre-request retry");
+  assert.equal(healthyRequests, 1, "an ambiguous response must not stop later destinations in the same drain");
+  assert.equal(box.status().rows.find((row) => row.key === failureKey)?.state, "ambiguous");
+  assert.equal(box.status().rows.find((row) => row.key === partialKey)?.state, "ambiguous");
+  assert.equal(box.status().rows.find((row) => row.key === healthyKey)?.state, "acknowledged");
+});
+
+test("a retry outcome stops the current drain and the next drain is not stuck behind it", async (t) => {
+  const { pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  box.enable();
+  const first = box.enqueue({ ...intent("first"), payload: { text: "first" } });
+  const second = box.enqueue({ ...intent("second"), payload: { text: "second" } });
+  const seen: string[] = [];
+  await box.drain(async (_destination, payload) => { seen.push(payload.text); return "retry"; });
+  assert.deepEqual(seen, ["first"], "a retry must not post later rows in the same drain");
+  assert.equal(box.status().rows.find((row) => row.key === first)?.attempts, 1);
+  assert.equal(box.status().rows.find((row) => row.key === second)?.attempts, 0);
+  const next: string[] = [];
+  await box.drain(async (_destination, payload) => { next.push(payload.text); return "acknowledged"; }, 1);
+  assert.deepEqual(next, ["second"], "the next drain must prefer the intent that has not yet been attempted");
+  assert.equal(box.status().rows.find((row) => row.key === second)?.state, "acknowledged");
+  assert.equal(box.status().rows.find((row) => row.key === first)?.state, "pending");
+  const thrown: string[] = [];
+  box.enqueue({ ...intent("dropped"), payload: { text: "dropped" } });
+  box.enqueue({ ...intent("kept"), payload: { text: "kept" } });
+  await box.drain(async (_destination, payload) => {
+    thrown.push(payload.text);
+    if (payload.text === "dropped") throw new Error("connection dropped after accept");
+    return "acknowledged";
+  }, 2);
+  assert.deepEqual(thrown, ["dropped", "kept"], "uncertain transmission must not stop later rows");
+});
+
+/** Run the published SDK example in a child process so its exit status is observable. */
+function runPublishedExample(directory: string, env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }> {
+  const markdown = readFileSync(new URL("../docs/outbox-example.md", import.meta.url), "utf8");
+  const fenced = markdown.match(/```ts\r?\n([\s\S]*?)```/);
+  assert.ok(fenced?.[1], "docs/outbox-example.md must contain a TypeScript example");
+  const source = fenced[1].replaceAll('from "pm-slack"', `from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)}`);
+  writeFileSync(join(directory, "example.mts"), source);
+  const child = spawn(process.execPath, [join(directory, "example.mts")], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+  child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`example hung: ${stderr}`)); }, 15_000);
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("exit", (status) => { clearTimeout(timer); resolve({ code: status ?? 1, stdout, stderr }); });
+  });
+}
+
+/** Child environment for the published example, without inherited notification routing. */
+function exampleEnv(directory: string, webhook?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: directory, GIT_CEILING_DIRECTORIES: tmpdir() };
+  for (const key of ["PM_SLACK_WEBHOOK", "PM_SLACK_ROUTES", "PM_SLACK_CHANNEL", "PM_SLACK_EVENTS"]) delete env[key];
+  if (webhook) env.PM_SLACK_WEBHOOK = webhook;
+  return env;
+}
+
+test("the published SDK example exits nonzero when it catches an outbox refusal", async (t) => {
+  const { directory } = await fixture(t);
+  const result = await runPublishedExample(directory, exampleEnv(directory));
+  assert.equal(result.code, 2, result.stderr);
+  assert.match(result.stderr, /destination_changed/);
+});
+
+test("the published SDK example keeps a connection refused before transmission pending", async (t) => {
+  const { directory, pmRoot } = await fixture(t);
+  const refused = http.createServer();
+  await new Promise<void>((done) => refused.listen(0, "127.0.0.1", done));
+  const webhook = `http://127.0.0.1:${(refused.address() as { port: number }).port}/webhook`;
+  await new Promise<void>((done) => refused.close(() => done()));
+  const box = new SlackOutbox(pmRoot);
+  box.enable();
+  box.enqueue({ ...intent("example-refused"), destination: slackDestination(webhook) });
+  box.close();
+  const result = await runPublishedExample(directory, exampleEnv(directory, webhook));
+  assert.equal(result.code, 0, result.stderr);
+  const check = new SlackOutbox(pmRoot);
+  t.after(() => check.close());
+  assert.equal(check.status().counts.pending, 1);
+  assert.equal(check.status().counts.ambiguous, 0);
+  assert.equal(check.status().rows[0]?.attempts, 1);
 });
