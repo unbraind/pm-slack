@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import http from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import { decode } from "@toon-format/toon";
 import test, { type TestContext } from "node:test";
 import { init, create, update, close, notes } from "@unbrained/pm-cli/sdk";
@@ -407,6 +408,30 @@ function causeCode(error: unknown): string | undefined {
   return typeof error.cause.code === "string" ? error.cause.code : undefined;
 }
 
+/** Accept both permanent and temporary resolver failures without permitting uncertain sends to retry. */
+function retryableLookupFailure(error: unknown): boolean {
+  assert.ok(["ENOTFOUND", "EAI_AGAIN"].includes(causeCode(error) ?? ""), String(causeCode(error)));
+  assert.equal(__test__.classifyOutboxSendError(error), "retry");
+  return true;
+}
+
+test("DNS lookup assertions accept transient resolver failures", async () => {
+  const previousAgent = http.globalAgent;
+  let lookups = 0;
+  const agent = new http.Agent({ lookup(_hostname, _options, callback) {
+    lookups += 1;
+    callback(Object.assign(new Error("Temporary resolver failure"), { code: "EAI_AGAIN" }), "", 4);
+  } });
+  http.globalAgent = agent;
+  try {
+    await assert.rejects(__test__.postToSlackOnce("http://pm-slack-outbox.invalid/webhook", { text: "DNS fixture" }), retryableLookupFailure);
+    assert.equal(lookups, 1, "the real HTTP client must exercise the temporary DNS failure fixture");
+  } finally {
+    http.globalAgent = previousAgent;
+    agent.destroy();
+  }
+});
+
 /** Open a localhost sink and return its webhook URL. */
 async function listen(t: TestContext, onRequest: http.RequestListener): Promise<string> {
   const server = http.createServer(onRequest);
@@ -458,10 +483,7 @@ test("pre-request transport codes stay pending and response text cannot force a 
     assert.equal(causeCode(error), "ECONNREFUSED");
     return true;
   });
-  await assert.rejects(postToSlackOnce(missingUrl, { text: "probe" }), (error: unknown) => {
-    assert.equal(causeCode(error), "ENOTFOUND");
-    return true;
-  });
+  await assert.rejects(postToSlackOnce(missingUrl, { text: "probe" }), retryableLookupFailure);
 
   environment(t, healthyUrl);
   process.env.PM_SLACK_ROUTES = JSON.stringify([
@@ -577,4 +599,43 @@ test("the published SDK example keeps a connection refused before transmission p
   assert.equal(check.status().counts.pending, 1);
   assert.equal(check.status().counts.ambiguous, 0);
   assert.equal(check.status().rows[0]?.attempts, 1);
+});
+
+
+test("receipt existence uses indexed lookup and shares persisted revision keys", async (t) => {
+  const { pmRoot } = await fixture(t);
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  box.enable();
+  for (let index = 0; index < 64; index += 1) {
+    const key = box.enqueue({ ...intent(`indexed-${index}`), event: index % 2 ? "block" : "close" });
+    if (index === 0) assert.equal(key, "433b6669d8557bf868294a1070f78a68bb158383695aa580e09ce15a24aa355d");
+  }
+  const before = box.status(100);
+  const prepare = DatabaseSync.prototype.prepare;
+  const queries: string[] = [];
+  // Observe SQL while delegating every operation to the real SQLite database.
+  DatabaseSync.prototype.prepare = function (sql: string) {
+    queries.push(sql);
+    return prepare.call(this, sql);
+  };
+  try {
+    assert.equal(box.has("outbox-task", "close", "indexed-0"), true);
+    assert.equal(box.has("outbox-task", "block", "indexed-63"), true);
+    assert.equal(box.has("outbox-task", "close", "missing"), false);
+    assert.equal(box.has("missing", "close", "indexed-0"), false);
+  } finally {
+    DatabaseSync.prototype.prepare = prepare;
+  }
+  assert.equal(queries.length, 4);
+  const inspect = new DatabaseSync(join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite"), { readOnly: true });
+  t.after(() => inspect.close());
+  for (const query of queries) {
+    const parameters = Array.from({ length: (query.match(/\?/g) ?? []).length }, () => null);
+    const plan = inspect.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...parameters).map((row) => String(row.detail)).join("\n");
+    assert.match(plan, /\bSEARCH\b/, "receipt existence must use indexed search rather than inspect every retained receipt");
+    assert.match(plan, /\bINDEX\b/);
+    assert.doesNotMatch(plan, /\bSCAN\b/);
+  }
+  assert.deepEqual(box.status(100), before, "existence lookup must not alter durable receipts");
 });

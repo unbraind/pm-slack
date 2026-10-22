@@ -6,10 +6,10 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-10-21T20:00:45.908Z"
-updated_at: "2026-10-22T10:16:55.097Z"
+updated_at: "2026-10-22T19:26:41.816Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
-comments[20]{created_at,author,text}:
+comments[23]{created_at,author,text}:
   "2026-10-21T20:01:09.181Z",codex-agent,"Overlap recheck: CLI lifecycle hooks expose successful command results but no Slack-specific durable delivery acknowledgment. pm-slack currently retries immediate HTTP attempts only. pm-observer src/delivery.ts and src/store.ts own idempotent PM evidence notes, and pm-slack-standup owns digests. This feature owns Slack delivery intents and receipts only. Plan: opt-in durable storage, atomic claims and idempotency, persisted uncertain outcomes with explicit reconciliation, bounded SDK and CLI inspection/drain, real no-git tracker regressions and public tracker-copy validation. Reconciliation PR items remain untouched."
   "2026-10-21T20:09:32.697Z",codex-agent,"Implemented SQLite FULL-synchronous durable delivery with atomic cross-process claims and frozen history-revision identities, explicit enable boundary, verified SDK history recovery for commits missed by hooks, bounded structured inspection, safe destination fingerprints, and explicit reconciliation of uncertain sends. Targeted lifecycle/corpus/transport tests: 215 passed, 0 failed; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Typecheck and docstring gate passed. Full unchanged release gates will run under npm and Bun in CI because local CPU is saturated."
   "2026-10-21T20:16:31.480Z",codex-agent,"Real-data validation used a read-only non-git archive of the public pm-slack tracker at f4dce1dcf2b291a99d6c9e3f99fb529b104c707f: 85 items, 515 history entries, 177 immutable source files. Scan inspected all 515 entries and queued zero pre-enable events. Real-data snapshot intents produced 85 acknowledged localhost sends, zero duplicate sends after reopening and re-draining, with all source bytes unchanged. Bounded inspection returned 10 rows and omitted 75. Native Bun acceptance also recovered one lifecycle event with one acknowledged send and zero duplicates without git. Receipt pagination now makes every retained key reachable."
@@ -30,6 +30,9 @@ comments[20]{created_at,author,text}:
   "2026-10-22T10:13:30.717Z",codex-agent,"Unchanged npm release gate passed under isolated HOME with git global/system config disabled: 288 tests passed, zero failed/skipped/canceled; index.ts and outbox.ts each 100% lines/branches/functions; 77 documented declarations, audit 0 vulnerabilities, pack 14 files, changelog and both release workflow checks passed. Pinned pm test --run --progress passed all 7 linked commands, including 15/15 outbox tests and native Bun acceptance (1 recovered event, 1 acknowledged send, zero duplicates, no git). Linked result persistence remains disabled by existing policy; the CLI reports tracking_disabled. Full Bun release gate is running. Local pm health found ignored/global pm-github host-version skew plus installer fence drift; verifying clean-checkout health with isolated HOME to exclude local extension state."
   "2026-10-22T10:14:09.429Z",codex-agent,"Clean-checkout tracker health passed: pm health --strict-exit --require-merge-drivers returned exit 0 with all 10 checks ok after installing the pinned merge mappings under isolated HOME. Remaining telemetry-queue, stale-work and historical provenance notices are advisory; history and integrity passed. No history rewrites, extension changes or telemetry configuration changes were made."
   "2026-10-22T10:16:47.787Z",codex-agent,"Final review-round gates passed: npm run release:check and bun run release:check each 288 passed, zero failed/skipped/canceled, 100% lines/branches/functions for both production modules at unchanged thresholds. Both commands ran with isolated HOME and disabled git global/system configuration. npm ci, all 7 linked commands, native Bun acceptance, clean-clone strict health (10 checks ok), generated dist, and diff checks passed. No host-load gate retries were needed. Seven independent behavioral revert proofs are recorded above; no deliberately reverted source remains. All three thread findings are fixed, latest review has no outside-diff findings, and whole-PR review added the partial-response fix. No thread replies/resolutions, merge or release. Releasing the claim; item remains in_progress for orchestrator verification."
+  "2026-10-22T19:18:37.756Z",codex-agent,"Additional orchestrator round: worktree is clean at bdba3b4, no unpushed commits, remote pulled and main already contained. Previous fixes and evidence remain intact. Read every comment on both new unresolved threads; latest CodeRabbit body has no outside-diff findings. PRRT_kwDOSYpJkM6vJoJ9 is valid: receipt existence uses an unindexed tuple predicate per recovered transition. PRRT_kwDOSYpJkM6vJoKG is valid: DNS may fail with EAI_AGAIN as well as ENOTFOUND. Plan: shared immutable key derivation and indexed existence lookup, actual SQLite query-plan regression, and a deterministic temporary-DNS-failure fixture that exercises the relaxed assertion and retry classification."
+  "2026-10-22T19:21:16.693Z",codex-agent,"Both new fixes verified. receiptKey preserves the existing SHA-256 tuple encoding and is shared by enqueue and has; existence now uses the delivery primary key. Real non-git tracker regression inserts 64 receipts, locks the existing key format, checks present/absent revisions and read-only behavior, and runs EXPLAIN QUERY PLAN on the actual SQL observed during has (all database operations remain real). Before the fix and when reverting only has: actual SCAN delivery, expected indexed SEARCH, regression exits 1. Restored code passes. DNS assertion now accepts ENOTFOUND or EAI_AGAIN and verifies retry classification. A custom lookup on a real HTTP Agent deterministically returns EAI_AGAIN; reinstating only the old ENOTFOUND assertion makes that regression exit 1 with EAI_AGAIN versus ENOTFOUND. Restored code passes both regressions (2/2); combined transport/lookup regressions pass 3/3. Every revert restored in finally. Whole-PR self-review checked every receipt query and DNS assertion: no other per-transition unindexed lookup or strict unresolvable-host assertion remains; exact status counts intentionally aggregate retained rows, while receipt reconciliation/enqueue use keys and pagination uses rowid. No dependency pins or thresholds changed; installed pinned dependencies verified."
+  "2026-10-22T19:26:38.054Z",codex-agent,"Additional-round final gates passed: npm run release:check and bun run release:check each 290 passed, zero failed/skipped/canceled; index.ts and outbox.ts remain 100% lines/branches/functions at unchanged thresholds. Both run under isolated HOME with git global/system config disabled. All 8 pm-linked commands passed, including 17/17 outbox tests, both new regressions 2/2, typecheck and native Bun acceptance (1 recovered, 1 acknowledged send, 0 duplicates, no git). Clean-clone pm health --strict-exit --require-merge-drivers passes all 10 checks, with existing stale-work/provenance advisories only. Build, 77-declaration docstring gate, audit (0 vulnerabilities), package (14 files), changelog and release workflow checks passed. No gate retries were needed. Both behavioral reverts fail independently as documented above and every source was restored; generated dist rebuilt. Latest CodeRabbit body has no outside-diff findings; all current unresolved findings are addressed. Existing policy disables persisted linked-run receipts, so results are recorded here. Previous round work is preserved. No thread replies/resolutions, merge or release. Releasing the claim for orchestrator verification; item remains in_progress."
 files[14]{path,scope}:
   .github/workflows/ci.yml,project
   .hound.yml,project
@@ -45,7 +48,7 @@ files[14]{path,scope}:
   test/digest-corpus.test.ts,project
   test/outbox.test.ts,project
   test/smoke.test.ts,project
-tests[7]:
+tests[8]:
   - command: node --test test/outbox.test.ts
     scope: project
     provenance:
@@ -91,6 +94,13 @@ tests[7]:
     provenance:
       author: codex-agent
       created_at: "2026-10-22T10:06:27.025Z"
+      source_kind: local_mutation
+      source_ref: feat/durable-notification-outbox
+  - command: "node --test --test-name-pattern=\"receipt existence uses indexed|DNS lookup assertions\" test/outbox.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-22T19:21:17.817Z"
       source_kind: local_mutation
       source_ref: feat/durable-notification-outbox
 docs[5]{path,scope}:

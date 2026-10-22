@@ -105,3 +105,27 @@ one acknowledged send, zero duplicates and no git. Clean-clone strict tracker
 health with installed merge drivers passes all ten checks under isolated HOME;
 remaining telemetry queue, stale-work and historical provenance notices are
 advisory. Local/global extension version skew was isolated from that result.
+
+## Indexed recovery and resolver portability
+
+Receipt existence now derives the same stable primary key as enqueue and searches
+that key. A real non-git tracker regression retains 64 receipts, checks the
+published key format and present/absent revisions, and measures the query plan of
+the actual existence SQL against SQLite. Reverting only `has` reports
+`SCAN delivery` and fails the required indexed-search assertion; restored code
+passes. Query observation delegates all operations to the real database.
+
+The unresolvable-host assertion accepts either `ENOTFOUND` or `EAI_AGAIN` and
+checks retry classification. A real HTTP Agent with a controlled lookup produces
+`EAI_AGAIN` deterministically. Restoring only the old strict assertion fails with
+`EAI_AGAIN` versus `ENOTFOUND`; restored code passes. Both temporary mutations are
+restored before builds and gates. Previous review fixes remain intact.
+
+Latest-round validation: `npm run release:check` and `bun run release:check`
+each pass 290 tests with zero failures, skips or cancellations. Both production
+modules retain 100% lines, branches and functions at unchanged thresholds. All
+eight tracker-linked commands pass, including 17 outbox tests and native Bun
+acceptance (one recovered event, one acknowledged send, zero duplicates, no git).
+Clean-clone strict tracker health under isolated HOME passes all ten checks with
+only the existing stale-work and historical provenance advisories. No gate retry
+was needed. Exact installed dependency pins are unchanged and verified.

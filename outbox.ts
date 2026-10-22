@@ -98,6 +98,11 @@ export interface OutboxReport {
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 
+/** Derive the stable receipt primary key from one committed lifecycle transition. */
+function receiptKey(item: string, event: OutboxEvent, revision: string): string {
+  return createHash("sha256").update(JSON.stringify([item, event, revision])).digest("hex");
+}
+
 /** Hash a destination without persisting a webhook credential. */
 export function slackDestination(webhook: string, channel?: string): string {
   return createHash("sha256").update(JSON.stringify([webhook, channel ?? null])).digest("hex");
@@ -167,7 +172,7 @@ export class SlackOutbox {
     if (![intent.item, intent.event, intent.revision, intent.destination, intent.payload.text].every((value) => typeof value === "string" && value.length > 0) || !lifecycleEvents.includes(intent.event)) {
       throw new OutboxError("invalid_input", "Provide an item, event, immutable revision, destination and message text.");
     }
-    const key = createHash("sha256").update(JSON.stringify([intent.item, intent.event, intent.revision])).digest("hex");
+    const key = receiptKey(intent.item, intent.event, intent.revision);
     const payload = JSON.stringify(intent.payload);
     this.db.prepare("INSERT OR IGNORE INTO delivery(key,item,event,revision,destination,payload) VALUES (?,?,?,?,?,?)")
       .run(key, intent.item, intent.event, intent.revision, intent.destination, payload);
@@ -180,7 +185,7 @@ export class SlackOutbox {
 
   /** Check whether a verified history transition already has a durable intent. */
   has(item: string, event: OutboxEvent, revision: string): boolean {
-    return !!this.db.prepare("SELECT 1 FROM delivery WHERE item=? AND event=? AND revision=?").get(item, event, revision);
+    return !!this.db.prepare("SELECT 1 FROM delivery WHERE key=?").get(receiptKey(item, event, revision));
   }
 
   /** Inspect a bounded receipt page while preserving exact totals and omission evidence. */
