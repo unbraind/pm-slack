@@ -4,8 +4,8 @@
  * Two surfaces:
  *   1. afterCommand hook — posts a Slack notification when an item is created,
  *      closed, or blocked (only if PM_SLACK_WEBHOOK is set; otherwise a silent
- *      no-op). The hook NEVER throws and NEVER blocks the command: all work is
- *      wrapped in try/catch and Slack posting is fire-and-forget.
+ *      no-op). The hook catches delivery errors after the item is committed.
+ *      An explicitly enabled outbox retains delivery receipts across restarts.
  *   2. `pm slack notify` command — manual posting of a rich Slack Block Kit
  *      message (sections, fields, context) with a plain-text fallback.
  *
@@ -30,7 +30,10 @@
  */
 import https from "node:https";
 import http from "node:http";
-import { listAllComplete } from "@unbrained/pm-cli/sdk";
+import { listAllComplete, readHistoryEntries, replayHistoryToTarget, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { existsSync, readdirSync } from "node:fs";
+import { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
+export { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
 import path from "node:path";
 // ---------------------------------------------------------------------------
 // EXIT_CODE / CommandError (re-implemented locally)
@@ -460,7 +463,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"];
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test"];
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -1146,8 +1149,10 @@ function isRetryableSlackError(err) {
  * sends a JSON body with a 10-second timeout, and resolves on a 2xx response.
  * A non-2xx status rejects with a {@link SlackHttpError} carrying the status, a
  * snippet of the body, and the parsed `Retry-After`; a transport failure or
- * timeout rejects with a plain `Error`. The single attempt is the building
- * block {@link postToSlack} retries around.
+ * timeout rejects with a plain `Error` whose `cause` is the socket or timeout
+ * error. Callers classify that cause by its code, never by text in the message,
+ * because a response body can mention a DNS code after the request was sent.
+ * The single attempt is the building block {@link postToSlack} retries around.
  *
  * @param webhookUrl - The Slack incoming-webhook URL to post to.
  * @param payload - The Slack message payload to JSON-encode and send.
@@ -1173,6 +1178,9 @@ function postToSlackOnce(webhookUrl, payload) {
             res.on("data", (chunk) => {
                 data += chunk.toString();
             });
+            res.on("error", (err) => {
+                reject(new Error(`Slack webhook response failed: ${err.message}`, { cause: err }));
+            });
             res.on("end", () => {
                 // A ClientRequest response always carries statusCode; the `undefined`
                 // in IncomingMessage's type exists only for server-side requests.
@@ -1186,7 +1194,7 @@ function postToSlackOnce(webhookUrl, payload) {
             });
         });
         req.on("error", (err) => {
-            reject(new Error(`Slack webhook request failed: ${err.message}`));
+            reject(new Error(`Slack webhook request failed: ${err.message}`, { cause: err }));
         });
         req.setTimeout(10_000, () => {
             req.destroy(new Error("Slack webhook request timed out after 10s"));
@@ -1550,15 +1558,180 @@ function extractItem(ctx) {
  * checked against {@link ExtensionModule} exactly as the imported helper would.
  */
 const defineExtension = (module) => module;
+/** Resolve a durable destination from current routing without storing webhook credentials. */
+function outboxTargets() {
+    const config = loadConfig();
+    if (!config)
+        throw new OutboxError("destination_changed", "Configure PM_SLACK_WEBHOOK or PM_SLACK_ROUTES before enabling or draining.");
+    const targets = [
+        { webhookUrl: config.webhookUrl, channel: config.channel },
+        ...config.routes.map((route) => ({ webhookUrl: route.webhook ?? config.webhookUrl, channel: route.channel ?? config.channel })),
+    ].filter((target) => target.webhookUrl.length > 0);
+    if (targets.some((target) => !isHttpUrl(target.webhookUrl)))
+        throw new OutboxError("invalid_input", "Configure HTTP or HTTPS notification webhook URLs.");
+    return targets;
+}
+/** Render the fixed receipt schema as compact TOON without returning private payloads or destinations. */
+function outboxToon(report, recovered) {
+    return [
+        `enabled_since: ${JSON.stringify(report.enabled_since)}`,
+        "counts:",
+        ...Object.entries(report.counts).map(([state, count]) => `  ${state}: ${count}`),
+        `rows[${report.rows.length}]{sequence,key,item,event,state,attempts}:`,
+        ...report.rows.map((row) => `  ${[row.sequence, row.key, row.item, row.event, row.state, row.attempts].map((value) => JSON.stringify(value)).join(",")}`),
+        `omitted: ${report.omitted}`,
+        `next_cursor: ${report.next_cursor}`,
+        "recovered:", `  inspected: ${recovered.inspected}`, `  queued: ${recovered.queued}`, `  failed: ${recovered.failed}`,
+        ...(recovered.failed ? ['ok: false', 'exit_code: 2', 'code: history_unavailable', 'remediation: "Repair retained history; healthy queued receipts were drained."'] : []),
+    ].join("\n");
+}
+/** Preserve typed operational refusals across the host's structured nonzero command-result boundary. */
+function outboxFailure(error) {
+    const refusal = error instanceof OutboxError ? error : new OutboxError("storage_unavailable", "Restore writable local outbox storage and drain again; committed items are unchanged.");
+    return { ok: false, exit_code: refusal.exitCode, code: refusal.code, remediation: refusal.remedy };
+}
+/**
+ * Classify one failed outbox attempt without reading the error message.
+ *
+ * HTTP 429 is a confirmed refusal. Other 4xx statuses are permanent. A 5xx,
+ * timeout, reset or dropped response stays uncertain because Slack may already
+ * have accepted the webhook. DNS and connection-refused failures are retried
+ * only when the socket error's own code says the request never left; a sent
+ * response body that mentions those codes cannot force a retry.
+ *
+ * @param error - Rejection from one webhook attempt.
+ * @returns The durable outcome to store for that attempt.
+ */
+function classifyOutboxSendError(error) {
+    if (error instanceof SlackHttpError) {
+        if (error.status === 429)
+            return "retry";
+        return error.status < 500 ? "rejected" : "ambiguous";
+    }
+    const cause = error instanceof Error ? error.cause : undefined;
+    if (cause === null || typeof cause !== "object" || !("code" in cause))
+        return "ambiguous";
+    const code = cause.code;
+    if (typeof code !== "string" || (code !== "ENOTFOUND" && code !== "EAI_AGAIN" && code !== "ECONNREFUSED"))
+        return "ambiguous";
+    return "retry";
+}
+/** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
+async function sendOutbox(destination, payload) {
+    const target = outboxTargets().find((candidate) => slackDestination(candidate.webhookUrl, payload.channel ?? candidate.channel) === destination);
+    if (!target)
+        throw new OutboxError("destination_changed", "Restore the original routing destination before draining; no message was posted.");
+    try {
+        await postToSlackOnce(target.webhookUrl, payload);
+        return "acknowledged";
+    }
+    catch (error) {
+        return classifyOutboxSendError(error);
+    }
+}
+/** Preserve typed refusals and give receipt database failures a storage-specific recovery action. */
+function outboxStorage(operation) {
+    try {
+        return operation();
+    }
+    catch (error) {
+        if (error instanceof OutboxError)
+            throw error;
+        throw new OutboxError("storage_unavailable", "Restore readable and writable local runtime storage, then drain again.");
+    }
+}
+/**
+ * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
+ * History and items are read only. Invalid streams are counted and isolated before intent publication.
+ * Existing receipts win over later environment changes; frozen intents are never reformatted.
+ */
+export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
+    const since = outboxStorage(() => outbox.since());
+    if (!since)
+        throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
+    const config = loadConfig();
+    if (!config)
+        throw new OutboxError("destination_changed", "Restore notification configuration before recovering lifecycle history.");
+    let inspected = 0;
+    let queued = 0;
+    let failed = 0;
+    try {
+        outboxStorage(() => outbox.recoveryPolicies());
+        const files = readdirSync(path.join(pmRoot, "history")).filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).sort();
+        for (const file of files) {
+            const id = file.slice(0, -6);
+            if (itemIds && !itemIds.includes(id))
+                continue;
+            try {
+                const entries = await readHistoryEntries(path.join(pmRoot, "history", file), id);
+                if (!verifyHistoryEntries(entries).ok)
+                    throw new OutboxError("history_unavailable", "Restore valid retained lifecycle history, then drain again.");
+                const intents = [];
+                let previous;
+                for (const [index, entry] of entries.entries()) {
+                    inspected += 1;
+                    const statusPatch = entry.patch.find((patch) => patch.path === "/metadata/status" || patch.path === "/front_matter/status");
+                    const status = statusPatch && "value" in statusPatch ? String(statusPatch.value) : undefined;
+                    const prior = previous;
+                    if (status)
+                        previous = status;
+                    if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior))
+                        continue;
+                    const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
+                    const policy = outboxStorage(() => outbox.recoveryPolicyAt(entry.ts));
+                    if (!event || !policy || !policy.events.includes(event) || outboxStorage(() => outbox.has(id, event, entry.after_hash)))
+                        continue;
+                    const { metadata } = replayHistoryToTarget(entries, index);
+                    if (metadata.id !== id || typeof metadata.title !== "string")
+                        throw new OutboxError("history_unavailable", "Restore complete item history before recovering notifications.");
+                    const item = metadata;
+                    if (!meetsMinPriority(item, policy.minPriority))
+                        continue;
+                    const target = selectRoute(event, item, config.routes, config.webhookUrl, config.channel);
+                    if (!target)
+                        throw new OutboxError("destination_changed", "Restore a webhook for the retained lifecycle event.");
+                    if (!isHttpUrl(target.webhookUrl))
+                        throw new OutboxError("invalid_input", "Restore an HTTP or HTTPS webhook before recovering notifications.");
+                    const payload = buildItemPayload(item, event, config.format, {
+                        channel: target.channel,
+                        mention: config.mentionAssignee ? resolveAssigneeMention(item, config.assigneeMap) : undefined,
+                        link: resolveItemUrl(item),
+                    });
+                    intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload });
+                }
+                for (const intent of intents) {
+                    outboxStorage(() => outbox.enqueue(intent));
+                    queued += 1;
+                }
+            }
+            catch (error) {
+                if (error instanceof OutboxError && error.code !== "history_unavailable")
+                    throw error;
+                failed += 1;
+            }
+        }
+    }
+    catch (error) {
+        if (error instanceof OutboxError)
+            throw error;
+        throw new OutboxError("history_unavailable", "Restore readable, verified lifecycle history; existing queued receipts can still drain.");
+    }
+    return { inspected, queued, failed };
+}
 export default defineExtension({
     name: "pm-slack",
     version: "2026.10.20",
     activate(api) {
+        api.registerRenderer("toon", (ctx) => {
+            const report = ctx.result;
+            if (!report || !Array.isArray(report.rows) || !report.recovered)
+                return null;
+            return outboxToon(report, report.recovered);
+        }, { commands: ["slack outbox"] });
         // -----------------------------------------------------------------------
         // afterCommand hook — fires after every pm-cli command completes.
         // Posts a rich Block Kit notification for create/close/block events.
-        // NEVER throws and NEVER blocks: every path returns cleanly and the Slack
-        // POST is fire-and-forget (failures are logged, never propagated).
+        // Delivery runs after commit; failures are logged and never propagated.
         // -----------------------------------------------------------------------
         if (typeof api.hooks?.afterCommand === "function") {
             api.hooks.afterCommand(async (ctx) => {
@@ -1572,6 +1745,28 @@ export default defineExtension({
                     // context during early bootstrap; do not simplify it away.
                     if (ctx && ctx.ok === false)
                         return;
+                    if (ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
+                        const outbox = new SlackOutbox(ctx.pm_root);
+                        try {
+                            if (outbox.since()) {
+                                const item = extractItem(ctx);
+                                if (item && detectEvent(ctx)) {
+                                    try {
+                                        await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
+                                    }
+                                    catch (error) {
+                                        if (outboxFailure(error).code !== "history_unavailable")
+                                            throw error;
+                                    }
+                                    await outbox.drain(sendOutbox, 1);
+                                }
+                                return;
+                            }
+                        }
+                        finally {
+                            outbox.close();
+                        }
+                    }
                     const config = loadConfig();
                     if (!config)
                         return; // no webhook → silent no-op
@@ -1667,6 +1862,69 @@ export default defineExtension({
         // command — `pm slack notify` : manual rich Block Kit post.
         // -----------------------------------------------------------------------
         if (typeof api.registerCommand === "function") {
+            api.registerCommand({
+                name: "slack outbox",
+                description: "Enable, inspect, drain or reconcile durable Slack lifecycle notifications",
+                intent: "Recover opted-in lifecycle delivery after a restart with explicit uncertainty receipts",
+                examples: ["pm slack outbox --action enable", "pm slack outbox --action drain --limit 20 --json", "pm slack outbox --action status"],
+                flags: [
+                    { long: "--action", value_name: "action", description: "status (default), enable, configure, drain, or resolve" },
+                    { long: "--limit", value_name: "count", description: "Receipt and delivery bound, 1..100 (default 20)" },
+                    { long: "--after", value_name: "cursor", description: "Resume status after next_cursor from the previous page" },
+                    { long: "--key", value_name: "key", description: "Receipt idempotency key to reconcile" },
+                    { long: "--decision", value_name: "decision", description: "acknowledged, retry, or skip; retry can duplicate an uncertain send" },
+                    { long: "--force-reconcile", description: "Override PID reuse only after verifying no sender is active; duplicates are possible" },
+                ],
+                async run(ctx) {
+                    try {
+                        const options = ctx.options;
+                        const action = readStrOption(options, "action") ?? "status";
+                        const limit = Number(readStrOption(options, "limit") ?? "20");
+                        const after = Number(readStrOption(options, "after") ?? "0");
+                        if (!["status", "enable", "configure", "drain", "resolve"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0) {
+                            throw new OutboxError("invalid_input", "Choose status, enable, configure, drain or resolve and a limit from 1 to 100.");
+                        }
+                        const outbox = new SlackOutbox(ctx.pm_root);
+                        try {
+                            if (action === "enable" || action === "configure") {
+                                outboxTargets();
+                                const config = loadConfig();
+                                const filter = { events: [...config.events], minPriority: config.minPriority };
+                                if (action === "enable")
+                                    outbox.enable(filter);
+                                else
+                                    outbox.configureRecovery(filter);
+                            }
+                            if (action === "resolve") {
+                                const key = readStrOption(options, "key");
+                                const decision = readStrOption(options, "decision");
+                                if (!key || (decision !== "acknowledged" && decision !== "retry" && decision !== "skip"))
+                                    throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry|skip after checking Slack delivery.");
+                                outbox.resolve(key, decision, { force: readBoolOption(options, "force-reconcile") });
+                            }
+                            let recovered = { inspected: 0, queued: 0, failed: 0 };
+                            if (action === "drain") {
+                                try {
+                                    recovered = await captureSlackOutbox(ctx.pm_root, outbox);
+                                }
+                                catch (error) {
+                                    if (outboxFailure(error).code !== "history_unavailable")
+                                        throw error;
+                                    recovered.failed = 1;
+                                }
+                            }
+                            const report = action === "drain" ? await outbox.drain(sendOutbox, limit) : outbox.status(limit, after);
+                            return { ...report, recovered, ...(recovered.failed ? outboxFailure(new OutboxError("history_unavailable", "Repair retained history; healthy queued receipts were drained.")) : {}) };
+                        }
+                        finally {
+                            outbox.close();
+                        }
+                    }
+                    catch (error) {
+                        return outboxFailure(error);
+                    }
+                },
+            });
             api.registerCommand({
                 name: "slack notify",
                 description: "Post a rich Slack Block Kit notification for a pm item or a free-form message",
@@ -1986,6 +2244,8 @@ export default defineExtension({
  * supported extension API.
  */
 export const __test__ = {
+    outboxFailure,
+    classifyOutboxSendError,
     buildItemBlockKit,
     buildItemPayload,
     buildTextMessage,

@@ -99,7 +99,7 @@ test("digest includes configured custom types and decodes escaped titles through
   const fixture = createCorpusFixture(t, "pm-slack-corpus-");
   const pmRoot = join(fixture.directory, ".agents", "pm");
   const client = { pmRoot, cwd: fixture.directory, noExtensions: true };
-  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight"] });
+  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight", "renderers"] });
   fixture.trackHarness(harness);
   await init("slack", { defaults: true, agentGuidance: "skip" }, client);
   await schemaAddType("Maintenance", { folder: "maintenance" }, client);
@@ -116,7 +116,7 @@ test("digest includes every terminal and active item in a multi-item corpus", as
   const fixture = createCorpusFixture(t, "pm-slack-complete-");
   const pmRoot = join(fixture.directory, ".agents", "pm");
   const client = { pmRoot, cwd: fixture.directory, noExtensions: true };
-  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight"] });
+  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight", "renderers"] });
   fixture.trackHarness(harness);
   await init("slack", { defaults: true, agentGuidance: "skip" }, client);
   for (let index = 0; index < 12; index += 1) {
@@ -137,7 +137,7 @@ test("malformed records refuse a real post before contacting the localhost webho
   const server = http.createServer((_request, response) => { requests += 1; response.end("ok"); });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   fixture.trackServer(server);
-  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight"] });
+  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight", "renderers"] });
   fixture.trackHarness(harness);
   await init("slack", { defaults: true, agentGuidance: "skip" }, { pmRoot, cwd: fixture.directory, noExtensions: true });
   writeFileSync(join(pmRoot, "tasks", "broken.toon"), "not a valid item document");
@@ -151,7 +151,7 @@ test("malformed records refuse a real post before contacting the localhost webho
 test("digest refuses malformed tracker records instead of previewing an incomplete corpus", async (t) => {
   const fixture = createCorpusFixture(t, "pm-slack-corrupt-");
   const pmRoot = join(fixture.directory, ".agents", "pm");
-  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight"] });
+  const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight", "renderers"] });
   fixture.trackHarness(harness);
   await init("slack", { defaults: true, agentGuidance: "skip" }, { pmRoot, cwd: fixture.directory, noExtensions: true });
   // Deliberate corruption of an isolated fixture tests the unsafe read boundary.

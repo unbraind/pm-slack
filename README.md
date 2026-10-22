@@ -6,6 +6,125 @@ Fires after `create`, `close`, `block`, `cancel`, `open`, `start`, `unblock`, an
 
 Slack posts retry transient delivery failures (`429`, `5xx`, timeout, socket/DNS hiccups) with exponential backoff and honor Slack's `Retry-After` header, so temporary webhook throttling does not immediately drop project context.
 
+## Durable lifecycle notifications
+
+Enable the local outbox explicitly after configuring the webhook (PM CLI/SDK
+2026.10.15 or newer is required for verified history recovery):
+
+```bash
+pm slack outbox --action enable
+pm create Task "Check the release" --priority 1
+pm slack outbox --action status --limit 20 --json
+pm slack outbox --action drain --limit 20 --json
+```
+
+`enable` records a durable start time and snapshots `PM_SLACK_EVENTS` and
+`PM_SLACK_MIN_PRIORITY`. It is idempotent and does not backfill older events.
+Changing those environment variables does not change existing recovery eligibility.
+Run `pm slack outbox --action configure` before future lifecycle changes to record
+an explicit new filter epoch; older history keeps its original policy. Existing
+outboxes without saved filters retain their queued receipts; enable or configure
+starts their recovery policy with future history rather than guessing old eligibility.
+
+After successful lifecycle mutations, the hook recovers the affected item's
+matching transitions and attempts at most one delivery. Reads never drain.
+`drain` recovers committed events from verified SDK history, including changes
+whose process exited before its hook ran, and drains queued receipts. Run it after
+a restart or periodically from your scheduler. A failed item history is isolated:
+healthy histories and already verified queued receipts still drain, while
+`recovered.failed` reports the failure count and the CLI exits 2 with
+`history_unavailable`. Repair and retry without duplicating acknowledged receipts.
+Keep history from the enable time; removing or compacting it can prevent recovery
+of unqueued transitions. History, tracker items and committed lifecycle commands
+are never rolled back by a delivery failure. Queued messages retain their original
+payload and destination fingerprint; recovery uses recorded eligibility epochs
+and current routing for new intents.
+
+SQLite stores intents, unique history-revision keys, attempt counts and
+acknowledgments in `.agents/pm/runtime/slack-outbox/delivery.sqlite` using full
+synchronous commits and atomic claims across local processes. Keep this ignored
+runtime directory on durable local storage and include it in your private backups.
+Do not use the same database from different hosts or over a network filesystem.
+The directory is private to its owner; webhook URLs are hashed, never persisted.
+Message bodies remain private runtime data. There is no automatic receipt deletion:
+retaining acknowledgments prevents old events from being delivered again.
+
+Each intent moves from `pending` to `sending` before a request starts. HTTP success
+becomes `acknowledged`; explicit 429 refusals remain `pending` for a later drain;
+other 4xx responses become `rejected`. A timeout, reset, dropped response or 5xx
+becomes `ambiguous`, including a response body that mentions a DNS failure.
+Connection refused and DNS errors that occur before the request is transmitted
+stay `pending` for a later drain; classification uses the socket error code, not
+the error text. After an ambiguous result, later rows for that destination stay
+pending for the remainder of this drain; other destinations can proceed. A retry
+stops the current drain. The next drain tries fewer-attempt
+intents first, so one refused destination cannot block every other notification.
+A crash leaves `sending` visible. Uncertain states are never automatically resent
+because incoming webhooks provide no transactional exactly-once guarantee.
+Existing immediate retry/backoff for non-outbox commands is unchanged.
+
+Inspect Slack before reconciling an uncertain receipt:
+
+```bash
+pm slack outbox --action resolve --key RECEIPT_KEY --decision acknowledged
+# Only after verifying absence; explicitly retrying uncertainty can duplicate a post:
+pm slack outbox --action resolve --key RECEIPT_KEY --decision retry
+pm slack outbox --action drain
+```
+
+A pre-request `destination_changed` parks the row as `refused` with zero added
+attempts and continues past it. Parked rows are never automatically retried. They
+do not block later healthy destinations. Restore the original routing and resolve
+with `--decision retry`, or explicitly discard the unsent receipt without claiming
+delivery:
+
+```bash
+pm slack outbox --action resolve --key RECEIPT_KEY --decision skip
+```
+
+`skip` records `skipped`, a terminal state distinct from `acknowledged`. Live or
+reused sender PIDs refuse reconciliation by default. After independently verifying
+that no sender is active, use `--force-reconcile` to override PID reuse, including
+PID 1 in containers. Forcing an active sender can duplicate delivery; it is never
+automatic. SDK callers use `resolve(key, decision, { force: true })` for the same
+explicit override.
+
+Global configuration/storage refusals still return typed errors; a global
+pre-request failure restores the row to pending without counting an attempt.
+Command refusals exit nonzero. SDK callers receive `OutboxError` with typed `code`,
+`remedy` and `exitCode` fields. Row-level routing refusals are reported by the
+`refused` count instead of aborting the drain.
+
+The command returns compact TOON by default or JSON with `--json`: exact counts
+for every state, at most `--limit` receipts (1–100, default 20), and an explicit
+`omitted` count. Continue inspection with `--after <next_cursor>` until
+`next_cursor` is null; totals cover the whole outbox on every page. Payloads and
+destinations are excluded. A drain inspects history
+without truncation, then attempts at most the requested number of pending rows.
+`recovered.inspected`, `recovered.queued` and `recovered.failed` describe that scan. A sending receipt
+means delivery may have happened; it is not an acknowledgment.
+
+The package root exports `SlackOutbox`, `captureSlackOutbox`, `slackDestination`,
+`OutboxError`, and their intent/receipt/report/outcome types. The low-level
+`drain(send, limit)` callback must make one attempt and report `acknowledged`
+only on explicit success, `retry` only on a confirmed refusal, and `ambiguous`
+whenever remote acceptance is uncertain. A `retry` ends the current drain; call
+it again later. See the [SDK example](docs/outbox-example.md).
+Raise `destination_changed` only before starting a remote request; this parks the
+intent as refused without counting a send attempt. Other typed pre-request errors
+restore pending and rethrow. Enable SDK history recovery with
+`enable({ events: [...], minPriority: 1 })`; `configureRecovery(filter)` records an
+explicit future-only filter change. Low-level `enable()` without a filter still
+supports direct intent enqueue/drain, while recovery requires a saved policy.
+
+## Without git
+
+Lifecycle delivery, outbox enable/status/drain/resolve, manual notifications,
+offline previews and digests work in a plain initialized tracker without git.
+Outbox history recovery uses SDK history reads and never runs a git subprocess.
+This outbox needs local durable runtime storage; it does not provide a remote
+database backend. No Slack command requires a git repository.
+
 ---
 
 ## Installation
@@ -257,7 +376,7 @@ Flags: `--format blockkit|text`, `--on create|close|block`, `--title`,
 
 Produce a single summary of recent activity (created / closed / blocked /
 in-progress) over a time window, as Block Kit or text. Requires pm CLI/SDK
-2026.9.29 or newer. Reads the complete tracker through the public SDK, including
+2026.10.15 or newer. Reads the complete tracker through the public SDK, including
 configured custom item types and terminal items. Unreadable or malformed records
 refuse the digest before posting, rather than silently omitting activity. Nested
 extension hooks are disabled during the observational read. Use `--dry-run` to

@@ -4,12 +4,13 @@
   "description": "Slack notifications for pm item lifecycle events",
   "author": "@unbraind",
   "entry": "./dist/index.js",
-  "pm_min_version": "2026.9.29",
+  "pm_min_version": "2026.10.15",
   "priority": 50,
   "capabilities": [
     "commands",
     "hooks",
     "schema",
-    "preflight"
+    "preflight",
+    "renderers"
   ]
 }

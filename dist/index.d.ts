@@ -4,8 +4,8 @@
  * Two surfaces:
  *   1. afterCommand hook — posts a Slack notification when an item is created,
  *      closed, or blocked (only if PM_SLACK_WEBHOOK is set; otherwise a silent
- *      no-op). The hook NEVER throws and NEVER blocks the command: all work is
- *      wrapped in try/catch and Slack posting is fire-and-forget.
+ *      no-op). The hook catches delivery errors after the item is committed.
+ *      An explicitly enabled outbox retains delivery receipts across restarts.
  *   2. `pm slack notify` command — manual posting of a rich Slack Block Kit
  *      message (sections, fields, context) with a plain-text fallback.
  *
@@ -29,6 +29,10 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+import { SlackOutbox } from "./outbox.ts";
+import type { OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
+export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
+export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -72,7 +76,7 @@ interface PmItem {
     sourceUrl?: string;
     link?: string;
 }
-type EventKind = "create" | "close" | "block" | "cancel" | "open" | "start" | "unblock" | "reopen";
+type EventKind = OutboxEvent;
 type MessageFormat = "blockkit" | "text" | "custom";
 /** A single routing rule parsed from PM_SLACK_ROUTES. */
 interface RouteRule {
@@ -210,7 +214,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -467,8 +471,10 @@ declare function isRetryableSlackError(err: unknown): boolean;
  * sends a JSON body with a 10-second timeout, and resolves on a 2xx response.
  * A non-2xx status rejects with a {@link SlackHttpError} carrying the status, a
  * snippet of the body, and the parsed `Retry-After`; a transport failure or
- * timeout rejects with a plain `Error`. The single attempt is the building
- * block {@link postToSlack} retries around.
+ * timeout rejects with a plain `Error` whose `cause` is the socket or timeout
+ * error. Callers classify that cause by its code, never by text in the message,
+ * because a response body can mention a DNS code after the request was sent.
+ * The single attempt is the building block {@link postToSlack} retries around.
  *
  * @param webhookUrl - The Slack incoming-webhook URL to post to.
  * @param payload - The Slack message payload to JSON-encode and send.
@@ -583,6 +589,32 @@ declare function detectEvent(ctx: AfterCommandHookContext): EventKind | null;
  * @returns The touched item, or `null` when the result carries none.
  */
 declare function extractItem(ctx: AfterCommandHookContext): PmItem | null;
+/** Preserve typed operational refusals across the host's structured nonzero command-result boundary. */
+declare function outboxFailure(error: unknown): {
+    ok: boolean;
+    exit_code: number;
+    code: import("./outbox.ts").OutboxRefusalCode;
+    remediation: string;
+};
+/**
+ * Classify one failed outbox attempt without reading the error message.
+ *
+ * HTTP 429 is a confirmed refusal. Other 4xx statuses are permanent. A 5xx,
+ * timeout, reset or dropped response stays uncertain because Slack may already
+ * have accepted the webhook. DNS and connection-refused failures are retried
+ * only when the socket error's own code says the request never left; a sent
+ * response body that mentions those codes cannot force a retry.
+ *
+ * @param error - Rejection from one webhook attempt.
+ * @returns The durable outcome to store for that attempt.
+ */
+declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
+/**
+ * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
+ * History and items are read only. Invalid streams are counted and isolated before intent publication.
+ * Existing receipts win over later environment changes; frozen intents are never reformatted.
+ */
+export declare function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<OutboxRecoveryReport>;
 declare const _default: {
     name: string;
     version: string;
@@ -598,6 +630,8 @@ export default _default;
  * supported extension API.
  */
 export declare const __test__: {
+    outboxFailure: typeof outboxFailure;
+    classifyOutboxSendError: typeof classifyOutboxSendError;
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;
@@ -628,7 +662,7 @@ export declare const __test__: {
     __resetWarnState: () => void;
     resolveItemUrl: typeof resolveItemUrl;
     isHttpUrl: typeof isHttpUrl;
-    EVENT_META: Record<EventKind, {
+    EVENT_META: Record<OutboxEvent, {
         verb: string;
         emoji: string;
     }>;
