@@ -72,7 +72,10 @@ and explicitly resolve it for retry. Ambiguity holds later rows for that
 destination during the current drain. A reused sender PID requires independent
 verification before `resolve(key, decision, { force: true })`.
 
-The enable filter is snapshotted once. Call `configureRecovery(filter)` before
+The enable filter and initial opt-in are committed atomically. If enabling
+crashes or returns `storage_unavailable`, restore writable runtime storage and
+retry `enable` before making lifecycle changes. The enable filter is snapshotted
+once. Call `configureRecovery(filter)` before
 future lifecycle changes to adopt new eligibility without backfilling stale
 messages. Failed histories are counted separately; healthy queued receipts can
 still drain. The example exits nonzero for incomplete recovery or parked refusals.

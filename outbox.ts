@@ -190,14 +190,21 @@ export class SlackOutbox {
   /** Release the database handle; committed receipts survive process exit. */
   close(): void { this.db.close(); }
 
-  /** Opt in once and optionally snapshot eligibility; legacy policy adoption starts with future history. */
+  /** Atomically opt in with initial eligibility; legacy policy adoption starts with future history. */
   enable(filter?: OutboxRecoveryFilter): string {
     if (filter) recoveryFilterValue(filter);
-    const previous = this.since();
-    this.db.prepare("INSERT OR IGNORE INTO settings VALUES (1, ?)").run(new Date().toISOString());
-    const since = this.since() as string;
-    if (filter) this.saveRecoveryPolicy(filter, previous === null ? since : new Date().toISOString(), true);
-    return since;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = this.since();
+      this.db.prepare("INSERT OR IGNORE INTO settings VALUES (1, ?)").run(new Date().toISOString());
+      const since = this.since() as string;
+      if (filter) this.saveRecoveryPolicy(filter, previous === null ? since : new Date().toISOString(), true);
+      this.db.exec("COMMIT");
+      return since;
+    } catch {
+      this.db.exec("ROLLBACK");
+      throw new OutboxError("storage_unavailable", "Restore writable local runtime storage and enable again; opt-in and eligibility were not changed.");
+    }
   }
 
   /** Record an explicit future-only filter change; retained history keeps its earlier eligibility. */
