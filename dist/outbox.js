@@ -87,8 +87,8 @@ export class SlackOutbox {
     enable(filter) {
         if (filter)
             recoveryFilterValue(filter);
-        this.db.exec("BEGIN IMMEDIATE");
         try {
+            this.db.exec("BEGIN IMMEDIATE");
             const previous = this.since();
             this.db.prepare("INSERT OR IGNORE INTO settings VALUES (1, ?)").run(new Date().toISOString());
             const since = this.since();
@@ -98,7 +98,11 @@ export class SlackOutbox {
             return since;
         }
         catch {
-            this.db.exec("ROLLBACK");
+            // SQLite may already have rolled back (or refused BEGIN); keep the typed remedy.
+            try {
+                this.db.exec("ROLLBACK");
+            }
+            catch { /* No transaction may remain to roll back. */ }
             throw new OutboxError("storage_unavailable", "Restore writable local runtime storage and enable again; opt-in and eligibility were not changed.");
         }
     }

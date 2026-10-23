@@ -219,7 +219,9 @@ one SQLite transaction. A policy-write refusal rolls both writes back and
 returns `storage_unavailable` with an enable remedy.
 
 Two real non-git regressions cover a SQLite trigger refusing the policy write
-and child-process exit between the opt-in and policy writes. Retrying enable
+and child-process exit between the opt-in and policy writes. Real automatic
+rollback and competing-writer refusals also preserve the typed storage remedy.
+Retrying enable
 restores complete eligibility and permits exactly one acknowledged send.
 Restoring only the old `enable` function fails both regressions: the refusal
 loses its typed storage remedy, and restart exposes an opt-in timestamp without

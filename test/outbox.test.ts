@@ -963,10 +963,17 @@ test("atomic enable rolls back opt-in when SQLite refuses the initial policy, th
   t.after(() => box.close());
   const db = new DatabaseSync(join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
   t.after(() => db.close());
-  db.exec("CREATE TRIGGER refuse_policy BEFORE INSERT ON recovery_policy BEGIN SELECT RAISE(ABORT, 'fixture policy fault'); END");
-  assert.throws(() => enableRecovery(box), refusal("storage_unavailable"));
-  assert.equal(box.since(), null, "failed enable must not leave durable opt-in without eligibility");
-  db.exec("DROP TRIGGER refuse_policy");
+  for (const rollback of ["ABORT", "ROLLBACK"]) {
+    db.exec(`CREATE TRIGGER refuse_policy BEFORE INSERT ON recovery_policy BEGIN SELECT RAISE(${rollback}, 'fixture policy fault'); END`);
+    assert.throws(() => enableRecovery(box), refusal("storage_unavailable"));
+    assert.equal(box.since(), null, "failed enable must not leave durable opt-in without eligibility");
+    db.exec("DROP TRIGGER refuse_policy");
+  }
+  db.exec("BEGIN IMMEDIATE");
+  (box as unknown as { db: DatabaseSync }).db.exec("PRAGMA busy_timeout=1");
+  try { assert.throws(() => enableRecovery(box), refusal("storage_unavailable")); }
+  finally { db.exec("ROLLBACK"); }
+  assert.equal(box.since(), null, "a refused transaction must leave opt-in unchanged");
   enableRecovery(box);
   const since = box.since();
   assert.equal(box.recoveryPolicies()[0]?.since, since);
