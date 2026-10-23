@@ -112,7 +112,7 @@ export declare class SlackOutbox {
     constructor(pmRoot: string);
     /** Release the database handle; committed receipts survive process exit. */
     close(): void;
-    /** Opt in once and optionally snapshot eligibility; legacy policy adoption starts with future history. */
+    /** Atomically opt in with initial eligibility; legacy policy adoption starts with future history. */
     enable(filter?: OutboxRecoveryFilter): string;
     /** Record an explicit future-only filter change; retained history keeps its earlier eligibility. */
     configureRecovery(filter: OutboxRecoveryFilter): void;

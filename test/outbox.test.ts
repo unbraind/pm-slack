@@ -954,3 +954,61 @@ test("recovery reports actual SQLite receipt faults as storage failures without 
     assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 1, "repairing storage must recover the unchanged history");
   });
 });
+
+
+test("atomic enable rolls back opt-in when SQLite refuses the initial policy, then retries once", async (t) => {
+  const { pmRoot, client } = await fixture(t);
+  environment(t);
+  const box = new SlackOutbox(pmRoot);
+  t.after(() => box.close());
+  const db = new DatabaseSync(join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+  t.after(() => db.close());
+  for (const rollback of ["ABORT", "ROLLBACK"]) {
+    db.exec(`CREATE TRIGGER refuse_policy BEFORE INSERT ON recovery_policy BEGIN SELECT RAISE(${rollback}, 'fixture policy fault'); END`);
+    assert.throws(() => enableRecovery(box), refusal("storage_unavailable"));
+    assert.equal(box.since(), null, "failed enable must not leave durable opt-in without eligibility");
+    db.exec("DROP TRIGGER refuse_policy");
+  }
+  db.exec("BEGIN IMMEDIATE");
+  (box as unknown as { db: DatabaseSync }).db.exec("PRAGMA busy_timeout=1");
+  try { assert.throws(() => enableRecovery(box), refusal("storage_unavailable")); }
+  finally { db.exec("ROLLBACK"); }
+  assert.equal(box.since(), null, "a refused transaction must leave opt-in unchanged");
+  enableRecovery(box);
+  const since = box.since();
+  assert.equal(box.recoveryPolicies()[0]?.since, since);
+  await create({ title: "Committed after successful enable retry", priority: 1 }, client);
+  assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 1);
+  let sends = 0;
+  await box.drain(async () => { sends += 1; return "acknowledged"; });
+  assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 0);
+  await box.drain(async () => { sends += 1; return "acknowledged"; });
+  assert.equal(sends, 1);
+  assert.equal(box.status().counts.acknowledged, 1);
+});
+
+test("atomic enable survives process death between opt-in and policy without partial recovery state", async (t) => {
+  const { pmRoot, directory } = await fixture(t);
+  const moduleUrl = new URL("../outbox.ts", import.meta.url).href;
+  // Terminate precisely at the policy boundary; every database operation stays real.
+  const source = `import {SlackOutbox} from ${JSON.stringify(moduleUrl)};
+    const box=new SlackOutbox(process.argv[1]);
+    box.saveRecoveryPolicy=()=>process.exit(73);
+    box.enable({events:['create'],minPriority:4});`;
+  const code = await new Promise<number | null>((done, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source, pmRoot], {
+      cwd: directory, env: { ...process.env, PATH: directory, GIT_CEILING_DIRECTORIES: tmpdir() }, stdio: "pipe",
+    });
+    child.on("error", reject); child.on("exit", done);
+  });
+  assert.equal(code, 73);
+  const restarted = new SlackOutbox(pmRoot);
+  t.after(() => restarted.close());
+  assert.equal(restarted.since(), null, "process death must roll back the opt-in write");
+  const since = restarted.enable({ events: ["create"], minPriority: 4 });
+  assert.deepEqual(restarted.recoveryPolicies(), [{ since, events: ["create"], minPriority: 4 }]);
+  restarted.enqueue(intent("after-enable-crash"));
+  await restarted.drain(async () => "acknowledged");
+  await restarted.drain(async () => { assert.fail("acknowledged receipt must survive retry"); });
+  assert.equal(restarted.status().counts.acknowledged, 1);
+});

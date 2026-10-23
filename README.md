@@ -19,7 +19,9 @@ pm slack outbox --action drain --limit 20 --json
 ```
 
 `enable` records a durable start time and snapshots `PM_SLACK_EVENTS` and
-`PM_SLACK_MIN_PRIORITY`. It is idempotent and does not backfill older events.
+`PM_SLACK_MIN_PRIORITY` in one atomic transaction. A crash or storage refusal
+before completion leaves the previous opt-in and policy intact; retry `enable`
+after restoring writable storage. It is idempotent and does not backfill older events.
 Changing those environment variables does not change existing recovery eligibility.
 Run `pm slack outbox --action configure` before future lifecycle changes to record
 an explicit new filter epoch; older history keeps its original policy. Existing

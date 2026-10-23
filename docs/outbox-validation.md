@@ -207,3 +207,64 @@ package validation contains 14 files. All ten linked commands passed, including
 command passed again after the deterministic fixture change. No test timeout or
 failure retry was needed in this round. All four behavioral revert proofs were
 rechecked after that fixture change and restored before the final gates.
+
+## Atomic opt-in follow-up (2026-10-23)
+
+A fresh overlap check found the original feature already merged in PR 147.
+Core PM supplies verified history, replay and complete reads; pm-observer owns
+its evidence-note outbox, and pm-slack-standup owns digests. This follow-up keeps
+the existing Slack SDK, CLI and transport boundaries and repairs one remaining
+crash window: the opt-in timestamp and initial eligibility policy now commit in
+one SQLite transaction. A policy-write refusal rolls both writes back and
+returns `storage_unavailable` with an enable remedy.
+
+Two real non-git regressions cover a SQLite trigger refusing the policy write
+and child-process exit between the opt-in and policy writes. Real automatic
+rollback and competing-writer refusals also preserve the typed storage remedy.
+Retrying enable
+restores complete eligibility and permits exactly one acknowledged send.
+Restoring only the old `enable` function fails both regressions: the refusal
+loses its typed storage remedy, and restart exposes an opt-in timestamp without
+its policy. The changed function was restored before building.
+
+Local checks passed `npm run typecheck`, `npm run build`, `npm run build:test`,
+`npm run docstring` (82 declarations), `git diff --check`, and
+`node --test test/outbox.test.ts` (36 passed, zero failed/skipped/canceled).
+Native `bun test/bun-outbox.acceptance.ts` passed with one recovered lifecycle,
+one acknowledged send, zero duplicates and no git. There is no standalone lint
+script; the package's source lint is its docstring gate. Full release checks run
+in CI to respect the shared host's CPU constraint.
+
+The repeat real-data validation used a read-only non-git archive of the public
+tracker at `0e3c084`. Complete SDK reads and verified history supplied these
+measurements; source files were fingerprinted before and after, and runtime
+receipts lived in a separate initialized scratch tracker. The validation ran
+with a git ceiling and a PATH containing no git executable.
+
+| Measurement | Result |
+| --- | ---: |
+| Complete SDK item corpus | 86 |
+| Verified history entries inspected | 642 |
+| Read-only source files fingerprinted | 179 |
+| Pre-enable events queued | 0 |
+| Snapshot intents derived from public items | 86 |
+| Acknowledged localhost POSTs after reopening | 86 |
+| Duplicate sends after reopening and draining again | 0 |
+| Source files changed | 0 |
+| Inspection rows / explicitly omitted rows | 10 / 76 |
+
+These snapshot sends validate receipt persistence with public item data; they
+are not historical lifecycle backfill or live Slack delivery. Ambiguous incoming
+webhook outcomes still require explicit reconciliation. No remote services were
+contacted by the delivery fixtures.
+
+The [implementation CI run](https://github.com/unbraind/pm-slack/actions/runs/40013028638)
+at `aca67d2101d6c321ec3b263819d0502186adcd80` passed all four full release
+checks: `npm run release:check` and `bun run release:check` on Node 22 and 26,
+each with **309 passed, zero failed/skipped/canceled**, and **100% lines,
+branches and functions** across both production modules at unchanged thresholds.
+Both native Bun acceptance runs also passed (one recovered lifecycle, one
+acknowledgment, zero duplicates). Both clean installed trackers passed all ten
+strict health checks, resolving the host-only extension skew and generated-fence
+warnings encountered locally. CodeQL passed. The PR records the final head's
+CI run after the documentation and tracker handoff commit.
