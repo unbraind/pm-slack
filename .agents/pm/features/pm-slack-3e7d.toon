@@ -6,9 +6,9 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-10-21T20:00:45.908Z"
-updated_at: "2026-10-24T21:48:08.702Z"
+updated_at: "2026-10-24T23:14:17.284Z"
 closed_at: "2026-10-24T21:48:08.668Z"
-completed_at: "2026-10-24T21:48:08.668Z"
+completed_at: "2026-10-23T19:45:33.000Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
 resolution: Latest implementing PR completes restart-durable outbox delivery from PR 147 by making opt-in/policy atomic and retaining no-git SDK/CLI crash/retry evidence.

@@ -4,8 +4,8 @@
 
 ### Added
 
-- Bound lifecycle notification bursts with complete coalescing receipts ([pm-slack-npwn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-npwn.toon))
 - Keep enabled Slack lifecycle notifications durable across restarts ([pm-slack-3e7d](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-3e7d.toon))
+- Bound lifecycle notification bursts with complete coalescing receipts ([pm-slack-npwn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-npwn.toon))
 
 ### Fixed
 

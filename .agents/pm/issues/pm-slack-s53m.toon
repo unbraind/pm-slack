@@ -6,9 +6,9 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-10-23T19:31:03.630Z"
-updated_at: "2026-10-24T21:48:08.557Z"
+updated_at: "2026-10-24T23:14:16.498Z"
 closed_at: "2026-10-24T21:48:08.532Z"
-completed_at: "2026-10-24T21:48:08.532Z"
+completed_at: "2026-10-23T19:45:33.000Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item. A crash while enabling never leaves opt-in without its initial policy. Typed SDK and CLI, bounded TOON/JSON, typed remedies, README/example, non-git real tracker validation and unchanged npm/Bun CI gates remain verified."
 resolution: Notification opt-in and initial recovery policy publish atomically across crashes; retries retain acknowledged sends and visible ambiguity without rolling back item commits.
