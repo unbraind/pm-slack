@@ -1,3 +1,4 @@
+import type { CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
 /** Stable refusal codes returned by both the SDK and CLI. */
 export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
 /** Expected failure with a safe message, machine-readable code, and concrete remedy. */
@@ -49,6 +50,30 @@ export interface OutboxIntent {
     destination: string;
     /** Frozen message body; inspection never returns it. */
     payload: OutboxPayload;
+    /** Committed event timestamp; legacy intents use epoch zero. */
+    at?: number;
+    /** Priority frozen at the transition; legacy blockers still bypass batching. */
+    priority?: number;
+}
+/** Bounded coalescing evidence; notification bodies and destination identities stay private. */
+export interface CoalescingReport {
+    /** Original event totals and notification counts, without payloads. */
+    summary: {
+        events: number;
+        urgent: number;
+        coalesced: number;
+        deferred: number;
+        waiting: number;
+        notifications: number;
+    };
+    /** Exactly identified source events on this page. */
+    rows: (CoalescingReceipt & {
+        state: OutboxState;
+    })[];
+    /** Evidence rows outside this page, never unreported event loss. */
+    omitted: number;
+    /** Offset for the next page; null denotes complete evidence. */
+    next_cursor: number | null;
 }
 /** Compact, credential-free delivery receipt. */
 export interface OutboxReceipt {
@@ -126,6 +151,16 @@ export declare class SlackOutbox {
     since(): string | null;
     /** Persist an intent once; conflicting reuse refuses instead of silently changing a message. */
     enqueue(intent: OutboxIntent): string;
+    /** Read a deterministic plan over pending intents; no payload or webhook is returned. */
+    planCoalescing(options?: CoalescingOptions): CoalescingPlan;
+    /** Page a preview or durable evidence manifest without exposing frozen payloads or destinations. */
+    coalescingReport(plan: CoalescingPlan, limit?: number, after?: number, durable?: boolean): CoalescingReport;
+    /**
+     * Send urgent originals first and bounded routine summaries after closed windows.
+     * Claims fence concurrent plain and coalesced drains. Every original keeps its
+     * state and attempt count; crashes leave all claimed members visibly sending.
+     */
+    drainCoalesced(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, options?: CoalescingOptions): Promise<CoalescingPlan>;
     /** Check whether a verified history transition already has a durable intent. */
     has(item: string, event: OutboxEvent, revision: string): boolean;
     /** Inspect a bounded receipt page while preserving exact totals and omission evidence. */

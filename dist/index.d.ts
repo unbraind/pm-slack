@@ -31,6 +31,9 @@
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { SlackOutbox } from "./outbox.ts";
 import type { OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
+export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
+export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
+export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
@@ -214,7 +217,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *

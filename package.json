@@ -18,6 +18,8 @@
     "manifest.json",
     "README.md",
     "docs/outbox-example.md",
+    "docs/coalescing-example.md",
+    "docs/coalescing-validation.md",
     "CHANGELOG.md"
   ],
   "scripts": {
@@ -93,11 +95,14 @@
     "docs": [
       "README.md",
       "docs/outbox-example.md",
+      "docs/coalescing-example.md",
+      "docs/coalescing-validation.md",
       "CHANGELOG.md"
     ],
     "examples": [
       "README.md",
-      "docs/outbox-example.md"
+      "docs/outbox-example.md",
+      "docs/coalescing-example.md"
     ]
   },
   "publishConfig": {

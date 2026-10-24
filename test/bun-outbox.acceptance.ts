@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { init, create } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import extension, { SlackOutbox } from "../dist/index.js";
-import type { OutboxReport } from "../dist/index.js";
+import extension, { SlackOutbox, slackDestination } from "../dist/index.js";
+import type { OutboxReport, CoalescingReport } from "../dist/index.js";
 import http from "node:http";
 
 const directory = mkdtempSync(join(tmpdir(), "slack-bun-acceptance-"));
@@ -36,7 +36,18 @@ try {
     assert.equal(restarted.status().counts.acknowledged, 1);
     assert.equal(sends, 1);
   } finally { restarted.close(); }
-  console.log("Native Bun acceptance: 1 lifecycle recovered, 1 acknowledged send, 0 duplicates, no git.");
+  const queued = new SlackOutbox(pmRoot);
+  try {
+    for (const revision of ["routine-a", "routine-b"]) queued.enqueue({ item: "bun-routine", event: "close", revision,
+      destination: slackDestination(process.env.PM_SLACK_WEBHOOK!), payload: { text: "Native Bun routine event" }, at: 1000, priority: 2 });
+  } finally { queued.close(); }
+  const grouped = (await harness.runCommand({ command: "slack coalesce", pmRoot, options: { action: "drain", budget: "1" }, global: { json: true } })).result as CoalescingReport;
+  assert.equal(grouped.summary.coalesced, 2);
+  assert.equal(grouped.summary.notifications, 1);
+  assert.equal(grouped.rows.length, 2);
+  assert.equal(grouped.rows.every((row) => row.state === "acknowledged"), true);
+  assert.equal(sends, 2);
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends, 0 duplicates, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));
