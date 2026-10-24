@@ -2,13 +2,18 @@ id: pm-slack-s53m
 title: Keep outbox opt-in and recovery policy atomic across crashes
 description: "Overlap recheck: durable Slack delivery is already shipped by PR 147 and tracked by pm-slack-3e7d. Core CLI owns verified item history and lifecycle commits, not Slack delivery; pm-observer owns evidence-note delivery; pm-slack-standup owns digests; immediate Slack retry/backoff remains transport logic. This follow-up addresses a separate crash window between durable opt-in and its eligibility snapshot, without rebuilding existing capabilities."
 type: Issue
-status: in_progress
+status: closed
 priority: 1
 tags: []
 created_at: "2026-10-23T19:31:03.630Z"
-updated_at: "2026-10-23T19:40:31.593Z"
+updated_at: "2026-10-24T21:48:08.557Z"
+closed_at: "2026-10-24T21:48:08.532Z"
+completed_at: "2026-10-24T21:48:08.532Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item. A crash while enabling never leaves opt-in without its initial policy. Typed SDK and CLI, bounded TOON/JSON, typed remedies, README/example, non-git real tracker validation and unchanged npm/Bun CI gates remain verified."
+resolution: Notification opt-in and initial recovery policy publish atomically across crashes; retries retain acknowledged sends and visible ambiguity without rolling back item commits.
+expected_result: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item. A crash while enabling never leaves opt-in without its initial policy. Typed SDK and CLI, bounded TOON/JSON, typed remedies, README/example, non-git real tracker validation and unchanged npm/Bun CI gates remain verified."
+actual_result: "https://github.com/unbraind/pm-slack/pull/150, merged 2026-10-23T19:45:33Z, merge 0e4c89e6212bb3e3d8a8cbdc6c95af871714fb8c: Notification opt-in and initial recovery policy publish atomically across crashes; retries retain acknowledged sends and visible ambiguity without rolling back item commits."
 comments[6]{created_at,author,text}:
   "2026-10-23T19:31:24.983Z",codex-agent,"Plan: reuse shipped SlackOutbox, captureSlackOutbox, registered CLI and SDK verified history/replay. Make enable persist opt-in and its first recovery policy in one SQLite transaction. Exercise real process death between writes plus a real SQLite policy-write refusal, then recover a later SDK lifecycle and acknowledge it exactly once. Existing feature pm-slack-3e7d remains the original delivery scope; this item owns the newly identified atomic-enable gap."
   "2026-10-23T19:34:15.602Z",codex-agent,"Implementation: enable now fences opt-in plus initial eligibility with BEGIN IMMEDIATE/COMMIT and rolls both back on a policy-write error, returning storage_unavailable with an enable remedy. Behavioral revert proof: restoring only origin/main enable made both new atomic-enable tests fail (raw SQLite refusal; persisted timestamp after child exit 73 instead of null). Restored code passes 36 outbox tests with zero failures/skips/cancellations. Typecheck, build, test compilation, docstring lint (82 declarations) and native Bun acceptance pass. No standalone lint script exists."
@@ -32,4 +37,5 @@ docs[3]{path,scope}:
   docs/outbox-example.md,project
   docs/outbox-validation.md,project
   README.md,project
+close_reason: "https://github.com/unbraind/pm-slack/pull/150, merged 2026-10-23T19:45:33Z, merge 0e4c89e6212bb3e3d8a8cbdc6c95af871714fb8c: Notification opt-in and initial recovery policy publish atomically across crashes; retries retain acknowledged sends and visible ambiguity without rolling back item commits."
 body: ""

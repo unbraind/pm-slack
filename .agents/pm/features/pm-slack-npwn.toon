@@ -2,13 +2,18 @@ id: pm-slack-npwn
 title: Bound lifecycle notification bursts with complete coalescing receipts
 description: "Coalesce queued delivery events using the durable Slack outbox, separately from tracker-state digest and periodic standup reports."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags[1]: "gh:unbraind/pm-slack#151"
 created_at: "2026-10-24T07:17:48.932Z"
-updated_at: "2026-10-24T09:43:21.920Z"
+updated_at: "2026-10-24T21:48:08.822Z"
+closed_at: "2026-10-24T21:48:08.810Z"
+completed_at: "2026-10-24T21:48:08.810Z"
 author: codex-agent
 acceptance_criteria: Order permutations yield stable summaries; Urgent events bypass the batch; Every suppressed event appears in an omission or coalescing receipt
+resolution: "Deterministic coalescing bounds bursts, lets urgent blockers bypass limits and accounts for every suppressed event in receipts."
+expected_result: Order permutations yield stable summaries; Urgent events bypass the batch; Every suppressed event appears in an omission or coalescing receipt
+actual_result: "https://github.com/unbraind/pm-slack/pull/151, merged 2026-10-24T09:51:25Z, merge 22248b97ca6d89f2f750fb596a84c4c418b52572: Deterministic coalescing bounds bursts, lets urgent blockers bypass limits and accounts for every suppressed event in receipts."
 comments[10]{created_at,author,text}:
   "2026-10-24T07:17:59.856Z",codex-agent,"Overlap check: pinned pm SDK exposes lifecycle history verification/replay and complete tracker reads, but no delivery coalescer. Existing slack digest summarizes current tracker state; pm-slack-standup produces periodic project reports and snapshot trends. This feature groups queued outbox lifecycle deliveries by item, destination and fixed time window. Reuse verified SDK history capture and durable delivery/reconciliation, with a pure typed planner, bounded CLI receipts and urgent-blocker bypass. No git dependency, tracker mutation or remote posting in preview."
   "2026-10-24T07:27:36.966Z",codex-agent,"Implementation uses a pure deterministic planner and the existing durable outbox. SDK verified history captures timestamp and priority per committed transition. Same-item/destination/fixed-window summaries retain source receipts; priority 0/1 and every blocker bypass routine bounds. Claims and group reconciliation fence concurrent senders and uncertain delivery. Public-data validation at main 0e4c89e: 87 items, 87 verified streams, 658 history entries, 222 lifecycle events; budget 5 produced 86 notifications (81 urgent plus 5 routine summaries covering 8 events), 133 deferred, zero waiting, 222 receipts, max summary 58 characters. Three order variants equal, zero-budget urgent-only, all exported tracker bytes unchanged. Priority 0 discovered in public data is supported as urgent. CLI source overlap rechecked at 06eff3bf1 and standup at f584c70; only CLI flag-list coalescing exists, unrelated to delivery."
@@ -36,4 +41,5 @@ docs[3]{path,scope}:
   docs/coalescing-example.md,project
   docs/coalescing-validation.md,project
   README.md,project
+close_reason: "https://github.com/unbraind/pm-slack/pull/151, merged 2026-10-24T09:51:25Z, merge 22248b97ca6d89f2f750fb596a84c4c418b52572: Deterministic coalescing bounds bursts, lets urgent blockers bypass limits and accounts for every suppressed event in receipts."
 body: ""

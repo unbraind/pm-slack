@@ -2,13 +2,18 @@ id: pm-slack-3e7d
 title: Keep enabled Slack lifecycle notifications durable across restarts
 description: "Persist Slack-only delivery intents, idempotency identities and acknowledgments. Existing immediate retry/backoff remains transport logic; pm-observer owns evidence-note delivery into PM only. CLI lifecycle hooks currently send without a durable receipt; sibling pm-slack-standup builds digests rather than delivering lifecycle intents. No duplicate open outbox item found; tracker-reconciliation items are excluded."
 type: Feature
-status: in_progress
+status: closed
 priority: 1
 tags: []
 created_at: "2026-10-21T20:00:45.908Z"
-updated_at: "2026-10-22T22:05:17.621Z"
+updated_at: "2026-10-24T21:48:08.702Z"
+closed_at: "2026-10-24T21:48:08.668Z"
+completed_at: "2026-10-24T21:48:08.668Z"
 author: codex-agent
 acceptance_criteria: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
+resolution: Latest implementing PR completes restart-durable outbox delivery from PR 147 by making opt-in/policy atomic and retaining no-git SDK/CLI crash/retry evidence.
+expected_result: "Crash/retry fixtures produce one acknowledged send; ambiguous remote outcomes remain visible; notification failure never rolls back a committed item.; Typed SDK and agent-sized CLI output, typed refusals with remedies, README and example, no-git regressions, public tracker copy validation, unchanged npm and Bun CI release gates."
+actual_result: "https://github.com/unbraind/pm-slack/pull/150, merged 2026-10-23T19:45:33Z, merge 0e4c89e6212bb3e3d8a8cbdc6c95af871714fb8c: Latest implementing PR completes restart-durable outbox delivery from PR 147 by making opt-in/policy atomic and retaining no-git SDK/CLI crash/retry evidence."
 comments[32]{created_at,author,text}:
   "2026-10-21T20:01:09.181Z",codex-agent,"Overlap recheck: CLI lifecycle hooks expose successful command results but no Slack-specific durable delivery acknowledgment. pm-slack currently retries immediate HTTP attempts only. pm-observer src/delivery.ts and src/store.ts own idempotent PM evidence notes, and pm-slack-standup owns digests. This feature owns Slack delivery intents and receipts only. Plan: opt-in durable storage, atomic claims and idempotency, persisted uncertain outcomes with explicit reconciliation, bounded SDK and CLI inspection/drain, real no-git tracker regressions and public tracker-copy validation. Reconciliation PR items remain untouched."
   "2026-10-21T20:09:32.697Z",codex-agent,"Implemented SQLite FULL-synchronous durable delivery with atomic cross-process claims and frozen history-revision identities, explicit enable boundary, verified SDK history recovery for commits missed by hooks, bounded structured inspection, safe destination fingerprints, and explicit reconciliation of uncertain sends. Targeted lifecycle/corpus/transport tests: 215 passed, 0 failed; index.ts and outbox.ts each measured 100 percent lines, branches and functions. Typecheck and docstring gate passed. Full unchanged release gates will run under npm and Bun in CI because local CPU is saturated."
@@ -132,4 +137,5 @@ docs[5]{path,scope}:
   "https://github.com/unbraind/pm-slack/issues/147#issuecomment-6325847600",project
   "https://github.com/unbraind/pm-slack/pull/147#discussion_r4342530828",project
   README.md,project
+close_reason: "https://github.com/unbraind/pm-slack/pull/150, merged 2026-10-23T19:45:33Z, merge 0e4c89e6212bb3e3d8a8cbdc6c95af871714fb8c: Latest implementing PR completes restart-durable outbox delivery from PR 147 by making opt-in/policy atomic and retaining no-git SDK/CLI crash/retry evidence."
 body: ""
