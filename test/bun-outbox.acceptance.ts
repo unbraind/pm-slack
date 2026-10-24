@@ -47,7 +47,28 @@ try {
   assert.equal(grouped.rows.length, 2);
   assert.equal(grouped.rows.every((row) => row.state === "acknowledged"), true);
   assert.equal(sends, 2);
-  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends, 0 duplicates, no git.");
+  const owner = new SlackOutbox(pmRoot);
+  const peer = new SlackOutbox(pmRoot);
+  try {
+    const keys = ["race-a", "race-b"].map((revision) => owner.enqueue({ item: "bun-race", event: "close", revision,
+      destination: "synthetic-route", payload: { text: "Native Bun concurrent event" }, at: 1000, priority: 2 }));
+    await owner.drainCoalesced(async () => "retry");
+    assert.equal(peer.status().counts.pending, 2);
+    let releaseOld!: () => void;
+    const old = owner.drainCoalesced(async () => { await new Promise<void>((done) => { releaseOld = done; }); return "retry"; });
+    peer.resolve(keys[0]!, "retry", { force: true });
+    let releaseNew!: () => void;
+    let accepted = 0;
+    const newer = peer.drainCoalesced(async () => { accepted += 1; await new Promise<void>((done) => { releaseNew = done; }); return "ambiguous"; });
+    releaseOld(); await old;
+    assert.equal(peer.status().counts.sending, 2);
+    releaseNew(); await newer;
+    peer.resolve(keys[1]!, "acknowledged");
+    assert.equal(peer.status().counts.ambiguous, 0);
+    assert.equal(peer.status().counts.acknowledged, 5);
+    assert.equal(accepted, 1);
+  } finally { peer.close(); owner.close(); }
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));

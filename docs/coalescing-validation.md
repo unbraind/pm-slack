@@ -45,3 +45,35 @@ and complete member receipts. Each reverted scenario failed its targeted test
 (one test, zero passes, one failure); the original source was restored after
 each proof. Native Bun acceptance also exercises the compiled package entry
 against a real no-git tracker and a local HTTP sink.
+
+## Outbox transition consistency (review 151)
+
+The outbox uses SQLite `BEGIN IMMEDIATE` transactions as its cross-process
+writer fence. The SDK's workspace/item transaction primitives protect tracker
+mutations; they do not transact this runtime SQLite database. Delivery therefore
+uses SQLite's own durable transaction and rollback primitives, without requiring
+git or holding a tracker lock across a remote request.
+
+| Transition | Consistency boundary |
+| --- | --- |
+| Enqueue / history recovery | Intent and event context commit together; immutable keys deduplicate replay. |
+| Plain or coalesced claim | All members, attempts, PID and group mappings commit before transport. |
+| Group identity | Each attempt gets a new token; planner notification IDs remain stable evidence. |
+| Send / typed refusal / transport failure | Completion selects only its attempt token, then changes the complete membership in one transaction. |
+| Retry cleanup | Delete only that attempt's mappings first; release members last; commit exposes both together. |
+| Storage failure | Roll back membership, attempt counts and state together; no partial release. |
+| Process death | SQLite rolls back uncommitted work; committed sending groups require explicit reconciliation. |
+| Reconcile / force | Select the complete owned group, delete its mappings, then update members under one transaction. |
+| Late sender completion | A retired token matches no members, so it cannot update or erase a newer claim. |
+
+`test/outbox-interleaving.test.ts` injects a second drainer after every actual SQL
+operation in retry/failure completion and in retry/acknowledge/skip recovery
+from ambiguous, rejected, refused and real dead-sender states. It holds the
+peer's new two-event group through the older cleanup, loses its response, and
+reconciles its sibling, requiring whole-group recovery and zero leftover
+ambiguity or duplicate acceptance. Separate cases terminate real processes at
+every retry-cleanup and crash-recovery boundary, inject native SQLite ABORT and
+ROLLBACK faults at mapping deletion and member release, and return stale plain
+and grouped senders after forced reconciliation. No SDK or SQLite state is
+mocked. Native Bun acceptance also covers retry cleanup and a stale completion
+while a peer owns the next group.

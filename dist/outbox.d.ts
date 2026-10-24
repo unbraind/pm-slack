@@ -175,6 +175,12 @@ export declare class SlackOutbox {
      * destination cannot block every other notification.
      */
     drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit?: number): Promise<OutboxReport>;
+    /** Run receipt mutations under SQLite's cross-process writer fence, rolling back every partial transition. */
+    private transaction;
+    /** Claim the complete membership and persist a fresh attempt token before any remote request. */
+    private claim;
+    /** Finish only this attempt; clean its mappings before releasing members, with no observable partial state. */
+    private finish;
     /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
     resolve(key: string, decision: OutboxDecision, options?: {
         force?: boolean;
