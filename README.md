@@ -374,6 +374,28 @@ pm slack test --on block --json          # machine-readable payload (with global
 Flags: `--format blockkit|text`, `--on create|close|block`, `--title`,
 `--channel`, `--json`.
 
+### Attention-budgeted lifecycle delivery
+
+`pm slack coalesce` previews pending lifecycle deliveries as bounded same-item,
+same-destination bursts, independently of the tracker-state digest and periodic
+`pm-slack-standup` reports. Enable the durable outbox, set
+`PM_SLACK_COALESCE=1` on lifecycle writers, and schedule
+`pm slack coalesce --action drain --budget 5`. Routine events wait for their fixed
+window to close. Blockers and priority-0/1 events bypass both the window and the
+routine notification budget, retaining their original payloads.
+
+The typed SDK exports `planSlackCoalescing`, event/options/plan/receipt types,
+`CoalescingError`, and `SlackOutbox` planning, draining and paged evidence methods.
+Default TOON and `--json` output contain bounded evidence pages, exact totals,
+omission counts and resume cursors. Every event retains its committed revision
+and a coalescing or bypass receipt; over-budget events remain pending. Preview
+and receipt inspection need no webhook. All operations work without git.
+
+See the [complete CLI and SDK example](docs/coalescing-example.md) for opt-in,
+scheduling, refusals, pagination, transport outcomes and group reconciliation.
+[Public-tracker measurements](docs/coalescing-validation.md) record read-only
+validation and behavioral revert proofs.
+
 ### `pm slack digest`
 
 Produce a single summary of recent activity (created / closed / blocked /

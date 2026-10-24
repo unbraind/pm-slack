@@ -33,6 +33,8 @@ import http from "node:http";
 import { listAllComplete, readHistoryEntries, replayHistoryToTarget, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
+import { CoalescingError } from "./coalescing.js";
+export { planSlackCoalescing, CoalescingError } from "./coalescing.js";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
 import path from "node:path";
 // ---------------------------------------------------------------------------
@@ -463,7 +465,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"];
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox"];
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -1697,7 +1699,7 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
                         mention: config.mentionAssignee ? resolveAssigneeMention(item, config.assigneeMap) : undefined,
                         link: resolveItemUrl(item),
                     });
-                    intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload });
+                    intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload, at: Date.parse(entry.ts), priority: item.priority ?? 4 });
                 }
                 for (const intent of intents) {
                     outboxStorage(() => outbox.enqueue(intent));
@@ -1722,6 +1724,15 @@ export default defineExtension({
     name: "pm-slack",
     version: "2026.10.24",
     activate(api) {
+        api.registerRenderer("toon", (ctx) => {
+            const report = ctx.result;
+            if (!report?.summary || !Array.isArray(report.rows))
+                return null;
+            return ["summary:", ...Object.entries(report.summary).map(([key, count]) => `  ${key}: ${count}`),
+                `rows[${report.rows.length}]{key,item,event,revision,disposition,notification,state}:`,
+                ...report.rows.map((row) => `  ${[row.key, row.item, row.event, row.revision, row.disposition, row.notification, row.state].map((value) => JSON.stringify(value)).join(",")}`),
+                `omitted: ${report.omitted}`, `next_cursor: ${report.next_cursor}`].join("\n");
+        }, { commands: ["slack coalesce"] });
         api.registerRenderer("toon", (ctx) => {
             const report = ctx.result;
             if (!report || !Array.isArray(report.rows) || !report.recovered)
@@ -1758,7 +1769,10 @@ export default defineExtension({
                                         if (outboxFailure(error).code !== "history_unavailable")
                                             throw error;
                                     }
-                                    await outbox.drain(sendOutbox, 1);
+                                    if (process.env.PM_SLACK_COALESCE === "1")
+                                        await outbox.drainCoalesced(sendOutbox, { budget: 0 });
+                                    else
+                                        await outbox.drain(sendOutbox, 1);
                                 }
                                 return;
                             }
@@ -1862,6 +1876,49 @@ export default defineExtension({
         // command — `pm slack notify` : manual rich Block Kit post.
         // -----------------------------------------------------------------------
         if (typeof api.registerCommand === "function") {
+            api.registerCommand({
+                name: "slack coalesce",
+                description: "Preview or drain bounded lifecycle bursts with item-level evidence and urgent bypass",
+                intent: "Reduce routine delivery interruptions while preserving every original outbox receipt",
+                examples: ["pm slack coalesce --budget 5 --json", "pm slack coalesce --action drain --budget 3", "pm slack coalesce --action receipts --after 20"],
+                flags: [
+                    { long: "--action", value_name: "action", description: "preview (default, offline), drain (sends), or receipts (durable evidence)" },
+                    { long: "--budget", value_name: "count", description: "Routine notification limit, 0..100; urgent bypasses (default 5)" },
+                    { long: "--window-ms", value_name: "milliseconds", description: "Fixed window width, 1000..86400000 (default 60000)" },
+                    { long: "--limit", value_name: "count", description: "Evidence rows per page, 1..100 (default 20)" },
+                    { long: "--after", value_name: "cursor", description: "Evidence offset from next_cursor (default 0)" },
+                ],
+                async run(ctx) {
+                    try {
+                        const action = readStrOption(ctx.options, "action") ?? "preview";
+                        const options = { budget: Number(readStrOption(ctx.options, "budget") ?? "5"), windowMs: Number(readStrOption(ctx.options, "window-ms") ?? "60000") };
+                        const limit = Number(readStrOption(ctx.options, "limit") ?? "20");
+                        const after = Number(readStrOption(ctx.options, "after") ?? "0");
+                        if (!["preview", "drain", "receipts"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0)
+                            throw new OutboxError("invalid_input", "Choose preview, drain or receipts; use limit 1..100 and a nonnegative cursor.");
+                        const outbox = new SlackOutbox(ctx.pm_root);
+                        try {
+                            // Validate every bound before recovering history or contacting Slack.
+                            const preview = outbox.planCoalescing(options);
+                            if (action === "drain") {
+                                const recovered = await captureSlackOutbox(ctx.pm_root, outbox);
+                                if (recovered.failed)
+                                    throw new OutboxError("history_unavailable", "Repair retained lifecycle history before coalesced delivery; queued intents remain available.");
+                            }
+                            const plan = action === "drain" ? await outbox.drainCoalesced(sendOutbox, options) : preview;
+                            return outbox.coalescingReport(plan, limit, after, action === "receipts");
+                        }
+                        finally {
+                            outbox.close();
+                        }
+                    }
+                    catch (error) {
+                        if (error instanceof CoalescingError)
+                            return { ok: false, exit_code: error.exitCode, code: error.code, remediation: error.remedy };
+                        return outboxFailure(error);
+                    }
+                },
+            });
             api.registerCommand({
                 name: "slack outbox",
                 description: "Enable, inspect, drain or reconcile durable Slack lifecycle notifications",

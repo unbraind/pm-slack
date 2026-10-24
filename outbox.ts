@@ -3,7 +3,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { createRequire } from "node:module";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { planSlackCoalescing } from "./coalescing.ts";
+import type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
 
 /** Stable refusal codes returned by both the SDK and CLI. */
 export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
@@ -63,6 +65,22 @@ export interface OutboxIntent {
   destination: string;
   /** Frozen message body; inspection never returns it. */
   payload: OutboxPayload;
+  /** Committed event timestamp; legacy intents use epoch zero. */
+  at?: number;
+  /** Priority frozen at the transition; legacy blockers still bypass batching. */
+  priority?: number;
+}
+
+/** Bounded coalescing evidence; notification bodies and destination identities stay private. */
+export interface CoalescingReport {
+  /** Original event totals and notification counts, without payloads. */
+  summary: { events: number; urgent: number; coalesced: number; deferred: number; waiting: number; notifications: number };
+  /** Exactly identified source events on this page. */
+  rows: (CoalescingReceipt & { state: OutboxState })[];
+  /** Evidence rows outside this page, never unreported event loss. */
+  omitted: number;
+  /** Offset for the next page; null denotes complete evidence. */
+  next_cursor: number | null;
 }
 
 /** Compact, credential-free delivery receipt. */
@@ -181,6 +199,9 @@ export class SlackOutbox {
         CREATE INDEX IF NOT EXISTS delivery_pending ON delivery(state);
         CREATE TABLE IF NOT EXISTS recovery_policy (since TEXT NOT NULL, events TEXT NOT NULL, min_priority INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS recovery_policy_since ON recovery_policy(since);`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS delivery_context (key TEXT PRIMARY KEY, at INTEGER NOT NULL, priority INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS coalescing_receipt (key TEXT PRIMARY KEY, disposition TEXT NOT NULL, notification TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS delivery_group (key TEXT PRIMARY KEY, notification TEXT NOT NULL);`);
     } catch {
       database?.close();
       throw new OutboxError("storage_unavailable", "Restore writable local runtime storage; committed items are unchanged. Then drain again.");
@@ -246,15 +267,79 @@ export class SlackOutbox {
     if (![intent.item, intent.event, intent.revision, intent.destination, intent.payload.text].every((value) => typeof value === "string" && value.length > 0) || !lifecycleEvents.includes(intent.event)) {
       throw new OutboxError("invalid_input", "Provide an item, event, immutable revision, destination and message text.");
     }
+    if ((intent.at !== undefined && (!Number.isSafeInteger(intent.at) || intent.at < 0)) || (intent.priority !== undefined && (!Number.isInteger(intent.priority) || intent.priority < 0 || intent.priority > 4))) {
+      throw new OutboxError("invalid_input", "Use a nonnegative integer timestamp and priority from 0 to 4.");
+    }
     const key = receiptKey(intent.item, intent.event, intent.revision);
     const payload = JSON.stringify(intent.payload);
-    this.db.prepare("INSERT OR IGNORE INTO delivery(key,item,event,revision,destination,payload) VALUES (?,?,?,?,?,?)")
-      .run(key, intent.item, intent.event, intent.revision, intent.destination, payload);
-    const row = this.db.prepare("SELECT destination,payload FROM delivery WHERE key=?").get(key)!;
-    if (row.destination !== intent.destination || row.payload !== payload) {
-      throw new OutboxError("conflict", "Keep the original intent and configuration; inspect the existing receipt before changing routing or message formatting.");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("INSERT OR IGNORE INTO delivery(key,item,event,revision,destination,payload) VALUES (?,?,?,?,?,?)")
+        .run(key, intent.item, intent.event, intent.revision, intent.destination, payload);
+      const row = this.db.prepare("SELECT destination,payload FROM delivery WHERE key=?").get(key)!;
+      if (row.destination !== intent.destination || row.payload !== payload) {
+        throw new OutboxError("conflict", "Keep the original intent and configuration; inspect the existing receipt before changing routing or message formatting.");
+      }
+      this.db.prepare("INSERT OR IGNORE INTO delivery_context VALUES (?,?,?)").run(key, intent.at ?? 0, intent.priority ?? 4);
+      this.db.exec("COMMIT");
+      return key;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
-    return key;
+  }
+
+  /** Read a deterministic plan over pending intents; no payload or webhook is returned. */
+  planCoalescing(options: CoalescingOptions = {}): CoalescingPlan {
+    if (!this.since()) throw new OutboxError("disabled", "Run pm slack outbox --action enable before coalescing.");
+    const rows = this.db.prepare(`SELECT d.key,d.item,d.event,d.revision,d.destination,COALESCE(c.at,0) AS at,COALESCE(c.priority,4) AS priority
+      FROM delivery d LEFT JOIN delivery_context c ON c.key=d.key WHERE d.state='pending' LIMIT 10001`).all() as unknown as CoalescingEvent[];
+    return planSlackCoalescing(rows, options);
+  }
+
+  /** Page a preview or durable evidence manifest without exposing frozen payloads or destinations. */
+  coalescingReport(plan: CoalescingPlan, limit = 20, after = 0, durable = false): CoalescingReport {
+    limitValue(limit);
+    if (!Number.isSafeInteger(after) || after < 0) throw new OutboxError("invalid_input", "Use a nonnegative integer coalescing cursor.");
+    const total = durable ? Number(this.db.prepare("SELECT COUNT(*) AS n FROM coalescing_receipt").get()!.n) : plan.receipts.length;
+    const rows = durable ? this.db.prepare(`SELECT d.key,d.item,d.event,d.revision,c.disposition,c.notification,d.state
+      FROM coalescing_receipt c JOIN delivery d ON d.key=c.key ORDER BY d.key LIMIT ? OFFSET ?`).all(limit, after) as unknown as CoalescingReport["rows"] : plan.receipts.slice(after, after + limit).map((row) => ({ ...row, state: this.db.prepare("SELECT state FROM delivery WHERE key=?").get(row.key)!.state as OutboxState }));
+    return { summary: { events: plan.events, urgent: plan.urgent, coalesced: plan.coalesced, deferred: plan.deferred, waiting: plan.waiting, notifications: plan.notifications.length }, rows,
+      omitted: total - rows.length, next_cursor: after + rows.length < total ? after + rows.length : null };
+  }
+
+  /**
+   * Send urgent originals first and bounded routine summaries after closed windows.
+   * Claims fence concurrent plain and coalesced drains. Every original keeps its
+   * state and attempt count; crashes leave all claimed members visibly sending.
+   */
+  async drainCoalesced(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, options: CoalescingOptions = {}): Promise<CoalescingPlan> {
+    const plan = this.planCoalescing(options);
+    for (const receipt of plan.receipts) {
+      this.db.prepare("INSERT OR IGNORE INTO coalescing_receipt VALUES (?,?,?)").run(receipt.key, receipt.disposition, receipt.notification);
+    }
+    const uncertain = new Set<string>();
+    for (const notification of plan.notifications) {
+      if (uncertain.has(notification.destination)) continue;
+      const claim = this.claim(notification.keys, notification);
+      if (!claim) continue;
+      const original = JSON.parse(String(claim.members[0]!.payload)) as OutboxPayload;
+      const payload = notification.urgent ? original : { text: notification.text, mrkdwn: false, ...(original.channel === undefined ? {} : { channel: original.channel }) };
+      let state: OutboxState;
+      let refusal: OutboxError | undefined;
+      try {
+        const outcome = await send(notification.destination, payload);
+        state = outcome === "retry" ? "pending" : outcome;
+      } catch (error) {
+        if (error instanceof OutboxError) { refusal = error; state = error.code === "destination_changed" ? "refused" : "pending"; }
+        else state = "ambiguous";
+      }
+      this.finish(claim.token, state, Boolean(refusal));
+      if (refusal && refusal.code !== "destination_changed") throw refusal;
+      if (state === "ambiguous") uncertain.add(notification.destination);
+      if (state === "pending") break;
+    }
+    return plan;
   }
 
   /** Check whether a verified history transition already has a durable intent. */
@@ -290,34 +375,80 @@ export class SlackOutbox {
     const uncertain = new Set<string>();
     for (const candidate of candidates) {
       if (uncertain.has(String(candidate.destination))) continue;
-      const row = this.db.prepare("UPDATE delivery SET state='sending',owner=?,attempts=attempts+1 WHERE key=? AND state='pending' RETURNING destination,payload").get(process.pid, candidate.key!);
-      if (!row) continue;
+      const claim = this.claim([String(candidate.key)]);
+      if (!claim) continue;
+      const row = claim.members[0]!;
       let state: OutboxState;
+      let refusal: OutboxError | undefined;
       try {
-        const outcome = await send(String(row.destination), JSON.parse(String(row.payload)) as OutboxPayload);
+        const outcome = await send(row.destination, JSON.parse(row.payload) as OutboxPayload);
         state = outcome === "retry" ? "pending" : outcome;
       } catch (error) {
-        if (error instanceof OutboxError) {
-          const refused = error.code === "destination_changed";
-          this.db.prepare("UPDATE delivery SET state=?,owner=0,attempts=attempts-1 WHERE key=?").run(refused ? "refused" : "pending", candidate.key!);
-          if (refused) continue;
-          throw error;
-        }
-        state = "ambiguous";
+        if (error instanceof OutboxError) { refusal = error; state = error.code === "destination_changed" ? "refused" : "pending"; }
+        else state = "ambiguous";
       }
-      this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(state, candidate.key!);
+      this.finish(claim.token, state, Boolean(refusal));
+      if (refusal) {
+        if (refusal.code === "destination_changed") continue;
+        throw refusal;
+      }
       if (state === "ambiguous") uncertain.add(String(candidate.destination));
       if (state === "pending") break;
     }
     return this.status(limit);
   }
 
+  /** Run receipt mutations under SQLite's cross-process writer fence, rolling back every partial transition. */
+  private transaction<T>(action: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = action();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* SQLite can roll back a failed transaction itself. */ }
+      throw error;
+    }
+  }
+
+  /** Claim the complete membership and persist a fresh attempt token before any remote request. */
+  private claim(keys: readonly string[], notification?: { key: string; urgent: boolean }): { token: string; members: { key: string; payload: string; destination: string }[] } | undefined {
+    try {
+      return this.transaction(() => {
+        const placeholders = keys.map(() => "?").join(",");
+        const members = this.db.prepare(`SELECT key,payload,destination FROM delivery WHERE state='pending' AND key IN (${placeholders})`).all(...keys) as unknown as { key: string; payload: string; destination: string }[];
+        if (members.length !== keys.length) return undefined;
+        // Planner notification keys are stable across retries. Attempt tokens must never be reused.
+        const token = randomUUID();
+        for (const key of keys) {
+          this.db.prepare("UPDATE delivery SET state='sending',owner=?,attempts=attempts+1 WHERE key=?").run(process.pid, key);
+          if (notification) this.db.prepare("INSERT OR REPLACE INTO coalescing_receipt VALUES (?,?,?)").run(key, notification.urgent ? "bypass" : "coalesced", notification.key);
+          this.db.prepare("INSERT OR REPLACE INTO delivery_group VALUES (?,?)").run(key, token);
+        }
+        return { token, members };
+      });
+    } catch {
+      throw new OutboxError("storage_unavailable", "Restore writable receipt storage, then drain again; the failed group was not sent.");
+    }
+  }
+
+  /** Finish only this attempt; clean its mappings before releasing members, with no observable partial state. */
+  private finish(token: string, state: OutboxState, undoAttempt: boolean): void {
+    this.transaction(() => {
+      const keys = this.db.prepare("SELECT key FROM delivery_group WHERE notification=?").all(token).map((member) => String(member.key));
+      // Forced reconciliation may have retired this attempt while its sender was awaiting transport.
+      if (!keys.length) return;
+      if (state === "pending") this.db.prepare("DELETE FROM delivery_group WHERE notification=?").run(token);
+      const placeholders = keys.map(() => "?").join(",");
+      this.db.prepare(`UPDATE delivery SET state=?,owner=0,attempts=attempts-? WHERE state='sending' AND key IN (${placeholders})`).run(state, Number(undoAttempt), ...keys);
+    });
+  }
+
   /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
   resolve(key: string, decision: OutboxDecision, options: { force?: boolean } = {}): void {
     if (decision !== "acknowledged" && decision !== "retry" && decision !== "skip") throw new OutboxError("invalid_input", "Choose acknowledged, retry after verifying absence, or skip to discard without claiming delivery.");
     // One transaction fences concurrent reconciliation and claims across processes.
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       const row = this.db.prepare("SELECT state,owner FROM delivery WHERE key=?").get(key);
       if (!row) throw new OutboxError("not_found", "Inspect status and use an existing receipt key.");
       if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected" && row.state !== "refused") throw new OutboxError("not_ambiguous", "Only reconcile sending, ambiguous, rejected, or refused receipts.");
@@ -326,11 +457,12 @@ export class SlackOutbox {
         try { process.kill(Number(row.owner), 0); } catch (error) { active = (error as NodeJS.ErrnoException).code !== "ESRCH"; }
         if (active) throw new OutboxError("in_flight", "Verify that no sender is active; only then use force reconciliation for a reused process id (duplicates are possible).");
       }
-      this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(decision === "retry" ? "pending" : decision === "skip" ? "skipped" : decision, key);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      // A grouped HTTP attempt has one outcome: reconcile every member together.
+      const group = this.db.prepare("SELECT notification FROM delivery_group WHERE key=?").get(key);
+      const keys = group ? this.db.prepare("SELECT key FROM delivery_group WHERE notification=?").all(group.notification!).map((member) => String(member.key)) : [key];
+      if (group) this.db.prepare("DELETE FROM delivery_group WHERE notification=?").run(group.notification!);
+      // Releasing members is the final mutation; peers see the complete transition at COMMIT.
+      for (const member of keys) this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(decision === "retry" ? "pending" : decision === "skip" ? "skipped" : decision, member);
+    });
   }
 }
