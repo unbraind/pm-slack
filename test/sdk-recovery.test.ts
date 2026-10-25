@@ -1,6 +1,6 @@
 /** Canonical mutation-feed recovery on real trackers, with no git executable. */
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,18 @@ import { create, createHistoryEntry, init, listMutationEvents, readHistoryEntrie
 import type { ItemDocument } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { captureSlackOutbox, SlackOutbox } from "../index.ts";
+import type { OutboxRecoveryReport } from "../index.ts";
+
+/** Keep count assertions strict while requiring complete typed reasons for damaged candidates. */
+function assertRecoveryTotals(actual: OutboxRecoveryReport, expected: { inspected: number; queued: number; failed: number }) {
+  const { failures, ...totals } = actual;
+  assert.deepEqual(totals, expected);
+  assert.equal(failures?.length ?? 0, expected.failed);
+  for (const failure of failures ?? []) {
+    assert.equal(failure.code, "history_unavailable");
+    assert.ok(failure.item && failure.reason);
+  }
+}
 
 /** Initialize a real non-git tracker with isolated notification configuration. */
 async function fixture(t: TestContext) {
@@ -171,11 +183,11 @@ test("primed SDK caches cannot authorize corrupted history, with seeded mutation
         }
         result = await captureSlackOutbox(pmRoot, box);
       }
-      assert.deepEqual(result, { inspected: 0, queued: 0, failed: 1 });
+      assertRecoveryTotals(result, { inspected: 0, queued: 0, failed: 1 });
       assert.equal(box.status().rows.length, 0, "no intent may be published from a corrupt stream");
       assert.equal(box.since(), optIn, "verification must not advance opt-in");
       assert.deepEqual(box.recoveryPolicies(), policies, "verification must not advance eligibility");
-      assert.deepEqual(await captureSlackOutbox(pmRoot, box, [created.item.id]), { inspected: 0, queued: 0, failed: 1 });
+      assertRecoveryTotals(await captureSlackOutbox(pmRoot, box, [created.item.id]), { inspected: 0, queued: 0, failed: 1 });
     });
   }
 });
@@ -191,7 +203,7 @@ test("authoritative item mismatch refuses cached history with a typed CLI failur
   const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
   assert.equal(response.exitCode, 2);
   assert.equal(response.errorCode, "history_unavailable");
-  assert.deepEqual((response.result as { recovered: unknown }).recovered, { inspected: 0, queued: 0, failed: 1 });
+  assertRecoveryTotals((response.result as { recovered: OutboxRecoveryReport }).recovered, { inspected: 0, queued: 0, failed: 1 });
   assert.equal(box.status().rows.length, 0);
 });
 
@@ -215,7 +227,7 @@ test("verified historical snapshots enforce identity and title while retaining t
     assert.equal(verifyHistoryEntries(await readHistoryEntries(file, created.item.id), before).ok, true);
     const recovered = await captureSlackOutbox(pmRoot, box);
     if (field !== "priority") {
-      assert.deepEqual(recovered, { inspected: 2, queued: 0, failed: 1 });
+      assertRecoveryTotals(recovered, { inspected: 2, queued: 0, failed: 1 });
       assert.equal(box.status().rows.length, 0, "an invalid historical snapshot cannot publish an earlier buffered intent");
     } else {
       assert.deepEqual(recovered, { inspected: 3, queued: 2, failed: 0 });
@@ -224,5 +236,140 @@ test("verified historical snapshots enforce identity and title while retaining t
       t.after(() => db.close());
       assert.equal(db.prepare("SELECT priority FROM delivery_context WHERE key=?").get(blocked.key)!.priority, 4);
     }
+  });
+});
+
+/** Every batch includes both review reproductions and independent history failures. */
+const mixedDamage = ["document_empty", "document_missing", "document_missing_prefix", "document_invalid", "document_unreadable", "document_identity", "history_partial", "history_reorder", "history_forged", "history_missing", "history_empty", "history_null"] as const;
+
+test("mixed damaged inputs never abort healthy recovery or disable a check, with primed caches and restart", async (t) => {
+  for (const seed of [7, 19, 104729]) for (const restart of [false, true]) await t.test(`seed=${seed} restart=${restart}`, async (t) => {
+    const { directory, pmRoot, client, box } = await fixture(t);
+    const choose = randomPositions(seed);
+    const roles: string[] = [...mixedDamage, ...Array.from({ length: 5 }, () => "healthy")];
+    for (let index = roles.length - 1; index > 0; index--) {
+      const other = choose(index + 1);
+      [roles[index], roles[other]] = [roles[other]!, roles[index]!];
+    }
+    const candidates: { id: string; damage: string }[] = [];
+    for (const [index, damage] of roles.entries()) {
+      const created = await create({ title: `Mixed source ${index}`, priority: 1 }, client);
+      await update(created.item.id, { title: `Committed mixed revision ${seed}-${index}` }, client);
+      await update(created.item.id, { status: "blocked" }, client);
+      candidates.push({ id: created.item.id, damage });
+    }
+    assert.equal((await listMutationEvents({ pmRoot, cwd: directory, full: true, limit: 1000 })).source, "derived_index");
+    for (const { id, damage } of candidates) {
+      const item = join(pmRoot, "tasks", `${id}.toon`);
+      const history = join(pmRoot, "history", `${id}.jsonl`);
+      const original = readFileSync(history, "utf8");
+      if (damage === "document_empty") writeFileSync(item, "");
+      else if (damage === "document_missing" || damage === "document_missing_prefix") {
+        rmSync(item);
+        if (damage === "document_missing_prefix") writeFileSync(history, original.split("\n")[0]! + "\n");
+      } else if (damage === "document_invalid") writeFileSync(item, "null\n");
+      else if (damage === "document_unreadable") { rmSync(item); mkdirSync(item); }
+      else if (damage === "document_identity") writeFileSync(item, readFileSync(item, "utf8").replace(id, `${id}-wrong`));
+      else if (damage === "history_partial") writeFileSync(history, corruptHistory(original, "partial-tail", choose)!);
+      else if (damage === "history_reorder") writeFileSync(history, corruptHistory(original, "reorder", choose)!);
+      else if (damage === "history_forged") writeFileSync(history, corruptHistory(original, "hash", choose)!);
+      else if (damage === "history_missing") rmSync(history);
+      else if (damage === "history_empty") writeFileSync(history, " \n");
+      else if (damage === "history_null") writeFileSync(history, "null\n");
+    }
+    let result: { first: OutboxRecoveryReport; second: OutboxRecoveryReport; rows: { item: string; event: string }[] };
+    if (restart) {
+      const child = spawnSync(process.execPath, [join(import.meta.dirname, "helpers", "sdk-mixed-recovery-probe.ts"), pmRoot],
+        { cwd: directory, env: { ...process.env }, encoding: "utf8" });
+      assert.equal(child.status, 0, child.stderr);
+      result = JSON.parse(child.stdout) as typeof result;
+    } else {
+      result = { first: await captureSlackOutbox(pmRoot, box), second: await captureSlackOutbox(pmRoot, box), rows: box.status(100).rows };
+    }
+    const healthy = candidates.filter((candidate) => candidate.damage === "healthy").map((candidate) => candidate.id).sort();
+    const damaged = candidates.filter((candidate) => candidate.damage !== "healthy").map((candidate) => candidate.id).sort();
+    assertRecoveryTotals(result.first, { inspected: healthy.length * 3, queued: healthy.length * 2, failed: damaged.length });
+    assertRecoveryTotals(result.second, { inspected: healthy.length * 3, queued: 0, failed: damaged.length });
+    assert.deepEqual(result.first.failures!.map((failure) => failure.item).sort(), damaged);
+    assert.deepEqual(result.second.failures, result.first.failures);
+    assert.deepEqual([...new Set(result.rows.map((row) => row.item))].sort(), healthy);
+    assert.equal(result.rows.length, healthy.length * 2);
+    for (const id of healthy) assert.deepEqual(result.rows.filter((row) => row.item === id).map((row) => row.event).sort(), ["block", "create"]);
+    const missing = candidates.find((candidate) => candidate.damage === "document_missing_prefix")!.id;
+    assert.equal(result.first.failures!.find((failure) => failure.item === missing)!.reason, "document_missing");
+    const empty = candidates.find((candidate) => candidate.damage === "document_empty")!.id;
+    assert.equal(result.first.failures!.find((failure) => failure.item === empty)!.reason, "document_unreadable_or_invalid");
+  });
+});
+
+test("wrong-shaped history fields are explicit failures and cannot suppress another item's notification", async (t) => {
+  const cases = ["null", "scalar", "timestamp_type", "timestamp_value", "operation_type", "operation_empty", "patch_type"] as const;
+  for (const shape of cases) await t.test(shape, async (t) => {
+    const { pmRoot, client, box } = await fixture(t);
+    const bad = await create({ title: "Bad wire shape", priority: 1 }, client);
+    const good = await create({ title: "Healthy wire shape neighbor", priority: 1 }, client);
+    await listMutationEvents({ pmRoot, full: true });
+    const file = join(pmRoot, "history", `${bad.item.id}.jsonl`);
+    const entry = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    if (shape === "timestamp_type") entry.ts = 42;
+    else if (shape === "timestamp_value") entry.ts = "not-a-timestamp";
+    else if (shape === "operation_type") entry.op = {};
+    else if (shape === "operation_empty") entry.op = "";
+    else if (shape === "patch_type") entry.patch = {};
+    writeFileSync(file, JSON.stringify(shape === "null" ? null : shape === "scalar" ? 42 : entry) + "\n");
+    const recovered = await captureSlackOutbox(pmRoot, box);
+    assertRecoveryTotals(recovered, { inspected: 1, queued: 1, failed: 1 });
+    assert.equal(recovered.failures![0]!.item, bad.item.id);
+    assert.equal(recovered.failures![0]!.reason, "history_unreadable_or_invalid");
+    assert.deepEqual(box.status().rows.map((row) => row.item), [good.item.id]);
+  });
+});
+
+test("unreadable and absent inventory directories do not abort known healthy candidates", async (t) => {
+  const { pmRoot, client, box } = await fixture(t);
+  const good = await create({ title: "Recover beside damaged discovery input", priority: 1 }, client);
+  rmSync(join(pmRoot, "issues"), { recursive: true });
+  writeFileSync(join(pmRoot, "issues"), "not a directory");
+  rmSync(join(pmRoot, "epics"), { recursive: true });
+  writeFileSync(join(pmRoot, "tasks", "ignored.txt"), "Not an item document");
+  const recovered = await captureSlackOutbox(pmRoot, box);
+  assertRecoveryTotals(recovered, { inspected: 1, queued: 1, failed: 1 });
+  assert.deepEqual(recovered.failures, [{ item: "_inventory", code: "history_unavailable", reason: "inventory_unavailable" }]);
+  assert.deepEqual(box.status().rows.map((row) => row.item), [good.item.id]);
+});
+
+test("a missing history directory reports each current item instead of bypassing or aborting verification", async (t) => {
+  const { pmRoot, client, box } = await fixture(t);
+  const items = [await create({ title: "First missing stream", priority: 1 }, client), await create({ title: "Second missing stream", priority: 1 }, client)];
+  rmSync(join(pmRoot, "history"), { recursive: true });
+  const recovered = await captureSlackOutbox(pmRoot, box);
+  assertRecoveryTotals(recovered, { inspected: 0, queued: 0, failed: 2 });
+  assert.deepEqual(recovered.failures!.map((failure) => failure.item).sort(), items.map((item) => item.item.id).sort());
+  assert.ok(recovered.failures!.every((failure) => failure.reason === "history_missing"));
+});
+
+test("invalid historical values cannot partially publish an item or stop its healthy neighbor", async (t) => {
+  for (const field of ["priority", "type", "timestamp"] as const) await t.test(field, async (t) => {
+    const { pmRoot, client, box } = await fixture(t);
+    const bad = await create({ title: "Invalid historical projection", priority: 1 }, client);
+    const good = await create({ title: "Valid neighboring projection", priority: 1 }, client);
+    const before = { metadata: bad.item, body: "" };
+    const metadata: Record<string, unknown> = { ...bad.item, status: "blocked" };
+    if (field !== "timestamp") metadata[field] = {};
+    const historical = { metadata, body: "" } as unknown as ItemDocument;
+    const timestamp = field === "timestamp" ? "64" : new Date(Date.now() + 1000).toISOString();
+    const transitions = [
+      createHistoryEntry({ nowIso: timestamp, author: "fixture-agent", op: "update", before, after: historical }),
+      createHistoryEntry({ nowIso: timestamp, author: "fixture-agent", op: "update", before: historical, after: before }),
+    ];
+    const file = join(pmRoot, "history", `${bad.item.id}.jsonl`);
+    writeFileSync(file, readFileSync(file, "utf8") + transitions.map((entry) => JSON.stringify(entry) + "\n").join(""));
+    assert.equal(verifyHistoryEntries(await readHistoryEntries(file, bad.item.id), before).ok, true);
+    if (field === "type") process.env.PM_SLACK_ROUTES = JSON.stringify([{ match: "type:Task", webhook: process.env.PM_SLACK_WEBHOOK }]);
+    const recovered = await captureSlackOutbox(pmRoot, box);
+    assert.equal(recovered.queued, 1);
+    assert.equal(recovered.failed, 1);
+    assert.deepEqual(recovered.failures, [{ item: bad.item.id, code: "history_unavailable", reason: "historical_snapshot_invalid" }]);
+    assert.deepEqual(box.status().rows.map((row) => row.item), [good.item.id]);
   });
 });

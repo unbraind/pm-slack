@@ -127,6 +127,19 @@ export interface OutboxRecoveryPolicy extends OutboxRecoveryFilter {
   since: string;
 }
 
+/** Safe reasons an authoritative recovery input cannot authorize notifications. */
+export type OutboxRecoveryFailureReason = "document_missing" | "document_unreadable_or_invalid" | "history_missing" | "history_unreadable_or_invalid" | "current_state_mismatch" | "historical_snapshot_invalid" | "inventory_unavailable";
+
+/** Per-item refusal; contains no raw history, message body or local path. */
+export interface OutboxRecoveryFailure {
+  /** Candidate identity, or `_inventory` when a discovery directory is unreadable. */
+  item: string;
+  /** Stable operational refusal category shared with the CLI. */
+  code: "history_unavailable";
+  /** Exact input boundary that refused recovery. */
+  reason: OutboxRecoveryFailureReason;
+}
+
 /** Complete recovery totals; failed item histories never authorize partial intents. */
 export interface OutboxRecoveryReport {
   /** Verified history entries inspected. */
@@ -135,6 +148,8 @@ export interface OutboxRecoveryReport {
   queued: number;
   /** Item-history or global recovery failures, without exposing contents or local paths. */
   failed: number;
+  /** Complete safe refusal list when one or more candidate inputs fail. */
+  failures?: OutboxRecoveryFailure[];
 }
 
 /** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
@@ -151,6 +166,16 @@ function receiptKey(item: string, event: OutboxEvent, revision: string): string 
 /** Hash a destination without persisting a webhook credential. */
 export function slackDestination(webhook: string, channel?: string): string {
   return createHash("sha256").update(JSON.stringify([webhook, channel ?? null])).digest("hex");
+}
+
+/** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
+export function validateOutboxIntent(intent: OutboxIntent): void {
+  if (![intent.item, intent.event, intent.revision, intent.destination, intent.payload.text].every((value) => typeof value === "string" && value.length > 0) || !lifecycleEvents.includes(intent.event)) {
+    throw new OutboxError("invalid_input", "Provide an item, event, immutable revision, destination and message text.");
+  }
+  if ((intent.at !== undefined && (!Number.isSafeInteger(intent.at) || intent.at < 0)) || (intent.priority !== undefined && (!Number.isInteger(intent.priority) || intent.priority < 0 || intent.priority > 4))) {
+    throw new OutboxError("invalid_input", "Use a nonnegative integer timestamp and priority from 0 to 4.");
+  }
 }
 
 /** Validate the shared SDK and CLI bound before reading or claiming work. */
@@ -264,12 +289,7 @@ export class SlackOutbox {
   /** Persist an intent once; conflicting reuse refuses instead of silently changing a message. */
   enqueue(intent: OutboxIntent): string {
     if (!this.since()) throw new OutboxError("disabled", "Run pm slack outbox --action enable before lifecycle changes.");
-    if (![intent.item, intent.event, intent.revision, intent.destination, intent.payload.text].every((value) => typeof value === "string" && value.length > 0) || !lifecycleEvents.includes(intent.event)) {
-      throw new OutboxError("invalid_input", "Provide an item, event, immutable revision, destination and message text.");
-    }
-    if ((intent.at !== undefined && (!Number.isSafeInteger(intent.at) || intent.at < 0)) || (intent.priority !== undefined && (!Number.isInteger(intent.priority) || intent.priority < 0 || intent.priority > 4))) {
-      throw new OutboxError("invalid_input", "Use a nonnegative integer timestamp and priority from 0 to 4.");
-    }
+    validateOutboxIntent(intent);
     const key = receiptKey(intent.item, intent.event, intent.revision);
     const payload = JSON.stringify(intent.payload);
     this.db.exec("BEGIN IMMEDIATE");
@@ -308,7 +328,7 @@ export class SlackOutbox {
       omitted: total - rows.length, next_cursor: after + rows.length < total ? after + rows.length : null };
   }
 
-  /**
+/**
    * Send urgent originals first and bounded routine summaries after closed windows.
    * Claims fence concurrent plain and coalesced drains. Every original keeps its
    * state and attempt count; crashes leave all claimed members visibly sending.

@@ -38,7 +38,7 @@ healthy histories and already verified queued receipts still drain, while
 `recovered.failed` reports the failure count and the CLI exits 2 with
 `history_unavailable`. Repair and retry without duplicating acknowledged receipts.
 The feed is discovery-only: cached event rows never authorize a notification.
-SDK readers load each candidate's authoritative history and current item, and
+SDK readers load each candidate's authoritative history and required current item, and
 `verifyHistoryEntries` checks both chain integrity and agreement with the current
 item before replay, eligibility, deduplication or queuing. Missing streams and
 valid-prefix truncations are reported as failures; current item identities are
@@ -48,6 +48,14 @@ If the feed is unavailable (for example, for legacy timestamps), discovery falls
 back to retained history. Replay preserves historical payloads and authoritative
 stream order. A failed item publishes no new intents; healthy queued receipts
 can still drain.
+Recovery isolates each candidate: an empty, unreadable, malformed or missing item
+document never stops healthy neighbors. Identity discovery reads filenames with
+the SDK's folder/format mapping, since metadata inventories either omit unreadable
+documents or reject the whole read. A missing document fails even when its
+remaining history is a valid prefix. A failed item publishes no buffered intents.
+When failures occur, `recovered.failures` lists every candidate's `item`,
+`code: history_unavailable` and safe typed `reason`. An unreadable discovery
+directory is identified as `_inventory`. Healthy receipts remain unchanged.
 Keep history from the enable time; removing or compacting it can prevent recovery
 of unqueued transitions. History, tracker items and committed lifecycle commands
 are never rolled back by a delivery failure. Queued messages retain their original

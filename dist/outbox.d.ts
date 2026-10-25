@@ -115,6 +115,17 @@ export interface OutboxRecoveryPolicy extends OutboxRecoveryFilter {
     /** First eligible history timestamp for this policy. */
     since: string;
 }
+/** Safe reasons an authoritative recovery input cannot authorize notifications. */
+export type OutboxRecoveryFailureReason = "document_missing" | "document_unreadable_or_invalid" | "history_missing" | "history_unreadable_or_invalid" | "current_state_mismatch" | "historical_snapshot_invalid" | "inventory_unavailable";
+/** Per-item refusal; contains no raw history, message body or local path. */
+export interface OutboxRecoveryFailure {
+    /** Candidate identity, or `_inventory` when a discovery directory is unreadable. */
+    item: string;
+    /** Stable operational refusal category shared with the CLI. */
+    code: "history_unavailable";
+    /** Exact input boundary that refused recovery. */
+    reason: OutboxRecoveryFailureReason;
+}
 /** Complete recovery totals; failed item histories never authorize partial intents. */
 export interface OutboxRecoveryReport {
     /** Verified history entries inspected. */
@@ -123,6 +134,8 @@ export interface OutboxRecoveryReport {
     queued: number;
     /** Item-history or global recovery failures, without exposing contents or local paths. */
     failed: number;
+    /** Complete safe refusal list when one or more candidate inputs fail. */
+    failures?: OutboxRecoveryFailure[];
 }
 /** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
 export type OutboxDecision = "acknowledged" | "retry" | "skip";
@@ -130,6 +143,8 @@ export type OutboxDecision = "acknowledged" | "retry" | "skip";
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 /** Hash a destination without persisting a webhook credential. */
 export declare function slackDestination(webhook: string, channel?: string): string;
+/** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
+export declare function validateOutboxIntent(intent: OutboxIntent): void;
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export declare class SlackOutbox {
     private readonly db;
@@ -156,10 +171,10 @@ export declare class SlackOutbox {
     /** Page a preview or durable evidence manifest without exposing frozen payloads or destinations. */
     coalescingReport(plan: CoalescingPlan, limit?: number, after?: number, durable?: boolean): CoalescingReport;
     /**
-     * Send urgent originals first and bounded routine summaries after closed windows.
-     * Claims fence concurrent plain and coalesced drains. Every original keeps its
-     * state and attempt count; crashes leave all claimed members visibly sending.
-     */
+       * Send urgent originals first and bounded routine summaries after closed windows.
+       * Claims fence concurrent plain and coalesced drains. Every original keeps its
+       * state and attempt count; crashes leave all claimed members visibly sending.
+       */
     drainCoalesced(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, options?: CoalescingOptions): Promise<CoalescingPlan>;
     /** Check whether a verified history transition already has a durable intent. */
     has(item: string, event: OutboxEvent, revision: string): boolean;

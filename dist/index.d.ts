@@ -36,6 +36,7 @@ export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingRece
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;

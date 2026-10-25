@@ -32,10 +32,11 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import https from "node:https";
 import http from "node:http";
-import { getActiveExtensionRegistrations, listAllComplete, listMutationEvents, locateItem, readHistoryEntries, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
-import { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
+import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent } from "./outbox.ts";
 import type { OutboxPayload, OutboxOutcome, OutboxReport, OutboxEvent, OutboxIntent, OutboxRecoveryReport } from "./outbox.ts";
+import type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import type { CoalescingReport } from "./outbox.ts";
 import { CoalescingError } from "./coalescing.ts";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
@@ -43,6 +44,7 @@ export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingRece
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import path from "node:path";
 import type {
   AfterCommandHookContext,
@@ -1858,6 +1860,7 @@ function outboxToon(report: OutboxReport, recovered: OutboxRecoveryReport): stri
     `omitted: ${report.omitted}`,
     `next_cursor: ${report.next_cursor}`,
     "recovered:", `  inspected: ${recovered.inspected}`, `  queued: ${recovered.queued}`, `  failed: ${recovered.failed}`,
+    ...(recovered.failures ? [`  failures[${recovered.failures.length}]{item,code,reason}:`, ...recovered.failures.map((failure) => `    ${[failure.item, failure.code, failure.reason].map((value) => JSON.stringify(value)).join(",")}`)] : []),
     ...(recovered.failed ? ['ok: false', 'exit_code: 2', 'code: history_unavailable', 'remediation: "Repair retained history; healthy queued receipts were drained."'] : []),
   ].join("\n");
 }
@@ -1866,6 +1869,17 @@ function outboxToon(report: OutboxReport, recovered: OutboxRecoveryReport): stri
 function outboxFailure(error: unknown) {
   const refusal = error instanceof OutboxError ? error : new OutboxError("storage_unavailable", "Restore writable local outbox storage and drain again; committed items are unchanged.");
   return { ok: false, exit_code: refusal.exitCode, code: refusal.code, remediation: refusal.remedy };
+}
+
+/** A missing or invalid verification input is a typed refusal, never an optional SDK argument. */
+class SlackRecoveryError extends OutboxError {
+  /** Safe machine-readable input boundary that failed verification. */
+  readonly reason: OutboxRecoveryFailureReason;
+  /** Keep input failures distinct from destination and receipt-storage failures. */
+  constructor(reason: OutboxRecoveryFailureReason) {
+    super("history_unavailable", "Restore complete readable item documents and verified lifecycle history, then drain again.");
+    this.reason = reason;
+  }
 }
 
 /**
@@ -1920,15 +1934,52 @@ function outboxStorage<T>(operation: () => T): T {
  * Return a typed refusal so one damaged stream does not hide healthy transitions.
  */
 async function readVerifiedOutboxHistory(pmRoot: string, id: string) {
+  let reason: OutboxRecoveryFailureReason = "history_unreadable_or_invalid";
   try {
-    const entries = await readHistoryEntries(path.join(pmRoot, "history", `${id}.jsonl`), id);
+    const snapshot = await readHistorySnapshot(path.join(pmRoot, "history", `${id}.jsonl`), id);
+    if (snapshot.raw === null) return new SlackRecoveryError("history_missing");
+    const entries = snapshot.entries;
+    if (entries.length === 0) return new SlackRecoveryError(reason);
+    reason = "document_unreadable_or_invalid";
     const settings = await readSettings(pmRoot);
     const registry = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
     const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, registry.type_to_folder);
-    const document = located ? (await readLocatedItem(located, { schema: settings.schema })).document : undefined;
-    if (verifyHistoryEntries(entries, document).ok) return entries;
-  } catch { /* Unreadable, malformed and invalid authoritative streams share the typed refusal. */ }
-  return new OutboxError("history_unavailable", "Restore complete, verified lifecycle history matching the current item, then drain again.");
+    if (!located) return new SlackRecoveryError("document_missing");
+    const { document } = await readLocatedItem(located, { schema: settings.schema });
+    if (document.metadata.id !== id) return new SlackRecoveryError(reason);
+    reason = "history_unreadable_or_invalid";
+    if (!entries.every((entry) => entry !== null && typeof entry === "object" && typeof entry.ts === "string" && isTimestampLiteral(entry.ts) && typeof entry.op === "string" && entry.op.length > 0 && Array.isArray(entry.patch))) return new SlackRecoveryError(reason);
+    const verification = verifyHistoryEntries(entries, document);
+    if (!verification.ok) return new SlackRecoveryError(verification.current_matches_latest === false ? "current_state_mismatch" : reason);
+    return entries;
+  } catch { return new SlackRecoveryError(reason); }
+}
+
+/**
+ * Discover current identities without parsing documents, using SDK-defined
+ * folders and extensions so malformed inputs cannot abort or disappear.
+ * The SDK has no unreadable-inclusive identity inventory with per-row failures.
+ * No document content from discovery is trusted for recovery decisions.
+ */
+async function readOutboxItemIds(pmRoot: string): Promise<{ ids: string[]; failures: OutboxRecoveryFailure[] }> {
+  const settings = await readSettings(pmRoot);
+  const registry = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
+  const directories = new Map<string, Set<string>>();
+  for (const type of registry.types) for (const format of ["toon", "json_markdown"] as const) {
+    const sample = getItemPath(pmRoot, type, "_candidate", format, registry.type_to_folder);
+    const directory = path.dirname(sample);
+    const extensions = directories.get(directory) ?? new Set<string>();
+    extensions.add(path.extname(sample)); directories.set(directory, extensions);
+  }
+  const ids = new Set<string>();
+  const failures: OutboxRecoveryFailure[] = [];
+  for (const [directory, extensions] of directories) {
+    if (!existsSync(directory)) continue;
+    try {
+      for (const file of readdirSync(directory)) if (extensions.has(path.extname(file))) ids.add(path.basename(file, path.extname(file)));
+    } catch { failures.push({ item: "_inventory", code: "history_unavailable", reason: "inventory_unavailable" }); }
+  }
+  return { ids: [...ids], failures };
 }
 
 /**
@@ -1971,15 +2022,26 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
   let inspected = 0;
   let queued = 0;
   let failed = 0;
+  const failures: OutboxRecoveryFailure[] = [];
   try {
     outboxStorage(() => outbox.recoveryPolicies());
+    const inventory = itemIds ? { ids: itemIds, failures: [] } : await readOutboxItemIds(pmRoot);
+    failures.push(...inventory.failures);
+    failed += inventory.failures.length;
     const streams = await readOutboxMutationStreams(pmRoot, itemIds);
     // Explicit legacy fallback when the canonical feed cannot read retained history.
-    const discovered = streams ? [...streams.keys()] : readdirSync(path.join(pmRoot, "history"))
-      .filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).map((file) => file.slice(0, -6));
+    let discovered = streams ? [...streams.keys()] : [];
+    if (!streams) {
+      try {
+        discovered = readdirSync(path.join(pmRoot, "history"))
+          .filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).map((file) => file.slice(0, -6));
+      } catch {
+        if (!inventory.ids.length) throw new SlackRecoveryError("inventory_unavailable");
+      }
+    }
     // A missing stream can vanish from the derived feed. Inventory is discovery
     // only; each candidate's authoritative item and history are verified below.
-    const currentIds = itemIds ?? (await listAllComplete({}, { pmRoot, cwd: path.dirname(pmRoot), noExtensions: true })).items.map((item) => item.id);
+    const currentIds = inventory.ids;
     const ids = [...new Set([...discovered, ...currentIds])].sort();
     for (const id of ids) {
       if (itemIds && !itemIds.includes(id)) continue;
@@ -1999,7 +2061,8 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
           const policy = outboxStorage(() => outbox.recoveryPolicyAt(entry.ts));
           if (!event || !policy || !policy.events.includes(event) || outboxStorage(() => outbox.has(id, event, entry.after_hash))) continue;
           const { metadata } = replayHistoryToTarget(entries, index);
-          if (metadata.id !== id || typeof metadata.title !== "string") throw new OutboxError("history_unavailable", "Restore complete item history before recovering notifications.");
+          if (metadata.id !== id || typeof metadata.title !== "string") throw new SlackRecoveryError("historical_snapshot_invalid");
+          if (metadata.priority !== undefined && ![0, 1, 2, 3, 4].includes(metadata.priority as number)) throw new SlackRecoveryError("historical_snapshot_invalid");
           const item = metadata as unknown as PmItem;
           if (!meetsMinPriority(item, policy.minPriority as Priority)) continue;
           const target = selectRoute(event, item, config.routes, config.webhookUrl, config.channel);
@@ -2012,17 +2075,20 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
           });
           intents.push({ item: id, event, revision: entry.after_hash, destination: slackDestination(target.webhookUrl, target.channel), payload, at: Date.parse(entry.ts), priority: item.priority ?? 4 });
         }
+        try { for (const intent of intents) validateOutboxIntent(intent); }
+        catch { throw new SlackRecoveryError("historical_snapshot_invalid"); }
         for (const intent of intents) { outboxStorage(() => outbox.enqueue(intent)); queued += 1; }
       } catch (error) {
         if (error instanceof OutboxError && error.code !== "history_unavailable") throw error;
         failed += 1;
+        failures.push({ item: id, code: "history_unavailable", reason: error instanceof SlackRecoveryError ? error.reason : "historical_snapshot_invalid" });
       }
     }
   } catch (error) {
     if (error instanceof OutboxError) throw error;
     throw new OutboxError("history_unavailable", "Restore readable, verified lifecycle history; existing queued receipts can still drain.");
   }
-  return { inspected, queued, failed };
+  return { inspected, queued, failed, ...(failures.length ? { failures } : {}) };
 }
 
 export default defineExtension({
