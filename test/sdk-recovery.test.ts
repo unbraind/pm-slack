@@ -74,6 +74,10 @@ test("legacy timestamps outside the strict feed contract retain verified history
   writeFileSync(historyPath, JSON.stringify(original) + "\n");
   assert.deepEqual(await captureSlackOutbox(pmRoot, box), { inspected: 1, queued: 1, failed: 0 });
   assert.equal((await captureSlackOutbox(pmRoot, box)).queued, 0);
+  const excluded = await create({ title: "Outside the requested legacy stream", priority: 1 }, client);
+  assert.deepEqual(await captureSlackOutbox(pmRoot, box, [created.item.id]), { inspected: 1, queued: 0, failed: 0 });
+  assert.equal(box.status().rows.some((row) => row.item === excluded.item.id), false,
+    "the explicit retained-history fallback must preserve the requested item filter");
 });
 
 test("canonical timestamp normalization preserves sealed retained records through history fallback", async (t) => {
