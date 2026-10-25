@@ -298,6 +298,17 @@ if (result.error) {
 // coverage-configuration problem the author does not have — burying the test
 // failure they need to act on.
 if (result.status !== 0) {
+  // A branch miss has no uncovered line in Node's summary. Preserve the original
+  // failure while naming zero-hit LCOV branches so CI failures are actionable.
+  try {
+    let source = "";
+    for (const line of readFileSync(lcovPath, "utf8").split("\n")) {
+      if (line.startsWith("SF:")) source = relative(repoRoot, resolve(repoRoot, line.slice(3)));
+      if (!line.startsWith("BRDA:")) continue;
+      const [at, block, branch, hits] = line.slice(5).split(",");
+      if (hits === "0" || hits === "-") console.error(`coverage-gate: uncovered branch ${source}:${at} (${block}/${branch})`);
+    }
+  } catch { /* Missing reports must not hide the test runner's original failure. */ }
   process.exit(result.status ?? 1);
 }
 
