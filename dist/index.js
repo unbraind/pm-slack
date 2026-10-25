@@ -1722,7 +1722,7 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
 }
 export default defineExtension({
     name: "pm-slack",
-    version: "2026.10.24",
+    version: "2026.10.25",
     activate(api) {
         api.registerRenderer("toon", (ctx) => {
             const report = ctx.result;
