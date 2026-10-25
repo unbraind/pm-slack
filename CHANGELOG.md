@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Keep enabled Slack lifecycle notifications durable across restarts ([pm-slack-3e7d](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-3e7d.toon))
+- Bound lifecycle notification bursts with complete coalescing receipts ([pm-slack-npwn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-npwn.toon))
+
+### Fixed
+
+- Keep outbox opt-in and recovery policy atomic across crashes ([pm-slack-s53m](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-s53m.toon))
+
 ## 2026.10.23 - 2026-10-23
 
 ### Changed
