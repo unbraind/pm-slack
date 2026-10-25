@@ -30,12 +30,18 @@ starts their recovery policy with future history rather than guessing old eligib
 
 After successful lifecycle mutations, the hook recovers the affected item's
 matching transitions and attempts at most one delivery. Reads never drain.
-`drain` recovers committed events from verified SDK history, including changes
+`drain` discovers committed events through the SDK's cursor-paginated mutation
+feed and verifies full history entries, including changes
 whose process exited before its hook ran, and drains queued receipts. Run it after
 a restart or periodically from your scheduler. A failed item history is isolated:
 healthy histories and already verified queued receipts still drain, while
 `recovered.failed` reports the failure count and the CLI exits 2 with
 `history_unavailable`. Repair and retry without duplicating acknowledged receipts.
+If the feed cannot cover retained history (for example, legacy timestamps outside
+its stricter timestamp contract), recovery falls back to verified SDK history
+reads per item. It also uses authoritative history if timestamp normalization in
+the feed changes a sealed entry's integrity hash. Replay preserves stream-version order and historical payloads;
+no notification is inferred from an incomplete or invalid history chain.
 Keep history from the enable time; removing or compacting it can prevent recovery
 of unqueued transitions. History, tracker items and committed lifecycle commands
 are never rolled back by a delivery failure. Queued messages retain their original
@@ -123,7 +129,9 @@ supports direct intent enqueue/drain, while recovery requires a saved policy.
 
 Lifecycle delivery, outbox enable/status/drain/resolve, manual notifications,
 offline previews and digests work in a plain initialized tracker without git.
-Outbox history recovery uses SDK history reads and never runs a git subprocess.
+Outbox recovery uses the SDK mutation feed with retained-history fallback and
+never runs a git subprocess. The feed may rebuild its derived runtime index;
+authoritative item and history files stay unchanged.
 This outbox needs local durable runtime storage; it does not provide a remote
 database backend. No Slack command requires a git repository.
 

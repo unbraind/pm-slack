@@ -1,0 +1,29 @@
+id: pm-slack-3so4
+title: Use the pm SDK mutation feed for Slack outbox recovery
+description: "Adopt the canonical paginated mutation-event API for lifecycle recovery, preserve verified retained-history fallback and uncertain delivery semantics, and retain renderer defense in depth. Related SDK adoption: pm-slack-fitn."
+type: Chore
+status: in_progress
+priority: 2
+tags[1]: sdk-adoption
+created_at: "2026-10-25T15:46:32.272Z"
+updated_at: "2026-10-25T16:00:52.105Z"
+author: codex-agent
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-slack-fitn,related,"2026-10-25T15:52:27.938Z",codex-agent,"cli:update:dep",detected
+comments[6]{created_at,author,text}:
+  "2026-10-25T15:47:15.676Z",codex-agent,"Plan: use listMutationEvents with full entries and opaque cursor pagination as the primary discovery path; preserve verified retained-history fallback when the event API cannot cover an old or malformed stream. Preserve lifecycle ordering, revision deduplication, eligibility snapshots and delivery uncertainty. Related SDK adoption item: https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fitn.toon . Audit renderer finding requires no replacement: command-owned SDK renderers are already registered; local result-shape checks remain defense in depth. Dependencies stay pinned."
+  "2026-10-25T15:52:30.067Z",codex-agent,"Replacement proof: reverted only captureSlackOutbox to origin/main while retaining the new tests and helper. node --test test/sdk-recovery.test.ts failed exactly one test: the canonical SDK feed projection was absent. The retained-history fallback test still passed. Restored the implementation. Full coverage: 476 tests passed; 100% lines, branches and functions across index.ts, outbox.ts and coalescing.ts. Renderer finding is already SDK-owned and deliberately retained, with no missing API."
+  "2026-10-25T15:52:32.276Z",codex-agent,"Differential proof: freshly compiled origin/main 5c0bd37 versus candidate using read-only, non-git public tracker snapshots. pm-slack 5c0bd37: 700 inspected, 230 queued, 0 failed; pm-slack-standup f1d1187: 881 inspected, 237 queued, 0 failed. All 467 frozen payloads, revision receipts, eligibility contexts, repeated captures, item-filtered captures and ambiguous-destination holds matched exactly. Authoritative snapshot hashes were unchanged before and after; no git executable and no network sends. Zero intentional output differences. The SDK may create its disposable derived runtime projection."
+  "2026-10-25T15:53:50.156Z",codex-agent,"Linked targeted test execution passed via pm test --run --progress. This tracker disables persisted test-result tracking, so the CLI returned a local receipt; results are recorded here without changing that policy. Full npm and Bun release gates will run with isolated HOME and git identity, matching clean CI discovery rather than optional host-global extensions."
+  "2026-10-25T15:56:57.235Z",codex-agent,"SDK compatibility gap reproduced with real sealed history: listMutationEvents full entries normalize an RFC3339 +00:00 timestamp to Z, invalidating the original immutable record hash. Needed SDK capability: byte-faithful authoritative full history entries (or a projection that preserves the sealed entry timestamp). No upstream issue filed; orchestrator can report it. Package fallback now retries a projected stream from readHistoryEntries before declaring it invalid. The new offset regression failed before this fallback (0 inspected, 0 queued, 1 failed instead of 2/2/0) and passes after it. This preserves original behavior; no history is rewritten. Re-running final gates after the added regression."
+  "2026-10-25T16:00:50.097Z",codex-agent,"Final validation after timestamp-compatibility fallback: linked typecheck, test typecheck, docstring gate and targeted tests passed (39 tests). Complete npm run release:check and bun run release:check both passed with clean HOME and git identity: 477 tests each, zero failures/skips, 100% lines/branches/functions across all three shipped sources. Native Bun acceptance passed: one recovered lifecycle plus two coalesced events, two acknowledged HTTP sends, zero duplicates, no git. Re-ran the differential proof after the fix: all 467 public-corpus payloads/receipts remain identical and authoritative hashes unchanged. Final function-revert proof: two passes, one expected canonical-feed failure. Six original source lines removed; explicit SDK history fallback and already-owned renderers retained. No lint script is configured. Ready for review; owner verifies and closes the item."
+files[3]{path,scope}:
+  index.ts,project
+  scripts/verify-sdk-adoption.ts,project
+  test/sdk-recovery.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run typecheck && npm run build:test && npm run docstring && node --test test/sdk-recovery.test.ts test/outbox.test.ts",project,codex-agent,"2026-10-25T15:52:34.291Z",local_mutation,refactor/sdk-adoption-1025
+docs[2]{path,scope}:
+  docs/sdk-adoption-validation.md,project
+  README.md,project
+body: ""

@@ -613,7 +613,7 @@ declare function outboxFailure(error: unknown): {
  */
 declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
 /**
- * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
+ * Recover opted-in lifecycle transitions from SDK mutation events, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */

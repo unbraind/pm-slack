@@ -30,7 +30,7 @@
  */
 import https from "node:https";
 import http from "node:http";
-import { listAllComplete, readHistoryEntries, replayHistoryToTarget, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { listAllComplete, listMutationEvents, readHistoryEntries, replayHistoryToTarget, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
 import { CoalescingError } from "./coalescing.js";
@@ -1643,7 +1643,38 @@ function outboxStorage(operation) {
     }
 }
 /**
- * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
+ * Discover retained item streams through the canonical cursor-paginated SDK feed.
+ * Full entries preserve historical payloads and pre-opt-in status context. The SDK
+ * orders across streams by timestamp; replay within each item uses stream version.
+ * An unavailable feed falls back to isolated retained-history reads, so legacy
+ * timestamps or one malformed stream cannot hide healthy committed transitions.
+ */
+async function readOutboxMutationStreams(pmRoot, itemIds) {
+    try {
+        if (!existsSync(path.join(pmRoot, "history")))
+            return undefined;
+        const streams = new Map();
+        let cursor;
+        for (;;) {
+            const page = await listMutationEvents({ pmRoot, cwd: path.dirname(pmRoot), item: itemIds, since: cursor, full: true, limit: 1000 });
+            for (const event of page.events) {
+                if (event.item_id.startsWith("_") || (itemIds && !itemIds.includes(event.item_id)))
+                    continue;
+                const entries = streams.get(event.item_id) ?? [];
+                entries.push(event);
+                streams.set(event.item_id, entries);
+            }
+            if (!page.has_more)
+                return streams;
+            cursor = page.next_cursor;
+        }
+    }
+    catch {
+        return undefined;
+    }
+}
+/**
+ * Recover opted-in lifecycle transitions from SDK mutation events, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
@@ -1659,13 +1690,20 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
     let failed = 0;
     try {
         outboxStorage(() => outbox.recoveryPolicies());
-        const files = readdirSync(path.join(pmRoot, "history")).filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).sort();
-        for (const file of files) {
-            const id = file.slice(0, -6);
+        const streams = await readOutboxMutationStreams(pmRoot, itemIds);
+        // Explicit legacy fallback when the canonical feed cannot read retained history.
+        const ids = streams ? [...streams.keys()].sort() : readdirSync(path.join(pmRoot, "history"))
+            .filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).map((file) => file.slice(0, -6)).sort();
+        for (const id of ids) {
             if (itemIds && !itemIds.includes(id))
                 continue;
             try {
-                const entries = await readHistoryEntries(path.join(pmRoot, "history", file), id);
+                let entries = streams ? streams.get(id).sort((left, right) => left.version - right.version).map((event) => event.entry)
+                    : await readHistoryEntries(path.join(pmRoot, "history", `${id}.jsonl`), id);
+                // Feed timestamp normalization can invalidate an otherwise sealed raw record.
+                // Recover the authoritative representation before rejecting the item stream.
+                if (streams && !verifyHistoryEntries(entries).ok)
+                    entries = await readHistoryEntries(path.join(pmRoot, "history", `${id}.jsonl`), id);
                 if (!verifyHistoryEntries(entries).ok)
                     throw new OutboxError("history_unavailable", "Restore valid retained lifecycle history, then drain again.");
                 const intents = [];
