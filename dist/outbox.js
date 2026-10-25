@@ -34,6 +34,15 @@ function receiptKey(item, event, revision) {
 export function slackDestination(webhook, channel) {
     return createHash("sha256").update(JSON.stringify([webhook, channel ?? null])).digest("hex");
 }
+/** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
+export function validateOutboxIntent(intent) {
+    if (![intent.item, intent.event, intent.revision, intent.destination, intent.payload.text].every((value) => typeof value === "string" && value.length > 0) || !lifecycleEvents.includes(intent.event)) {
+        throw new OutboxError("invalid_input", "Provide an item, event, immutable revision, destination and message text.");
+    }
+    if ((intent.at !== undefined && (!Number.isSafeInteger(intent.at) || intent.at < 0)) || (intent.priority !== undefined && (!Number.isInteger(intent.priority) || intent.priority < 0 || intent.priority > 4))) {
+        throw new OutboxError("invalid_input", "Use a nonnegative integer timestamp and priority from 0 to 4.");
+    }
+}
 /** Validate the shared SDK and CLI bound before reading or claiming work. */
 function limitValue(limit) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
@@ -143,12 +152,7 @@ export class SlackOutbox {
     enqueue(intent) {
         if (!this.since())
             throw new OutboxError("disabled", "Run pm slack outbox --action enable before lifecycle changes.");
-        if (![intent.item, intent.event, intent.revision, intent.destination, intent.payload.text].every((value) => typeof value === "string" && value.length > 0) || !lifecycleEvents.includes(intent.event)) {
-            throw new OutboxError("invalid_input", "Provide an item, event, immutable revision, destination and message text.");
-        }
-        if ((intent.at !== undefined && (!Number.isSafeInteger(intent.at) || intent.at < 0)) || (intent.priority !== undefined && (!Number.isInteger(intent.priority) || intent.priority < 0 || intent.priority > 4))) {
-            throw new OutboxError("invalid_input", "Use a nonnegative integer timestamp and priority from 0 to 4.");
-        }
+        validateOutboxIntent(intent);
         const key = receiptKey(intent.item, intent.event, intent.revision);
         const payload = JSON.stringify(intent.payload);
         this.db.exec("BEGIN IMMEDIATE");
@@ -188,10 +192,10 @@ export class SlackOutbox {
             omitted: total - rows.length, next_cursor: after + rows.length < total ? after + rows.length : null };
     }
     /**
-     * Send urgent originals first and bounded routine summaries after closed windows.
-     * Claims fence concurrent plain and coalesced drains. Every original keeps its
-     * state and attempt count; crashes leave all claimed members visibly sending.
-     */
+       * Send urgent originals first and bounded routine summaries after closed windows.
+       * Claims fence concurrent plain and coalesced drains. Every original keeps its
+       * state and attempt count; crashes leave all claimed members visibly sending.
+       */
     async drainCoalesced(send, options = {}) {
         const plan = this.planCoalescing(options);
         for (const receipt of plan.receipts) {

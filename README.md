@@ -30,12 +30,32 @@ starts their recovery policy with future history rather than guessing old eligib
 
 After successful lifecycle mutations, the hook recovers the affected item's
 matching transitions and attempts at most one delivery. Reads never drain.
-`drain` recovers committed events from verified SDK history, including changes
+`drain` discovers candidate items through the SDK's cursor-paginated mutation
+feed, then reads and verifies authoritative history, including changes
 whose process exited before its hook ran, and drains queued receipts. Run it after
 a restart or periodically from your scheduler. A failed item history is isolated:
 healthy histories and already verified queued receipts still drain, while
 `recovered.failed` reports the failure count and the CLI exits 2 with
 `history_unavailable`. Repair and retry without duplicating acknowledged receipts.
+The feed is discovery-only: cached event rows never authorize a notification.
+SDK readers load each candidate's authoritative history and required current item, and
+`verifyHistoryEntries` checks both chain integrity and agreement with the current
+item before replay, eligibility, deduplication or queuing. Missing streams and
+valid-prefix truncations are reported as failures; current item identities are
+included so a missing history file cannot disappear from discovery. Page cursors
+are used only after verification and never saved as a durable acknowledgement.
+If the feed is unavailable (for example, for legacy timestamps), discovery falls
+back to retained history. Replay preserves historical payloads and authoritative
+stream order. A failed item publishes no new intents; healthy queued receipts
+can still drain.
+Recovery isolates each candidate: an empty, unreadable, malformed or missing item
+document never stops healthy neighbors. Identity discovery reads filenames with
+the SDK's folder/format mapping, since metadata inventories either omit unreadable
+documents or reject the whole read. A missing document fails even when its
+remaining history is a valid prefix. A failed item publishes no buffered intents.
+When failures occur, `recovered.failures` lists every candidate's `item`,
+`code: history_unavailable` and safe typed `reason`. An unreadable discovery
+directory is identified as `_inventory`. Healthy receipts remain unchanged.
 Keep history from the enable time; removing or compacting it can prevent recovery
 of unqueued transitions. History, tracker items and committed lifecycle commands
 are never rolled back by a delivery failure. Queued messages retain their original
@@ -123,7 +143,9 @@ supports direct intent enqueue/drain, while recovery requires a saved policy.
 
 Lifecycle delivery, outbox enable/status/drain/resolve, manual notifications,
 offline previews and digests work in a plain initialized tracker without git.
-Outbox history recovery uses SDK history reads and never runs a git subprocess.
+Outbox recovery uses the SDK mutation feed with retained-history fallback and
+never runs a git subprocess. The feed may rebuild its derived runtime index;
+authoritative item and history files stay unchanged.
 This outbox needs local durable runtime storage; it does not provide a remote
 database backend. No Slack command requires a git repository.
 

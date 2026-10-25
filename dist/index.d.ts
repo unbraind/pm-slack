@@ -36,6 +36,7 @@ export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingRece
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -613,7 +614,7 @@ declare function outboxFailure(error: unknown): {
  */
 declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
 /**
- * Recover opted-in lifecycle transitions from verified SDK history, including commits whose hook never ran.
+ * Recover opted-in lifecycle transitions from SDK mutation events, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
