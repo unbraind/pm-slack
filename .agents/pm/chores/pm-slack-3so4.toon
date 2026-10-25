@@ -6,13 +6,11 @@ status: in_progress
 priority: 2
 tags[1]: sdk-adoption
 created_at: "2026-10-25T15:46:32.272Z"
-updated_at: "2026-10-25T19:30:31.594Z"
-assignee: codex-agent
-claim_principal: codex-agent
+updated_at: "2026-10-25T19:34:45.952Z"
 author: codex-agent
 dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-slack-fitn,related,"2026-10-25T15:52:27.938Z",codex-agent,"cli:update:dep",detected
-comments[14]{created_at,author,text}:
+comments[15]{created_at,author,text}:
   "2026-10-25T15:47:15.676Z",codex-agent,"Plan: use listMutationEvents with full entries and opaque cursor pagination as the primary discovery path; preserve verified retained-history fallback when the event API cannot cover an old or malformed stream. Preserve lifecycle ordering, revision deduplication, eligibility snapshots and delivery uncertainty. Related SDK adoption item: https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fitn.toon . Audit renderer finding requires no replacement: command-owned SDK renderers are already registered; local result-shape checks remain defense in depth. Dependencies stay pinned."
   "2026-10-25T15:52:30.067Z",codex-agent,"Replacement proof: reverted only captureSlackOutbox to origin/main while retaining the new tests and helper. node --test test/sdk-recovery.test.ts failed exactly one test: the canonical SDK feed projection was absent. The retained-history fallback test still passed. Restored the implementation. Full coverage: 476 tests passed; 100% lines, branches and functions across index.ts, outbox.ts and coalescing.ts. Renderer finding is already SDK-owned and deliberately retained, with no missing API."
   "2026-10-25T15:52:32.276Z",codex-agent,"Differential proof: freshly compiled origin/main 5c0bd37 versus candidate using read-only, non-git public tracker snapshots. pm-slack 5c0bd37: 700 inspected, 230 queued, 0 failed; pm-slack-standup f1d1187: 881 inspected, 237 queued, 0 failed. All 467 frozen payloads, revision receipts, eligibility contexts, repeated captures, item-filtered captures and ambiguous-destination holds matched exactly. Authoritative snapshot hashes were unchanged before and after; no git executable and no network sends. Zero intentional output differences. The SDK may create its disposable derived runtime projection."
@@ -27,8 +25,10 @@ comments[14]{created_at,author,text}:
   "2026-10-25T19:17:13.258Z",codex-agent,"Exact-head CI exposed a Node 26 Bun-gate coverage gap: all 527 tests passed, but index.ts branch coverage was 99.77% (aggregate 99.82%) against the unchanged 100% threshold. Node 22 passed both release gates, and Node 26 npm/native Bun passed. Reproducing under local Node 26 to identify the missing deterministic scenario; no threshold changes and no CI retry in place of evidence."
   "2026-10-25T19:25:33.171Z",codex-agent,"Coverage follow-up: the original Node 26 full-suite reproduction passed 527 tests at 100%, so the CI branch miss was not deterministic. Extended the real legacy-history regression with a second item and an explicit item filter. Targeted Node 26 LCOV confirms the fallback-filter skip branch at index.ts:1985 now executes (0 hits before, 1 after), and the excluded item never queues. Typecheck, test typecheck and docstrings passed. Complete Node 26 bun run release:check now passes 527 tests with 100% lines/branches/functions across all three sources. No production code or coverage threshold changed in this follow-up. Original authoritative corruption properties and function-revert proof remain valid."
   "2026-10-25T19:30:31.593Z",codex-agent,"The new CI head passed both Node 26 release gates, but Node 22 npm reported the same single-branch shortfall with all 527 tests passing. Adding failure-only LCOV diagnostics to the coverage gate so CI identifies the actual zero-hit source range, while preserving its original status and the unchanged 100% thresholds. Reproducing the complete suite under local Node 22; no production recovery changes in this diagnostic follow-up."
-files[4]{path,scope}:
+  "2026-10-25T19:34:43.862Z",codex-agent,"CI acceptance: https://github.com/unbraind/pm-slack/actions/runs/40226450413 passed at dc3ba95. Both Node 22 and 26 jobs passed complete npm and Bun release gates: 527 tests per gate (2108 total), zero failures/skips, 100% lines/branches/functions across all three shipped sources, and both native Bun acceptance runs passed. Local Node 22 coverage also passed 527 tests at 100%. Failure-only coverage diagnostics now print zero-hit LCOV source ranges without changing thresholds or failure status. All authoritative verification points, 48 seeded corruption cases, SDK cache-without-integrity-receipt gap and behavioral revert proof remain documented. Releasing the claim for orchestrator verification; no item closure, merge or release."
+files[5]{path,scope}:
   index.ts,project
+  scripts/coverage-gate.ts,project
   scripts/verify-sdk-adoption.ts,project
   test/helpers/sdk-corruption-probe.ts,project
   test/sdk-recovery.test.ts,project
