@@ -4,8 +4,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
-import { create, createHistoryEntry, init, listMutationEvents, serializeItemDocument, update, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { create, createHistoryEntry, init, listMutationEvents, readHistoryEntries, serializeItemDocument, update, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import type { ItemDocument } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { captureSlackOutbox, SlackOutbox } from "../index.ts";
 
@@ -191,4 +193,36 @@ test("authoritative item mismatch refuses cached history with a typed CLI failur
   assert.equal(response.errorCode, "history_unavailable");
   assert.deepEqual((response.result as { recovered: unknown }).recovered, { inspected: 0, queued: 0, failed: 1 });
   assert.equal(box.status().rows.length, 0);
+});
+
+test("verified historical snapshots enforce identity and title while retaining the unknown-priority default", async (t) => {
+  for (const field of ["id", "title", "priority"] as const) await t.test(field, async (t) => {
+    const { pmRoot, client, box } = await fixture(t);
+    const created = await create({ title: "Current valid snapshot", priority: 1 }, client);
+    const before = { metadata: created.item, body: "" };
+    const metadata: Record<string, unknown> = { ...created.item, status: "blocked" };
+    if (field === "id") metadata.id = `${created.item.id}-historical`; else delete metadata[field];
+    // SDK hashes can verify historical states that predate current item-field
+    // guarantees. Restore the current valid snapshot to test that boundary.
+    const historical = { metadata, body: "" } as unknown as ItemDocument;
+    const timestamp = new Date(Date.now() + 1000).toISOString();
+    const transitions = [
+      createHistoryEntry({ nowIso: timestamp, author: "fixture-agent", op: "update", before, after: historical }),
+      createHistoryEntry({ nowIso: timestamp, author: "fixture-agent", op: "update", before: historical, after: before }),
+    ];
+    const file = join(pmRoot, "history", `${created.item.id}.jsonl`);
+    writeFileSync(file, readFileSync(file, "utf8") + transitions.map((entry) => JSON.stringify(entry) + "\n").join(""));
+    assert.equal(verifyHistoryEntries(await readHistoryEntries(file, created.item.id), before).ok, true);
+    const recovered = await captureSlackOutbox(pmRoot, box);
+    if (field !== "priority") {
+      assert.deepEqual(recovered, { inspected: 2, queued: 0, failed: 1 });
+      assert.equal(box.status().rows.length, 0, "an invalid historical snapshot cannot publish an earlier buffered intent");
+    } else {
+      assert.deepEqual(recovered, { inspected: 3, queued: 2, failed: 0 });
+      const blocked = box.status().rows.find((row) => row.event === "block")!;
+      const db = new DatabaseSync(join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite"), { readOnly: true });
+      t.after(() => db.close());
+      assert.equal(db.prepare("SELECT priority FROM delivery_context WHERE key=?").get(blocked.key)!.priority, 4);
+    }
+  });
 });

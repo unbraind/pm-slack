@@ -20,6 +20,8 @@ Audit of all replacements in this PR: recovery is the only direct-read replaceme
 
 The seeded corruption property primes the real SDK index, then tests eight operators (same-size record-hash edit, same-size attribution-byte edit, partial-tail truncation, valid-prefix truncation, record reorder, deleted file, duplicated record and empty file), three seeds and both in-process/fresh-process recovery: 48 cases. Every case requires zero inspected entries, zero queued intents, one reported failure, unchanged opt-in and eligibility, and the same refusal on a filtered retry. A separate CLI regression verifies an authoritative item mismatch returns exit 2 with `history_unavailable` and queues nothing. The fixtures have real state-changing records, and all run without a git executable.
 
+Explicit SDK-hashed historical fixtures also cover temporarily invalid identity/title fields followed by a valid current snapshot: recovery reports failure without publishing even an earlier buffered intent. A historical snapshot without priority retains the documented default of 4 in its persisted delivery context. These cases make legacy-field coverage independent of incidental fixtures or timing. Failed coverage gates print zero-hit LCOV source branches without changing thresholds or failure status.
+
 SDK gap: after priming, same-size authoritative edits can still yield `source: derived_index` rows whose cached chain verifies, including after process restart. The page exposes no authoritative history integrity or completeness receipt. `source`, cursor and `has_more` do not attest that the bytes remain valid. Therefore cached event rows cannot replace authoritative SDK reads and verification. No upstream issue was filed.
 
 ## Differential proof
@@ -49,8 +51,8 @@ The sealed-offset regression originally failed before adding authoritative reads
 
 ## Checks
 
-The linked tracker test runs typecheck, test typecheck, the docstring gate and the recovery/outbox regressions: 89 passes. The tracker disables persisted test-result recording, so `pm test --run --progress` returned a local success receipt; the item comments retain the result without changing policy.
+The linked tracker test runs typecheck, test typecheck, the docstring gate and the recovery/outbox regressions: 93 passes. The tracker disables persisted test-result recording, so `pm test --run --progress` returned a local success receipt; the item comments retain the result without changing policy.
 
-The full suite reports 527 passes and 100% lines, branches and functions across all three shipped source files. The release checks enforce these unchanged thresholds, production dependency audit, package contents, changelog consistency and release-workflow verification. CI runs both complete npm and Bun gates on Node 22 and 26, plus native Bun outbox acceptance.
+The full suite reports 531 passes and 100% lines, branches and functions across all three shipped source files. The release checks enforce these unchanged thresholds, production dependency audit, package contents, changelog consistency and release-workflow verification. CI runs both complete npm and Bun gates on Node 22 and 26, plus native Bun outbox acceptance.
 
 No lint script is configured; typecheck and the docstring gate provide the package's configured static checks. Clean-home strict tracker health passes. Historical provenance has an existing advisory; history is left append-only.
