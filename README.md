@@ -30,18 +30,24 @@ starts their recovery policy with future history rather than guessing old eligib
 
 After successful lifecycle mutations, the hook recovers the affected item's
 matching transitions and attempts at most one delivery. Reads never drain.
-`drain` discovers committed events through the SDK's cursor-paginated mutation
-feed and verifies full history entries, including changes
+`drain` discovers candidate items through the SDK's cursor-paginated mutation
+feed, then reads and verifies authoritative history, including changes
 whose process exited before its hook ran, and drains queued receipts. Run it after
 a restart or periodically from your scheduler. A failed item history is isolated:
 healthy histories and already verified queued receipts still drain, while
 `recovered.failed` reports the failure count and the CLI exits 2 with
 `history_unavailable`. Repair and retry without duplicating acknowledged receipts.
-If the feed cannot cover retained history (for example, legacy timestamps outside
-its stricter timestamp contract), recovery falls back to verified SDK history
-reads per item. It also uses authoritative history if timestamp normalization in
-the feed changes a sealed entry's integrity hash. Replay preserves stream-version order and historical payloads;
-no notification is inferred from an incomplete or invalid history chain.
+The feed is discovery-only: cached event rows never authorize a notification.
+SDK readers load each candidate's authoritative history and current item, and
+`verifyHistoryEntries` checks both chain integrity and agreement with the current
+item before replay, eligibility, deduplication or queuing. Missing streams and
+valid-prefix truncations are reported as failures; current item identities are
+included so a missing history file cannot disappear from discovery. Page cursors
+are used only after verification and never saved as a durable acknowledgement.
+If the feed is unavailable (for example, for legacy timestamps), discovery falls
+back to retained history. Replay preserves historical payloads and authoritative
+stream order. A failed item publishes no new intents; healthy queued receipts
+can still drain.
 Keep history from the enable time; removing or compacting it can prevent recovery
 of unqueued transitions. History, tracker items and committed lifecycle commands
 are never rolled back by a delivery failure. Queued messages retain their original

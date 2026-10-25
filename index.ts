@@ -32,7 +32,7 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import https from "node:https";
 import http from "node:http";
-import { listAllComplete, listMutationEvents, readHistoryEntries, replayHistoryToTarget, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, listAllComplete, listMutationEvents, locateItem, readHistoryEntries, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 import type { OutboxPayload, OutboxOutcome, OutboxReport, OutboxEvent, OutboxIntent, OutboxRecoveryReport } from "./outbox.ts";
@@ -46,7 +46,6 @@ export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxSt
 import path from "node:path";
 import type {
   AfterCommandHookContext,
-  MutationEvent,
 } from "@unbrained/pm-cli/sdk";
 
 
@@ -1915,24 +1914,40 @@ function outboxStorage<T>(operation: () => T): T {
 }
 
 /**
- * Discover retained item streams through the canonical cursor-paginated SDK feed.
- * Full entries preserve historical payloads and pre-opt-in status context. The SDK
- * orders across streams by timestamp; replay within each item uses stream version.
- * An unavailable feed falls back to isolated retained-history reads, so legacy
- * timestamps or one malformed stream cannot hide healthy committed transitions.
+ * Verify authoritative history against the authoritative current item with SDK
+ * readers and hash verification. Current-state comparison rejects missing files
+ * and valid-prefix truncations that a self-consistent cached chain cannot reveal.
+ * Return a typed refusal so one damaged stream does not hide healthy transitions.
+ */
+async function readVerifiedOutboxHistory(pmRoot: string, id: string) {
+  try {
+    const entries = await readHistoryEntries(path.join(pmRoot, "history", `${id}.jsonl`), id);
+    const settings = await readSettings(pmRoot);
+    const registry = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
+    const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, registry.type_to_folder);
+    const document = located ? (await readLocatedItem(located, { schema: settings.schema })).document : undefined;
+    if (verifyHistoryEntries(entries, document).ok) return entries;
+  } catch { /* Unreadable, malformed and invalid authoritative streams share the typed refusal. */ }
+  return new OutboxError("history_unavailable", "Restore complete, verified lifecycle history matching the current item, then drain again.");
+}
+
+/**
+ * Use SDK event pages only to discover candidate identities. Verify each candidate
+ * from authoritative files before continuing its page cursor; retain refusals for
+ * the recovery report. This cursor is never persisted or acknowledged, and each
+ * recovery starts over, so failed verification cannot advance a durable checkpoint.
+ * An unavailable feed retains isolated authoritative-history discovery as fallback.
  */
 async function readOutboxMutationStreams(pmRoot: string, itemIds?: readonly string[]) {
   try {
     if (!existsSync(path.join(pmRoot, "history"))) return undefined;
-    const streams = new Map<string, MutationEvent[]>();
+    const streams = new Map<string, Awaited<ReturnType<typeof readVerifiedOutboxHistory>>>();
     let cursor: string | undefined;
     for (;;) {
-      const page = await listMutationEvents({ pmRoot, cwd: path.dirname(pmRoot), item: itemIds, since: cursor, full: true, limit: 1000 });
+      const page = await listMutationEvents({ pmRoot, cwd: path.dirname(pmRoot), item: itemIds, since: cursor, limit: 1000 });
       for (const event of page.events) {
         if (event.item_id.startsWith("_") || (itemIds && !itemIds.includes(event.item_id))) continue;
-        const entries = streams.get(event.item_id) ?? [];
-        entries.push(event);
-        streams.set(event.item_id, entries);
+        if (!streams.has(event.item_id)) streams.set(event.item_id, await readVerifiedOutboxHistory(pmRoot, event.item_id));
       }
       if (!page.has_more) return streams;
       cursor = page.next_cursor;
@@ -1948,6 +1963,7 @@ async function readOutboxMutationStreams(pmRoot: string, itemIds?: readonly stri
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
 export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<OutboxRecoveryReport> {
+  pmRoot = path.resolve(pmRoot);
   const since = outboxStorage(() => outbox.since());
   if (!since) throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
   const config = loadConfig();
@@ -1959,17 +1975,17 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
     outboxStorage(() => outbox.recoveryPolicies());
     const streams = await readOutboxMutationStreams(pmRoot, itemIds);
     // Explicit legacy fallback when the canonical feed cannot read retained history.
-    const ids = streams ? [...streams.keys()].sort() : readdirSync(path.join(pmRoot, "history"))
-      .filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).map((file) => file.slice(0, -6)).sort();
+    const discovered = streams ? [...streams.keys()] : readdirSync(path.join(pmRoot, "history"))
+      .filter((file) => file.endsWith(".jsonl") && !file.startsWith("_")).map((file) => file.slice(0, -6));
+    // A missing stream can vanish from the derived feed. Inventory is discovery
+    // only; each candidate's authoritative item and history are verified below.
+    const currentIds = itemIds ?? (await listAllComplete({}, { pmRoot, cwd: path.dirname(pmRoot), noExtensions: true })).items.map((item) => item.id);
+    const ids = [...new Set([...discovered, ...currentIds])].sort();
     for (const id of ids) {
       if (itemIds && !itemIds.includes(id)) continue;
       try {
-        let entries = streams ? streams.get(id)!.sort((left, right) => left.version - right.version).map((event) => event.entry!)
-          : await readHistoryEntries(path.join(pmRoot, "history", `${id}.jsonl`), id);
-        // Feed timestamp normalization can invalidate an otherwise sealed raw record.
-        // Recover the authoritative representation before rejecting the item stream.
-        if (streams && !verifyHistoryEntries(entries).ok) entries = await readHistoryEntries(path.join(pmRoot, "history", `${id}.jsonl`), id);
-        if (!verifyHistoryEntries(entries).ok) throw new OutboxError("history_unavailable", "Restore valid retained lifecycle history, then drain again.");
+        const entries = streams?.get(id) ?? await readVerifiedOutboxHistory(pmRoot, id);
+        if (entries instanceof OutboxError) throw entries;
         const intents: OutboxIntent[] = [];
         let previous: string | undefined;
         for (const [index, entry] of entries.entries()) {
