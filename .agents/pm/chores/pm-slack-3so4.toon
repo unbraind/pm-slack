@@ -2,15 +2,20 @@ id: pm-slack-3so4
 title: Use the pm SDK mutation feed for Slack outbox recovery
 description: "Adopt the canonical paginated mutation-event API for lifecycle recovery, preserve verified retained-history fallback and uncertain delivery semantics, and retain renderer defense in depth. Related SDK adoption: pm-slack-fitn."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[1]: sdk-adoption
 created_at: "2026-10-25T15:46:32.272Z"
-updated_at: "2026-10-25T21:35:54.438Z"
+updated_at: "2026-10-26T03:24:38.661Z"
+closed_at: "2026-10-26T03:24:33.146Z"
+completed_at: "2026-10-25T21:47:52.000Z"
 author: codex-agent
+resolution: "Delivered by PR #158, merge e23ecfe839fbb85c55e47a1cd325abf153593d4d, merged 2026-10-25T21:47:52Z. index.ts uses SDK listMutationEvents pages only for candidate discovery, then authoritative readHistorySnapshot/locateItem/readLocatedItem and verifyHistoryEntries(history, currentDocument) before recovery. test/sdk-recovery.test.ts covers pagination, retained-history fallback, cache corruption, missing documents, mixed healthy/damaged neighbors and all-intents validation."
+expected_result: "Canonical paginated recovery retains independent authoritative verification, healthy-neighbor progress and uncertain-delivery semantics."
+actual_result: The focused recovery regressions pass on main; inspected recovery never treats cached events as integrity authority. A narrow SDK-mapped filename candidate inventory remains for unreadable inputs; upstream event-cache integrity and older digest coverage/review blockers are not claimed fixed.
 dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-slack-fitn,related,"2026-10-25T15:52:27.938Z",codex-agent,"cli:update:dep",detected
-comments[24]{created_at,author,text}:
+comments[25]{created_at,author,text}:
   "2026-10-25T15:47:15.676Z",codex-agent,"Plan: use listMutationEvents with full entries and opaque cursor pagination as the primary discovery path; preserve verified retained-history fallback when the event API cannot cover an old or malformed stream. Preserve lifecycle ordering, revision deduplication, eligibility snapshots and delivery uncertainty. Related SDK adoption item: https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fitn.toon . Audit renderer finding requires no replacement: command-owned SDK renderers are already registered; local result-shape checks remain defense in depth. Dependencies stay pinned."
   "2026-10-25T15:52:30.067Z",codex-agent,"Replacement proof: reverted only captureSlackOutbox to origin/main while retaining the new tests and helper. node --test test/sdk-recovery.test.ts failed exactly one test: the canonical SDK feed projection was absent. The retained-history fallback test still passed. Restored the implementation. Full coverage: 476 tests passed; 100% lines, branches and functions across index.ts, outbox.ts and coalescing.ts. Renderer finding is already SDK-owned and deliberately retained, with no missing API."
   "2026-10-25T15:52:32.276Z",codex-agent,"Differential proof: freshly compiled origin/main 5c0bd37 versus candidate using read-only, non-git public tracker snapshots. pm-slack 5c0bd37: 700 inspected, 230 queued, 0 failed; pm-slack-standup f1d1187: 881 inspected, 237 queued, 0 failed. All 467 frozen payloads, revision receipts, eligibility contexts, repeated captures, item-filtered captures and ambiguous-destination holds matched exactly. Authoritative snapshot hashes were unchanged before and after; no git executable and no network sends. Zero intentional output differences. The SDK may create its disposable derived runtime projection."
@@ -35,6 +40,7 @@ comments[24]{created_at,author,text}:
   "2026-10-25T21:30:03.052Z",codex-agent,"Third isolation revert proof: removed only the all-intents prevalidation step from captureSlackOutbox, leaving enqueue validation and other guards intact. node --test --test-name-pattern=\"invalid historical values\" test/sdk-recovery.test.ts fails on the historical negative delivery timestamp: enqueue throws invalid_input after an earlier intent was publishable instead of isolating the item. Restoring the prevalidation step passes all four tests. Shared validation is extracted once and reused; operational SQLite failures remain storage refusals."
   "2026-10-25T21:30:05.627Z",codex-agent,"Round-2 validation: full coverage passed 552 tests, zero failures/skips, 100% lines/branches/functions across all three shipped sources. Linked static/targeted suite via pm test --run --progress --timeout 240 passed 114 tests. Mixed property passes six 17-item runs (three seeds, both process modes): 72 damaged item instances are all reported with reasons; all 60 healthy create/block intents recover exactly once; repeated captures queue zero. Both review cases are included. Wrong-shape history fields, missing whole history directory, malformed historical projections and discovery-directory faults also isolate healthy neighbors. Fresh public tracker differential still matches all 473 payloads/receipts with unchanged authoritative hashes. Preparing final npm and Bun release gates."
   "2026-10-25T21:35:51.850Z",codex-agent,"Final round-2 local gates passed: npm run release:check and bun run release:check each passed 552 tests with zero failures/skips and 100% lines/branches/functions across all three shipped sources. Native Bun outbox acceptance passed with zero duplicates and no git. Linked targeted/static suite passed 114 tests. All mixed healthy/damaged cases, required-input guards, complete safe failure receipts and per-item publication validation passed. Both review-case reverts fail independently; removing publication prevalidation also fails. SDK stale-event gap still reproduces on exactly 2026.10.25 in a separate install; pin/lock unchanged. Healthy differential remains 473 exact matches. Releasing the claim for orchestrator verification; item remains unclosed."
+  "2026-10-26T03:17:08.914Z",codex-agent,"Closure audit on main e23ecfe839fbb85c55e47a1cd325abf153593d4d: merged PR #158 (e23ecfe839fbb85c55e47a1cd325abf153593d4d, merged 2026-10-25T21:47:52Z). index.ts uses SDK listMutationEvents pages only for candidate discovery, then authoritative readHistorySnapshot/locateItem/readLocatedItem and verifyHistoryEntries(history, currentDocument) before recovery. test/sdk-recovery.test.ts covers pagination, retained-history fallback, cache corruption, missing documents, mixed healthy/damaged neighbors and all-intents validation. All scoped acceptance criteria are represented by the inspected implementation and regressions. Existing behavioural revert evidence is retained; this tracker-only audit changes no runtime functions."
 files[8]{path,scope}:
   index.ts,project
   outbox.ts,project
@@ -44,9 +50,24 @@ files[8]{path,scope}:
   test/helpers/sdk-corruption-probe.ts,project
   test/helpers/sdk-mixed-recovery-probe.ts,project
   test/sdk-recovery.test.ts,project
-tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  "npm run typecheck && npm run build:test && npm run docstring && node --test test/sdk-recovery.test.ts test/outbox.test.ts",project,codex-agent,"2026-10-25T15:52:34.291Z",local_mutation,refactor/sdk-adoption-1025
+tests[2]:
+  - command: "npm run typecheck && npm run build:test && npm run docstring && node --test test/sdk-recovery.test.ts test/outbox.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-25T15:52:34.291Z"
+      source_kind: local_mutation
+      source_ref: refactor/sdk-adoption-1025
+  - command: node --test test/sdk-recovery.test.ts
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-26T03:18:04.692Z"
+      source_kind: local_mutation
+      source_ref: chore/close-delivered-1026
 docs[2]{path,scope}:
   docs/sdk-adoption-validation.md,project
   README.md,project
+close_reason: "Delivered by PR #158, merge e23ecfe839fbb85c55e47a1cd325abf153593d4d, merged 2026-10-25T21:47:52Z. index.ts uses SDK listMutationEvents pages only for candidate discovery, then authoritative readHistorySnapshot/locateItem/readLocatedItem and verifyHistoryEntries(history, currentDocument) before recovery. test/sdk-recovery.test.ts covers pagination, retained-history fallback, cache corruption, missing documents, mixed healthy/damaged neighbors and all-intents validation."
 body: ""
