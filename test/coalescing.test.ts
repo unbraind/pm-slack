@@ -152,14 +152,14 @@ test("whole-group uncertainty and retries remain explicit across concurrent drai
   box.resolve(a, "acknowledged");
   assert.equal(box.status().counts.acknowledged, 2);
   box.enqueue(intent("c")); box.enqueue(intent("d"));
-  await box.drainCoalesced(async () => { throw new OutboxError("destination_changed", "Restore the original route."); });
+  await box.drainCoalesced(async (_destination, _payload, _context) => { throw new OutboxError("destination_changed", "Restore the original route."); });
   assert.equal(box.status().counts.refused, 2);
   const c = box.status().rows.find((row) => row.state === "refused")!;
   assert.equal(c.attempts, 0);
   box.resolve(c.key, "skip");
   assert.equal(box.status().counts.skipped, 2);
   box.enqueue(intent("e"));
-  await assert.rejects(box.drainCoalesced(async () => { throw new OutboxError("invalid_input", "Restore configuration."); }), OutboxError);
+  await assert.rejects(box.drainCoalesced(async (_destination, _payload, _context) => { throw new OutboxError("invalid_input", "Restore configuration."); }), OutboxError);
   assert.equal(box.status().counts.pending, 1);
   assert.equal(box.status().rows.find((row) => row.state === "pending")!.attempts, 0);
 });

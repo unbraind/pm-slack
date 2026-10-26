@@ -1,3 +1,5 @@
+/** Durable, local Slack delivery receipts. Payloads and webhook credentials never appear in inspection output. */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "node:module";
 import { chmodSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -27,6 +29,10 @@ export class OutboxError extends Error {
     }
 }
 const lifecycleEvents = ["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"];
+/** Propagate proof through wrappers that call the package transport without forwarding its context. */
+const sendContext = new AsyncLocalStorage();
+/** Read this asynchronous attempt's context without exposing or sharing it with another sender. */
+export function currentOutboxSendContext() { return sendContext.getStore(); }
 /** Derive the stable receipt primary key from one committed lifecycle transition. */
 function receiptKey(item, event, revision) {
     return createHash("sha256").update(JSON.stringify([item, event, revision])).digest("hex");
@@ -300,7 +306,7 @@ export class SlackOutbox {
                 const original = JSON.parse(String(claim.members[0].payload));
                 return notification.urgent ? original : { text: notification.text, mrkdwn: false, ...(original.channel === undefined ? {} : { channel: original.channel }) };
             });
-            if (refusal && refusal.code !== "destination_changed")
+            if (refusal && (refusal.code !== "destination_changed" || state !== "refused"))
                 throw refusal;
             if (state === "ambiguous")
                 uncertain.add(notification.destination);
@@ -358,7 +364,7 @@ export class SlackOutbox {
             const row = claim.members[0];
             const { state, refusal } = await this.sendAttempt(claim.token, send, row.destination, () => JSON.parse(row.payload));
             if (refusal) {
-                if (refusal.code === "destination_changed")
+                if (refusal.code === "destination_changed" && state === "refused")
                     continue;
                 throw refusal;
             }
@@ -407,7 +413,7 @@ export class SlackOutbox {
             });
         }
         catch {
-            this.recordTerminal(token, "pending", true);
+            this.recordTerminal(token, "ambiguous");
             throw new OutboxError("storage_unavailable", "Restore writable receipt storage, then drain again; the failed group was not sent.");
         }
     }
@@ -419,26 +425,31 @@ export class SlackOutbox {
     async sendAttempt(token, send, destination, payload) {
         let state = "ambiguous";
         let refusal;
+        let confirmed = false;
+        const context = {
+            requestDispatched: () => this.dispatch(token),
+            responseConfirmed: () => { confirmed = true; this.recordTerminal(token, "acknowledged"); },
+        };
         try {
             const body = payload();
-            // Existing SDK callbacks cannot signal their network boundary; mark conservatively before entering them.
+            // Legacy external transports cannot signal dispatch; their invocation remains conservative.
             if (send.length < 3)
-                this.dispatch(token);
-            const outcome = await send(destination, body, { requestDispatched: () => this.dispatch(token) });
-            state = outcome === "retry" ? "pending" : outcome;
+                context.requestDispatched();
+            const outcome = await sendContext.run(context, () => send(destination, body, context));
+            state = confirmed ? "acknowledged" : outcome === "retry" ? "pending" : outcome;
         }
         catch (error) {
-            if (error instanceof OutboxError) {
+            if (error instanceof OutboxError)
                 refusal = error;
-                state = error.code === "destination_changed" ? "refused" : "pending";
-            }
+            const dispatched = !!this.db.prepare("SELECT 1 FROM delivery_request_dispatched WHERE token=?").get(token);
+            state = confirmed ? "acknowledged" : dispatched ? "ambiguous" : refusal ? refusal.code === "destination_changed" ? "refused" : "pending" : "ambiguous";
         }
         finally {
             try {
-                this.finish(token, state, Boolean(refusal));
+                this.finish(token, state);
             }
             catch (error) {
-                this.recordTerminal(token, state, Boolean(refusal));
+                this.recordTerminal(token, state);
                 throw error;
             }
         }
@@ -464,15 +475,15 @@ export class SlackOutbox {
         });
     }
     /** Append exactly one terminal fact; repeated cleanup cannot replace an earlier fact. */
-    recordTerminal(token, state, refused) {
+    recordTerminal(token, state) {
         this.db.prepare(`INSERT OR IGNORE INTO delivery_attempt_terminal SELECT s.key,s.token,
-      CASE WHEN ? THEN 'not_sent' WHEN ?='acknowledged' THEN 'confirmed' WHEN ? IN ('pending','rejected') THEN 'rejected'
-      WHEN x.token IS NULL THEN 'not_sent' ELSE 'unknown_after_send' END
-      FROM delivery_attempt_start s LEFT JOIN delivery_request_dispatched x ON x.key=s.key AND x.token=s.token WHERE s.token=?`).run(Number(refused), state, state, token);
+      CASE WHEN ?='acknowledged' THEN 'confirmed' WHEN x.token IS NULL THEN 'not_sent'
+      WHEN ? IN ('pending','rejected') THEN 'rejected' ELSE 'unknown_after_send' END
+      FROM delivery_attempt_start s LEFT JOIN delivery_request_dispatched x ON x.key=s.key AND x.token=s.token WHERE s.token=?`).run(state, state, token);
     }
     /** Close the immutable record pair before touching scheduling state, even after a peer retires the claim. */
-    finish(token, state, refused) {
-        this.recordTerminal(token, state, refused);
+    finish(token, state) {
+        this.recordTerminal(token, state);
         this.transaction(() => {
             const keys = this.db.prepare("SELECT key FROM delivery_group WHERE notification=?").all(token).map((member) => String(member.key));
             if (!keys.length)

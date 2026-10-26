@@ -11,7 +11,7 @@ import { init, create, readHistorySnapshot } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import { decode } from "@toon-format/toon";
 import extension, { SlackOutbox, OutboxError, explainSlackRouting, deriveSlackDeliveryOutcome, slackDestination, __test__ } from "../index.ts";
-import type { OutboxOutcome, SlackRoutingIdentity, SlackRoutingExplanation, OutboxReport, CoalescingReport, SlackDeliveryEvidence } from "../index.ts";
+import type { OutboxOutcome, SlackRoutingIdentity, SlackRoutingExplanation, OutboxReport, CoalescingReport, SlackDeliveryEvidence, OutboxSendContext } from "../index.ts";
 
 type Mode = "ack" | "reject" | "rate" | "timeout" | "before" | "after" | "server_error" | "crash" | "refusal" | "never" | "redirect";
 type Call = { accepted: boolean; confirmed: boolean; couldAcceptWithoutConfirmation: boolean };
@@ -54,7 +54,7 @@ async function fixture(t: TestContext) {
   http.request = ((...args: Parameters<typeof http.request>) => {
     const nextMode = mode; const id = ++requestId;
     const options = args[0] as http.RequestOptions;
-    const enriched = { ...options, headers: { ...options.headers, "x-proof-mode": nextMode, "x-proof-request": String(id) } };
+    const enriched = { ...options, agent: false, headers: { ...options.headers, "x-proof-mode": nextMode, "x-proof-request": String(id) } };
     const request = Reflect.apply(originalRequest, http, [enriched, ...args.slice(1)]) as http.ClientRequest;
     const setTimeout = request.setTimeout;
     request.setTimeout = function (duration, callback) {
@@ -83,14 +83,14 @@ async function fixture(t: TestContext) {
   /** Run the package's actual transport and durable completion path. */
   async function send(next: Mode, grouped = false, owner = box) {
     mode = next;
-    const transport = next === "refusal" ? (_destination: string, payload: { text: string }) => __test__.sendOutbox("unconfigured", payload) : __test__.sendOutbox;
+    const transport = next === "refusal" ? (_destination: string, payload: { text: string }, context: OutboxSendContext) => __test__.sendOutbox("unconfigured", payload, context) : __test__.sendOutbox;
     if (grouped) await owner.drainCoalesced(transport, { budget: 0 }); else await owner.drain(transport, 1);
   }
   /** Exit a real process after Slack's response but before the durable completion transition. */
   async function crash() {
     mode = "crash";
     const url = new URL("../index.ts", import.meta.url).href;
-    const source = `import {SlackOutbox,__test__} from ${JSON.stringify(url)}; const box=new SlackOutbox(process.argv[1]); await box.drain(async(d,p)=>{await __test__.sendOutbox(d,p); process.exit(73);},1);`;
+    const source = `import {SlackOutbox,__test__} from ${JSON.stringify(url)}; const box=new SlackOutbox(process.argv[1]); await box.drain(async(d,p,c)=>{await __test__.sendOutbox(d,p,{...c,responseConfirmed(){process.exit(73);}});},1);`;
     await new Promise<void>((done, reject) => {
       const child = spawn(process.execPath, ["--input-type=module", "-e", source, pmRoot], { cwd: directory, env: process.env, stdio: ["ignore", "ignore", "pipe"] });
       let stderr = ""; child.stderr.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -354,18 +354,18 @@ test("exceptions and real process crashes at every journal step boundary preserv
   const module = new URL("../index.ts", import.meta.url).href;
   let baseline: string[] = [];
   /** Run a real transport process and fault before or after every observed persistence/transport step. */
-  async function run(boundary: number, fault: "trace" | "exception" | "crash") {
+  async function run(boundary: number, fault: "trace" | "exception" | "typed" | "crash") {
     const event = await f.event(1000 + boundary);
     const callsBefore = f.calls.length;
-    const source = `import {SlackOutbox,__test__} from ${JSON.stringify(module)};
+    const source = `import {SlackOutbox,OutboxError,__test__} from ${JSON.stringify(module)};
       const box=new SlackOutbox(process.argv[1]); const db=box.db;
-      let armed=true,step=0,terminal=false,dispatched=false,returned=false; const trace=[];
-      const point=(name)=>{if(!armed)return;trace.push(name);if(step++===${boundary}){armed=false;${fault === "crash" ? "process.exit(73);" : fault === "exception" ? "throw new Error('Synthetic boundary exception');" : ""}}};
+      let armed=true,step=0,terminal=false,dispatched=false,returned=false,confirmed=false; const trace=[];
+      const point=(name)=>{if(!armed)return;trace.push(name);if(step++===${boundary}){armed=false;${fault === "crash" ? "process.exit(73);" : fault === "exception" ? "throw new Error('Synthetic boundary exception');" : fault === "typed" ? "throw new OutboxError('storage_unavailable','Synthetic typed boundary exception.');" : ""}}};
       const prepare=db.prepare,exec=db.exec;
       db.exec=function(sql){point('before '+sql);const result=exec.call(this,sql);point('after '+sql);return result;};
-      db.prepare=function(sql){const statement=prepare.call(this,sql);for(const method of ['run','get','all']){const operation=statement[method];statement[method]=function(...args){point('before '+sql);const result=operation.apply(this,args);if(sql.startsWith('INSERT OR IGNORE INTO delivery_attempt_terminal'))terminal=true;if(sql.startsWith('INSERT OR IGNORE INTO delivery_request_dispatched'))dispatched=true;point('after '+sql);return result;};}return statement;};
+      db.prepare=function(sql){const statement=prepare.call(this,sql);for(const method of ['run','get','all']){const operation=statement[method];statement[method]=function(...args){point('before '+sql);const result=operation.apply(this,args);if(sql.startsWith('INSERT OR IGNORE INTO delivery_attempt_terminal')){terminal=true;if(args[0]==='acknowledged')confirmed=true;}if(sql.startsWith('INSERT OR IGNORE INTO delivery_request_dispatched'))dispatched=true;point('after '+sql);return result;};}return statement;};
       try {await box.drain(async(d,p,c)=>{point('before transport');const result=await __test__.sendOutbox(d,p,c);point('after response');returned=true;return result;},1);}catch(error){}
-      armed=false; console.log(JSON.stringify({trace,terminal,dispatched,returned}));box.close();`;
+      armed=false; console.log(JSON.stringify({trace,terminal,dispatched,returned,confirmed}));box.close();`;
     let output = "";
     const code = await new Promise<number | null>((done, reject) => {
       const child = spawn(process.execPath, ["--input-type=module", "-e", source, f.pmRoot], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
@@ -381,11 +381,11 @@ test("exceptions and real process crashes at every journal step boundary preserv
     const rows = db.prepare("SELECT s.token,t.result,x.token dispatched FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token LEFT JOIN delivery_request_dispatched x ON x.key=s.key AND x.token=s.token WHERE s.key=?").all(event.key);
     assert.ok(rows.every((row) => row.result !== null), `open after ${fault} boundary ${boundary}`);
     const report = await explainSlackRouting(f.pmRoot, event.identity);
-    const info = code === 0 ? JSON.parse(output) as { trace: string[]; terminal: boolean; dispatched: boolean; returned: boolean } : undefined;
+    const info = code === 0 ? JSON.parse(output) as { trace: string[]; terminal: boolean; dispatched: boolean; returned: boolean; confirmed: boolean } : undefined;
     // Independent fault schedule: only a persisted confirmed response proves delivery; dispatch can precede a crash before HTTP.
     const observed = f.calls.slice(callsBefore);
     let expected: string;
-    if (fault === "trace" || (info?.terminal && info.returned && observed.some((call) => call.confirmed))) expected = "delivered";
+    if (fault === "trace" || (info?.confirmed && observed.some((call) => call.confirmed))) expected = "delivered";
     else if (info) expected = observed.length > 0 || info.dispatched ? "uncertain" : "withheld";
     else {
       const past = baseline.slice(0, boundary + 1);
@@ -400,10 +400,10 @@ test("exceptions and real process crashes at every journal step boundary preserv
   // status() runs after the send; stop after work cleanup's final COMMIT.
   const end = trace.length - [...trace].reverse().indexOf("after COMMIT");
   assert.ok(end > 20);
-  for (const fault of ["exception", "crash"] as const) for (let boundary = 0; boundary < end; boundary++) {
+  for (const fault of ["exception", "typed", "crash"] as const) for (let boundary = 0; boundary < end; boundary++) {
     await t.test(`${fault} boundary ${boundary + 1}`, async () => { await run(boundary, fault); });
   }
-  t.diagnostic(JSON.stringify({ seed: "0xc1a551f1", persistenceAndTransportBoundaries: end, exceptions: end, processCrashes: end }));
+  t.diagnostic(JSON.stringify({ seed: "0xc1a551f1", persistenceAndTransportBoundaries: end, exceptions: end, typedExceptions: end, processCrashes: end }));
 });
 
 test("retirement and replacement at every step boundary cannot drift from late-refusal evidence", async (t) => {
@@ -487,12 +487,80 @@ test("transient terminal and post-commit claim exceptions close the pair before 
     }
     return statement;
   };
-  try { await assert.rejects(f.send("ack"), /transient terminal/); } finally { db.prepare = prepare; }
+  try { await f.send("ack"); } finally { db.prepare = prepare; }
   assert.equal((await explainSlackRouting(f.pmRoot, first.identity)).outcome, "delivered");
-  f.box().resolve(first.key, "acknowledged", { force: true });
   const next = await f.event(1); const exec = db.exec; once = true;
   db.exec = function (sql) { exec.call(this, sql); if (sql === "COMMIT" && once) { once = false; throw new Error("Synthetic lost commit result"); } };
   try { await assert.rejects(f.send("ack"), /storage_unavailable/); } finally { db.exec = exec; }
   assert.equal((await explainSlackRouting(f.pmRoot, next.identity)).outcome, "withheld");
   assert.equal(db.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE t.token IS NULL").get()!.n, 0);
+});
+
+test("successful post followed by typed storage error keeps confirmed delivery", async (t) => {
+  const f = await fixture(t); const { key, identity } = await f.event(0);
+  await assert.rejects(f.box().drain(async (destination, payload) => {
+    await __test__.sendOutbox(destination, payload);
+    throw new OutboxError("storage_unavailable", "Synthetic callback failure after confirmation.");
+  }), OutboxError);
+  const explained = await explainSlackRouting(f.pmRoot, identity);
+  assert.equal(explained.outcome, "delivered"); assert.equal(explained.attempts, 1);
+  assert.equal(explained.attempt_evidence!.confirmed, 1);
+  assert.equal(f.calls[0]!.confirmed, true);
+  assert.equal(f.box().status().rows.find((row) => row.key === key)!.state, "acknowledged");
+});
+
+test("500 seeded typed and untyped errors at dispatch/response/terminal boundaries follow only retained transport facts", async (t) => {
+  const f = await fixture(t); let seed = 0xd15fac7;
+  const totals = { delivered: 0, withheld: 0, uncertain: 0 }; const covered = new Set<string>();
+  const codes = ["invalid_input", "disabled", "conflict", "not_found", "in_flight", "not_ambiguous", "destination_changed", "storage_unavailable", "history_unavailable"] as const;
+  /** Reproducible fault order changes type/code independently of network phase. */
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
+  for (let sequence = 0; sequence < 500; sequence++) {
+    const { identity, key } = await f.event(3000 + sequence);
+    const phase = sequence % 4; const typed = ((sequence >>> 2) % 2) === 0;
+    const code = codes[(random() >>> 16) % codes.length]!;
+    covered.add(`${phase}/${typed}`);
+    const error = typed ? new OutboxError(code, "Synthetic phase fault.") : new Error("Synthetic phase fault.");
+    const callsBefore = f.calls.length;
+    let confirmedObserved = false;
+    const journalDb = (f.box() as unknown as { db: DatabaseSync }).db;
+    const prepare = journalDb.prepare;
+    let injected = false;
+    if (phase === 3) journalDb.prepare = function (sql) {
+      const statement = prepare.call(this, sql);
+      if (sql.startsWith("INSERT OR IGNORE INTO delivery_attempt_terminal")) {
+        const run = statement.run;
+        statement.run = function (...args) { if (!injected) { injected = true; throw error; } return Reflect.apply(run, this, args); };
+      }
+      return statement;
+    };
+    const send = f.box().drain(async (destination, payload, context) => {
+      const observedContext = { ...context, responseConfirmed: () => { confirmedObserved = true; context.responseConfirmed(); } };
+      if (phase === 0) throw error; // before dispatch
+      if (phase === 1) { context.requestDispatched(); throw error; }
+      if (phase === 2) { await __test__.sendOutbox(destination, payload, observedContext); throw error; }
+      // Fault the first terminal append after the real response; confirmation is already known in memory.
+      await __test__.sendOutbox(destination, payload, observedContext);
+      throw error;
+    });
+    try { if (typed && (code !== "destination_changed" || phase !== 0)) await assert.rejects(send, OutboxError); else await send; }
+    finally { journalDb.prepare = prepare; }
+    if (phase === 3 && confirmedObserved) assert.equal(injected, true);
+    const expected = phase === 0 ? "withheld" : confirmedObserved ? "delivered" : "uncertain";
+    const observed = f.calls.slice(callsBefore);
+    assert.ok(observed.length <= (phase >= 2 ? 1 : 0), `sequence ${sequence}, phase ${phase}`);
+    if (confirmedObserved) assert.equal(observed[0]!.confirmed, true);
+    assert.equal((await explainSlackRouting(f.pmRoot, identity)).outcome, expected, `${sequence}: phase ${phase}, ${typed ? code : "untyped"}`);
+    totals[expected] += 1;
+    const journal = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+    try {
+      assert.equal(journal.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=? AND t.token IS NULL").get(key)!.n, 0);
+      if (expected === "withheld") assert.equal(journal.prepare("SELECT COUNT(*) n FROM delivery_request_dispatched WHERE key=?").get(key)!.n, 0);
+    } finally { journal.close(); }
+    const state = (await explainSlackRouting(f.pmRoot, identity)).state;
+    if (state !== "acknowledged") f.box().resolve(key, "skip");
+    assert.deepEqual(f.box().status(1).outcomes, totals);
+  }
+  assert.equal(covered.size, 8);
+  t.diagnostic(JSON.stringify({ seed: "0x0d15fac7", sequences: 500, boundaries: 4, errorKinds: 2, errorCodes: codes.length, requests: f.calls.length, ...totals }));
 });

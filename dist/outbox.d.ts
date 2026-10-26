@@ -155,7 +155,11 @@ export type OutboxDecision = "acknowledged" | "retry" | "skip" | "abandon";
 export interface OutboxSendContext {
     /** Persist dispatch intent before a request can leave this process. */
     requestDispatched(): void;
+    /** Record a successful Slack response immediately, before later callback code can fail. */
+    responseConfirmed(): void;
 }
+/** Read this asynchronous attempt's context without exposing or sharing it with another sender. */
+export declare function currentOutboxSendContext(): OutboxSendContext | undefined;
 /** Transport callback; legacy two-argument callbacks are conservatively marked before invocation. */
 export type OutboxSend = (destination: string, payload: OutboxPayload, context: OutboxSendContext) => Promise<OutboxOutcome>;
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */

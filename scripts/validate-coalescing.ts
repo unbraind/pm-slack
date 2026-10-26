@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { listAllComplete, readHistoryEntries, verifyHistoryEntries, replayHistoryToTarget } from "@unbrained/pm-cli/sdk";
-import { planSlackCoalescing, __test__ } from "../index.ts";
+import { listAllComplete, readHistoryEntries, verifyHistoryEntries, replayHistoryToTarget, readSettings, resolveRuntimeStatusRegistry } from "@unbrained/pm-cli/sdk";
+import { planSlackCoalescing, classifySlackTransition } from "../index.ts";
 import type { CoalescingEvent } from "../index.ts";
 
 /** Hash all exported tracker bytes to prove the validation is observational. */
@@ -20,6 +20,7 @@ function fingerprint(root: string): string {
 const pmRoot = process.argv[2];
 assert.ok(pmRoot, "Pass an exported public tracker root.");
 const before = fingerprint(pmRoot);
+const statusRegistry = resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema);
 const corpus = await listAllComplete({}, { pmRoot, cwd: pmRoot, noExtensions: true });
 const events: CoalescingEvent[] = [];
 let entries = 0;
@@ -36,7 +37,7 @@ for (const item of corpus.items) {
     const prior = previous;
     if (status) previous = status;
     if ((!status && entry.op !== "create") || (entry.op !== "create" && status === prior)) continue;
-    const event = __test__.detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
+    const event = classifySlackTransition({ command: entry.op === "create" ? "create" : "update", status, previousStatus: prior }, statusRegistry);
     if (!event) continue;
     const { metadata } = replayHistoryToTarget(history, index);
     const priority = Number(metadata.priority ?? 4);

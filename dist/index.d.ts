@@ -31,6 +31,7 @@
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
+import { resolveRuntimeStatusRegistry } from "@unbrained/pm-cli/sdk";
 import { SlackOutbox } from "./outbox.ts";
 import type { OutboxPayload, OutboxOutcome, OutboxEvent, OutboxRecoveryReport, OutboxSendContext } from "./outbox.ts";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
@@ -489,7 +490,7 @@ declare function isRetryableSlackError(err: unknown): boolean;
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void): Promise<void>;
+declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void, confirmed?: () => void): Promise<void>;
 /** Metadata used for digest aggregation and item lines, independent of notification priorities. */
 interface DigestItem {
     /** Stable SDK item identity. */
@@ -524,11 +525,11 @@ interface DigestSummary {
  * Aggregate store items into digest buckets for the window. An item counts as:
  *   - created     if created_at >= cutoff
  *   - closed      if it is in a closed/done status AND updated_at >= cutoff
- *   - blocked     if status === blocked AND updated_at >= cutoff
- *   - in_progress if status === in_progress AND updated_at >= cutoff
+ *   - blocked     if the shared classifier reports block AND updated_at >= cutoff
+ *   - in_progress if the shared classifier reports start AND updated_at >= cutoff
  * An item may appear in multiple buckets (e.g. created and blocked).
  */
-declare function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string): DigestSummary;
+declare function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): DigestSummary;
 /**
  * Build the plain-text (mrkdwn) activity digest message.
  *
@@ -573,7 +574,18 @@ declare function buildDigestBlockKit(summary: DigestSummary, channel?: string): 
  * @returns The assembled Slack payload.
  */
 declare function buildDigestPayload(summary: DigestSummary, format: MessageFormat, channel?: string): SlackPayload;
-/** Map a (normalized) status string to the EventKind for a transition into it. */
+/** One transition boundary shared by capture, recovery, explanation and legacy command adapters. */
+export interface SlackTransition {
+    /** Command determines creation and provides legacy aliases only when no resulting status is known. */
+    command: string | undefined;
+    /** Authoritative resulting status, when available. */
+    status?: string;
+    /** Prior committed status; unchanged statuses are not lifecycle transitions. */
+    previousStatus?: string;
+}
+/** Classify a transition using SDK registry roles, with literals only when no registry definition exists. */
+export declare function classifySlackTransition(input: SlackTransition, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): EventKind | null;
+/** Legacy test/helper adapter delegates all status semantics to the single classifier. */
 declare function statusToEvent(status: string | undefined): EventKind | null;
 /**
  * Detect the lifecycle event for a completed command. Strategy:
@@ -585,7 +597,7 @@ declare function statusToEvent(status: string | undefined): EventKind | null;
  *      open→reopen (from a closed/canceled state) and open→unblock (from
  *      blocked) so terminal-recovery transitions are distinguishable.
  */
-declare function detectEvent(ctx: AfterCommandHookContext): EventKind | null;
+declare function detectEvent(ctx: AfterCommandHookContext, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): EventKind | null;
 /**
  * Pull the touched item out of an afterCommand hook's result.
  *

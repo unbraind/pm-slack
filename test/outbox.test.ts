@@ -128,7 +128,7 @@ test("uncertainty is held, active senders refuse reconciliation and changed dest
   assert.equal(sends, 0);
   box.resolve(key, "acknowledged");
   const second = box.enqueue(intent("retry"));
-  assert.equal((await box.drain(async () => { throw new OutboxError("destination_changed", "Restore the original route."); })).counts.refused, 1);
+  assert.equal((await box.drain(async (_destination, _payload, _context) => { throw new OutboxError("destination_changed", "Restore the original route."); })).counts.refused, 1);
   assert.equal(box.status().rows[1]!.attempts, 0);
   box.resolve(second, "retry");
   await box.drain(async () => "rejected");

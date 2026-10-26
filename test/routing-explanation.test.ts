@@ -1,5 +1,6 @@
 /** Offline explanations exercise real SDK history, durable SQLite evidence and configured status roles. */
 import assert from "node:assert/strict";
+import http from "node:http";
 import test, { type TestContext } from "node:test";
 import { mkdtempSync, rmSync, chmodSync, statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +10,7 @@ import { init, create, update, createHistoryEntry, appendHistoryEntry, resolveRu
 import type { ItemDocument } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import { decode } from "@toon-format/toon";
-import extension, { explainSlackRouting, SlackRoutingError, SlackOutbox, OutboxError } from "../index.ts";
+import extension, { explainSlackRouting, SlackRoutingError, SlackOutbox, OutboxError, captureSlackOutbox, classifySlackTransition, __test__ } from "../index.ts";
 import type { SlackRoutingIdentity, SlackRoutingExplanation, OutboxEvent } from "../index.ts";
 import { validateSlackRoutingIdentity } from "../routing-explanation.ts";
 
@@ -364,4 +365,108 @@ test("empty and unopenable outbox storage yield uncertainty or a typed refusal w
   } finally { chmodSync(file, 0o600); }
   rmSync(file); mkdirSync(file);
   await assert.rejects(explainSlackRouting(f.pmRoot, input), (error: unknown) => error instanceof OutboxError && error.code === "storage_unavailable");
+});
+
+test("done configured as blocked captures and explains the same confirmed block event", async (t) => {
+  const f = await fixture(t); const box = new SlackOutbox(f.pmRoot); t.after(() => box.close());
+  box.enable({ events: ["create", "block", "close"], minPriority: 4 });
+  writeFileSync(join(f.pmRoot, "schema", "statuses.json"), JSON.stringify({ statuses: [
+    { id: "open", roles: ["active", "default_open"] }, { id: "done", aliases: ["waiting"], roles: ["blocked"] },
+    { id: "finished", roles: ["terminal", "terminal_done", "default_close"] },
+  ] }));
+  const registry = resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema);
+  for (const status of ["done", "DONE", " waiting ", "WAITING"]) assert.equal(classifySlackTransition({ command: "update", status }, registry), "block");
+  assert.equal(classifySlackTransition({ command: "update", status: "unregistered" }, registry), null);
+  assert.equal(classifySlackTransition({ command: "update" }, registry), null);
+  await update(f.item, { status: "done", blockedReason: "Synthetic block" }, f.client);
+  assert.equal((await captureSlackOutbox(f.pmRoot, box, [f.item])).failed, 0);
+  const captured = box.status().rows.find((row) => row.event !== "create")!;
+  assert.equal(captured.event, "block");
+  await box.drain(async () => "acknowledged");
+  const snapshot = await readHistorySnapshot(join(f.pmRoot, "history", `${f.item}.jsonl`), f.item);
+  const explained = await explainSlackRouting(f.pmRoot, { item: f.item, event: captured.event, revision: snapshot.entries.at(-1)!.after_hash });
+  assert.equal(explained.identity.event, "block"); assert.equal(explained.outcome, "delivered");
+});
+
+test("500 seeded transitions across arbitrary SDK status registries keep every captured receipt explainable", async (t) => {
+  const f = await fixture(t); const box = new SlackOutbox(f.pmRoot); t.after(() => box.close());
+  box.enable({ events: ["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"], minPriority: 4 });
+  let seed = 0xc1a551f; let capturedCount = 0; let transitions = 0;
+  /** Deterministic status names/roles and transitions include literal collisions and role-less definitions. */
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
+  const coverage = new Set<string>();
+  for (let configuration = 0; configuration < 50; configuration++) {
+    const names = ["open", "done", ...Array.from({ length: 6 }, () => `r${random().toString(16)}`)];
+    const roleSets = [["active", "default_open"], ["blocked"], ["active"], ["blocked"], ["terminal", "terminal_done", "default_close"], ["terminal", "terminal_canceled", "default_cancel"], ["draft"], []];
+    // Shuffle all non-required roles. In half the registries literal done means blocked.
+    if (configuration % 2) { const selected = 2 + random() % 6; [roleSets[1], roleSets[selected]] = [roleSets[selected]!, roleSets[1]!]; }
+    const definitions = names.map((id, index) => index === 7 && configuration % 3 === 0 ? { id } : { id, roles: roleSets[index] });
+    writeFileSync(join(f.pmRoot, "schema", "statuses.json"), JSON.stringify({ statuses: definitions }));
+    const registry = resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema);
+    const created = await create({ title: `Synthetic registry ${configuration}`, priority: 1 }, f.client);
+    const item = created.item.id;
+    let prior = created.item.status;
+    const expected = new Map<string, string>();
+    const seenReceipts = new Set<string>();
+    for (let operation = 0; operation < 10; operation++) {
+      const status = names[(random() >>> 16) % names.length]!;
+      await update(item, { status, title: `Synthetic registry ${configuration}/${operation}`, blockedReason: "Synthetic block", closeReason: "Synthetic close" }, f.client);
+      transitions += 1;
+      const history = await readHistorySnapshot(join(f.pmRoot, "history", `${item}.jsonl`), item);
+      const revision = history.entries.at(-1)!.after_hash;
+      let kind: string | undefined;
+      if (status !== prior) {
+        if (registry.terminal_done_statuses.has(status)) kind = "close";
+        else if (registry.terminal_canceled_statuses.has(status)) kind = "cancel";
+        else if (registry.blocked_statuses.has(status)) kind = "block";
+        else if (registry.active_statuses.has(status)) kind = status === registry.in_progress_status ? "start" : registry.blocked_statuses.has(prior) ? "unblock" : registry.terminal_statuses.has(prior) ? "reopen" : "open";
+      }
+      coverage.add(registry.by_id.get(status)!.roles.join(",") || "missing_roles");
+      assert.equal(classifySlackTransition({ command: "update", status, previousStatus: prior }, registry), kind ?? null);
+      if (kind) expected.set(revision, kind);
+      const digest = __test__.aggregateDigest([{ id: item, title: "Synthetic digest", status, updated_at: "2026-10-26T00:00:00Z" }], 0, "synthetic", registry);
+      assert.equal(digest.counts.closed, Number(registry.terminal_done_statuses.has(status)));
+      assert.equal(digest.counts.blocked, Number(registry.blocked_statuses.has(status)));
+      assert.equal(digest.counts.in_progress, Number(registry.active_statuses.has(status) && status === registry.in_progress_status));
+      prior = status;
+      const recovered = await captureSlackOutbox(f.pmRoot, box, [item]);
+      assert.equal(recovered.failed, 0);
+      await box.drain(async () => "acknowledged", 100);
+      const db = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+      try {
+        const rows = db.prepare("SELECT event,revision FROM delivery WHERE item=?").all(item);
+        for (const row of rows) {
+          const receipt = `${row.event}/${row.revision}`;
+          if (seenReceipts.has(receipt)) continue;
+          seenReceipts.add(receipt);
+          const version = history.entries.findIndex((entry) => entry.after_hash === row.revision) + 1;
+          const event = String(row.event) as OutboxEvent;
+          const report = await explainSlackRouting(f.pmRoot, { item, event, revision: String(row.revision), version });
+          assert.equal(report.identity.event, event, `registry ${configuration} op ${operation}`);
+          if (event !== "create") assert.equal(event, expected.get(String(row.revision)));
+          assert.equal(report.outcome, "delivered"); capturedCount += 1;
+        }
+      } finally { db.close(); }
+    }
+  }
+  assert.equal(transitions, 500); assert.ok(capturedCount >= 200); assert.ok(coverage.has("missing_roles"));
+  t.diagnostic(JSON.stringify({ seed: "0x0c1a551f", configurations: 50, transitions, explainedReceipts: capturedCount, roleShapes: coverage.size }));
+});
+
+test("shared classifier keeps SDK aliases, role-less statuses and command-only fallback consistent", async (t) => {
+  const f = await fixture(t);
+  writeFileSync(join(f.pmRoot, "schema", "statuses.json"), JSON.stringify({ statuses: [
+    { id: "open", roles: ["active", "default_open"] }, { id: "in_progress", roles: ["active"] },
+    { id: "blocked", aliases: ["waiting"], roles: ["blocked"] }, { id: "done", roles: [] },
+  ] }));
+  const registry = resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema);
+  for (const configured of [registry, undefined]) for (const [command, event] of [["create", "create"], ["close", "close"], ["claim", "start"], ["reopen", "reopen"], ["pause-task", "open"], ["update", null], [undefined, null]] as const) {
+    assert.equal(classifySlackTransition({ command }, configured), event);
+  }
+  assert.equal(classifySlackTransition({ command: "update", status: "done" }, registry), null);
+  assert.equal(classifySlackTransition({ command: "update", status: "open", previousStatus: "OPEN" }, registry), null);
+  assert.equal(classifySlackTransition({ command: "update", status: "open", previousStatus: " waiting " }, registry), "unblock");
+  assert.equal(classifySlackTransition({ command: "update", status: "open", previousStatus: "resolved" }, registry), "reopen");
+  assert.equal(classifySlackTransition({ command: "update", status: "open", previousStatus: "unknown" }, registry), "open");
+  assert.equal(classifySlackTransition({ command: "list", status: "blocked" }, registry), null);
 });

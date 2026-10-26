@@ -7,10 +7,12 @@ status: in_progress
 priority: 2
 tags: []
 created_at: "2026-10-26T00:29:46.063Z"
-updated_at: "2026-10-26T14:19:00.405Z"
+updated_at: "2026-10-26T19:58:13.502Z"
+assignee: codex-agent
+claim_principal: codex-agent
 author: codex-agent
 acceptance_criteria: Each fixture event has one complete decision path; urgent bypass names its policy; suppressed events are diagnosable in one bounded command with zero network calls.
-comments[24]{created_at,author,text}:
+comments[30]{created_at,author,text}:
   "2026-10-26T00:30:06.793Z",codex-agent,"Overlap check against the current CLI and sibling pm-ops: CLI provides item/history/status SDK primitives, not Slack routing explanations. Existing pm-slack outbox records delivery and coalescing plans account for attention; pm-ops diagnostics do not own Slack attention semantics. Add an offline read-only explanation, reusing verified SDK history and existing routing/planner logic. No import/export/sync or journal mutation is introduced. Historical routes were not snapshotted, so distinguish retained evidence from current-policy evaluation and explicit uncertainty."
   "2026-10-26T00:37:49.198Z",codex-agent,"Implemented exact-revision SDK and CLI diagnosis with verified history replay, configured status roles, retained eligibility, ordered current routing, named attention policy, and receipt outcome. Reads existing SQLite storage in one read-only snapshot; no new shared mutable state or import/export/sync/journal path. Targeted suite passes 8 tests including 500 seeded policy sequences replaying older SDK revisions with CRLF variants and SDK read-back state comparisons, 12 randomized custom registries, all transport states, foreign-record skips and competing transitions at every read SQL boundary. Core output contract coverage is 100/100/100; full unchanged release thresholds will be verified in CI."
   "2026-10-26T00:39:48.745Z",codex-agent,"Public main snapshot e23ecfe: 90 items, 746 history entries, 232 complete verified paths, 83 named urgent policies, zero network calls, maximum JSON 1287 bytes and TOON 964 bytes; public tracked data has no runtime receipts so all 232 delivery outcomes correctly remain uncertain. Fingerprint unchanged. Revert proof: forcing outcome to uncertain fails the suppressed-event test; removing urgent policy selection fails the exact-receipt/urgent test (each 1 test, 0 pass, 1 fail). Restored production source. Historical blocked-to-in-progress transitions retain the existing start identity using registry roles."
@@ -35,35 +37,57 @@ comments[24]{created_at,author,text}:
   "2026-10-26T13:42:43.097Z",codex-agent,"The pinned linked command npx pm test pm-slack-slyv --run --match delivery-evidence --progress passed: 144 tests, 0 failures in 146 seconds, including 500 model sequences (734 requests; 201 delivered, 159 withheld, 140 uncertain), clean-exit pair checks before recovery, 32 exception/32 crash boundaries and 28 retry/28 abandon replacement boundaries. Pushed product head 5871efef1e853941a547aaa3884c8837bf013a36. Fresh-install CI release gate queued: https://github.com/unbraind/pm-slack/actions/runs/40332543370 ; CodeQL queued: https://github.com/unbraind/pm-slack/actions/runs/40332543214 . No local full release gates were run on the saturated shared host."
   "2026-10-26T13:52:31.536Z",codex-agent,"First CI attempt 40332543370 reached clean-install health/build successfully but Node 26 rejected the transient-fault test wrapper at test-source typecheck: overloaded SQLite run.apply argument tuple was narrower under fresh installed types. Replaced Function.apply with Reflect.apply, matching the other native statement wrappers. Local typecheck, build:test, docstring lint and the affected transient terminal/post-commit test pass. The old queued matrix is superseded; no failed/canceled run counts as full-gate evidence. Requeueing unchanged-threshold full npm/Bun gates at the corrected head."
   "2026-10-26T14:18:59.168Z",codex-agent,"Verified product head 229804683b8bb88b9505dd99c7d2809ff112f396: https://github.com/unbraind/pm-slack/actions/runs/40334571915 passed all four full release gates (npm and Bun on Node 22 and 26), each 744 tests passed / 0 failed, 100% lines/branches/functions across all five sources at unchanged thresholds. Every gate reproduced 500 model sequences / 734 HTTP requests / 201 delivered / 159 withheld / 140 uncertain, 32 exception + 32 crash boundaries and 28 retry + 28 abandon replacement boundaries. Both native compiled Bun acceptances passed; fresh-install tracker health, generated output, audit, pack, changelog and release-policy checks passed. Exact-head CodeQL https://github.com/unbraind/pm-slack/actions/runs/40334572040 passed. Required revert proof remains 2/2 failing with only counter path restored, then restored implementation passing 144/144 linked tests. Releasing the claim without closing the item; only final evidence-commit CI and PR read-back remain. Known separate legacy receipt identity follow-up remains pm-slack-rjb1; no new CLI/SDK defect was found."
-files[8]{path,scope}:
+  "2026-10-26T19:13:32.583Z",codex-agent,"Resumed PR 160 after dispatch-proof and status-classifier review. Starting head 7fffcf9 is clean. Unify delivery facts around durable dispatch/confirmed-response evidence, never exception type; share one exported registry-role transition classifier between capture, recovery and explanation. Add fixed regressions and seeded registry/transition plus typed/untyped boundary models, prove each old path fails independently, then targeted checks and exact-head npm/Bun CI. Preserve prior finished routing and public-validation evidence."
+  "2026-10-26T19:22:51.032Z",codex-agent,"Both fixed regressions pass: successful package transport followed by typed storage_unavailable preserves confirmed delivery (1 attempt), and done assigned blocked captures/explains a confirmed block receipt. Transport context now propagates across wrappers with AsyncLocalStorage; successful HTTP response appends confirmation before returning. Terminal proof no longer takes a refusal/error-type parameter: no dispatch marker => not_sent; dispatched exceptions => unknown_after_send; observed confirmation wins. The exported classifySlackTransition is called by hook adapter, authoritative recovery capture and explanation using SDK readSettings/resolveRuntimeStatusRegistry. Seeded models and full affected regressions are in progress."
+  "2026-10-26T19:38:20.912Z",codex-agent,"New models pass: seed 0x0d15fac7 ran 500 typed/untyped failures over all four dispatch/response/terminal boundaries (250 delivered, 125 withheld, 125 uncertain); error codes vary independently of phase, and every clean exit closes its pair. The recording fake disables connection reuse and the oracle records actual received confirmations instead of assuming network success. Seed 0x0c1a551f ran 500 transitions through 50 SDK registries (renamed/custom roles, done-as-blocked and missing roles), explaining all 358 distinct captured receipts with seven role shapes. Audit found digest close/block/start bucketing separately interpreted status names, so it now delegates to the same classifier and SDK settings as capture/explanation; validation scripts do likewise. Existing outbox/interleaving regressions and exhaustive typed SQL fault coverage are being checked next."
+  "2026-10-26T19:44:55.629Z",codex-agent,"Independent behavioral revert proofs completed. Restoring only the prior attempt/terminal/finish functions makes node --test --test-concurrency=1 --test-name-pattern=\"successful post followed\" test/delivery-evidence.test.ts fail 1/1: actual withheld versus expected delivered after recorded HTTP success. Separately restoring capture to its former literal-status adapter makes node --test --test-concurrency=1 --test-name-pattern=\"done configured\" test/routing-explanation.test.ts fail 1/1: actual close versus expected block. Both source files restored byte-for-byte in finally after each proof; restored fixed cases plus the corrected executable SDK example pass 3/3. Existing outbox/coalescing/interleaving run passed 236/237; its only failure was that example still using the legacy conservative callback shape, now corrected with explicit dispatch and confirmation context. No history rewrite or dependency bump was used."
+  "2026-10-26T19:48:14.750Z",codex-agent,"Current read-only public replay after shared-classifier integration passed on public main e23ecfe839fbb85c55e47a1cd325abf153593d4d: 90 items, 746 entries, 232 complete paths, 83 urgent policies, zero network calls, maximum 1415 JSON / 1094 TOON bytes, unchanged tracker fingerprint 7d705863b3bbf648d5ea326dc84dfc3c7e5e33f70760d2265a5f42c97d6ca731. The exported non-git tracker was read-only and PATH contained no git. Classifier uses SDK normalizeStatusInputWithRegistry for aliases/case variants and resolveRuntimeStatusRegistry roles; no separate close-status mapping remains in digest or validation scripts. The typed-error generator now covers all nine refusal codes across every phase (36 code/phase combinations) as well as untyped errors; final CI will run that expanded model."
+  "2026-10-26T19:58:13.438Z",codex-agent,"Targeted classifier/digest/hook and lifecycle boundary run passed 140/140 tests, including all 34 untyped exception, 34 typed OutboxError and 34 actual process-crash boundaries. A further SDK alias/role-less/command-fallback unit passes. Pinned linked fixed-case command passed 3/3 via pm test --run --progress. Typecheck, test-source typecheck, docstring lint, build and native compiled Bun acceptance pass. Source audit: classifySlackTransition is used by captureSlackOutbox, explanation, detectEvent hook adapter, digest aggregation and both public validation scripts; SDK status alias normalization and registry roles are authoritative, with literals confined to its fallback. Full npm/Bun gates are next; no dependency pins or thresholds changed."
+files[12]{path,scope}:
   delivery-evidence.ts,project
   index.ts,project
   outbox.ts,project
   routing-explanation.ts,project
+  scripts/validate-coalescing.ts,project
   scripts/validate-routing-explanations.ts,project
   test/bun-outbox.acceptance.ts,project
+  test/coalescing.test.ts,project
   test/delivery-evidence.test.ts,project
+  test/outbox-interleaving.test.ts,project
+  test/outbox.test.ts,project
   test/routing-explanation.test.ts,project
-tests[2]:
+tests[3]:
   - command: node --test test/routing-explanation.test.ts
     scope: project
+    timeout_seconds: 900
     provenance:
       author: codex-agent
       created_at: "2026-10-26T00:38:01.172Z"
       source_kind: local_mutation
       source_ref: feat/notification-routing-explanations
+    updated_by: codex-agent
+    updated_at: "2026-10-26T19:31:45.956Z"
   - command: node --test test/delivery-evidence.test.ts
     scope: project
-    timeout_seconds: 600
+    timeout_seconds: 900
     provenance:
       author: codex-agent
       created_at: "2026-10-26T07:06:57.430Z"
       source_kind: local_mutation
       source_ref: feat/notification-routing-explanations
     updated_by: codex-agent
-    updated_at: "2026-10-26T13:37:07.449Z"
-docs[4]{path,scope}:
+    updated_at: "2026-10-26T19:31:38.948Z"
+  - command: "node --test --test-concurrency=1 --test-name-pattern=\"successful post followed|done configured|published SDK example exits nonzero for parked\" test/delivery-evidence.test.ts test/routing-explanation.test.ts test/outbox.test.ts"
+    scope: project
+    timeout_seconds: 180
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-26T19:48:05.580Z"
+      source_kind: local_mutation
+      source_ref: feat/notification-routing-explanations
+docs[5]{path,scope}:
   docs/delivery-evidence-validation.md,project
+  docs/outbox-example.md,project
   docs/routing-explanation-example.md,project
   docs/routing-explanation-validation.md,project
   README.md,project

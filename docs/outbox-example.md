@@ -22,7 +22,7 @@ try {
   if (recovered.failed) process.exitCode = 2;
   console.log({ recovered, status: outbox.status(10) });
   // To supply your own transport, implement one attempt with explicit outcomes:
-  const result = await outbox.drain(async (_destination, payload): Promise<OutboxOutcome> => {
+  const result = await outbox.drain(async (_destination, payload, context): Promise<OutboxOutcome> => {
     // Resolve _destination against a trusted credential source first.
     // The example uses one configured destination; applications with routes
     // must check slackDestination(webhook, payload.channel) against _destination.
@@ -32,14 +32,15 @@ try {
       throw new OutboxError("destination_changed", "Restore the original webhook and channel.");
     }
     try {
+      context.requestDispatched();
       const response = await fetch(webhook, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000),
         redirect: "error",
       });
-      if (response.ok) return "acknowledged";
+      if (response.ok) { context.responseConfirmed(); return "acknowledged"; }
       if (response.status === 429) return "retry";
-      return response.status < 500 ? "rejected" : "ambiguous";
+      return response.status >= 400 && response.status < 500 ? "rejected" : "ambiguous";
     } catch (error) {
       const cause = error instanceof Error ? error.cause : undefined;
       const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
@@ -65,9 +66,12 @@ left; classify them by the socket error code, not by error text. Other thrown
 transport failures become `ambiguous` and are not automatically retried.
 Redirects are refused without following their target and remain ambiguous because
 the original endpoint already received the request.
-Throw `OutboxError` only before a request starts. `destination_changed` parks the
-receipt as `refused` and allows later destinations to proceed; other typed
-refusals leave it pending and rethrow. No refused row counts a remote attempt.
+Call `requestDispatched()` immediately before the network API and
+`responseConfirmed()` as soon as a successful response arrives. Before dispatch,
+`destination_changed` parks the receipt as `refused`; other typed refusals leave
+it pending and rethrow. After dispatch, every exception is uncertain unless a
+response was confirmed, regardless of error type/code. A successful response is
+retained before later callback code can fail. No refused row counts a remote attempt.
 Use `resolve(key, "skip")` to discard a refused row, or restore its original route
 and explicitly resolve it for retry. Ambiguity holds later rows for that
 destination during the current drain. A reused sender PID requires independent

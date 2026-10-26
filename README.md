@@ -603,8 +603,13 @@ attempt gives `uncertain`; otherwise the outcome is `withheld`. Operator retry,
 skip, abandon and acknowledgment do not change past attempt records. A confirmed
 retry can therefore prove delivery after an earlier uncertain attempt.
 A retained eligibility exclusion also proves withholding when no receipt exists.
-Legacy attempted receipts without a complete journal remain uncertain. Status roles use the current
-tracker registry, and this limitation is explicit in every result.
+Legacy attempted receipts without a complete journal remain uncertain.
+`classifySlackTransition` is the exported classifier used by capture, recovery,
+explanation and digest buckets. Each uses SDK alias normalization and the status
+registry loaded from tracker settings;
+configured roles override literal names (including `done` configured as blocked).
+Literal status names are a fallback inside that classifier only. Status roles use
+the current registry, and this historical limitation is explicit in every result.
 
 Output has six stages plus at most 100 indexed routing-rule decisions. Identity
 validation accepts only item, event, revision and the optional positive safe integer version, a bounded safe item id, a
@@ -644,7 +649,13 @@ call `deriveSlackDeliveryOutcome`. Each report row has an `outcome`; aggregate
 states only. Digest counts describe tracker activity and are unrelated to delivery.
 Neither a skipped nor an operator-acknowledged count proves a delivery result.
 Dispatch-aware SDK transports accept a third `OutboxSendContext` argument and
-call `context.requestDispatched()` immediately before their network API. Existing
+call `context.requestDispatched()` immediately before their network API and
+`context.responseConfirmed()` immediately after a confirmed successful response.
+The package transport does both automatically, including through asynchronous
+wrappers that do not forward the context. A typed or untyped exception after
+dispatch is uncertain unless a response was confirmed; an error code never proves
+`not_sent`. Confirmation is retained before the caller resumes, so later callback
+errors cannot hide a successful delivery. Existing
 two-argument transports are conservatively marked before callback invocation.
 A clean exit always closes its attempt, including cancellation and late refusal;
 a process crash leaves recovery to the durable dispatch marker.

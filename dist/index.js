@@ -32,9 +32,9 @@ import https from "node:https";
 import { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 import http from "node:http";
-import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, normalizeStatusInputWithRegistry, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
-import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence } from "./outbox.js";
+import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence, currentOutboxSendContext } from "./outbox.js";
 import { CoalescingError } from "./coalescing.js";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.js";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
@@ -1164,7 +1164,7 @@ function isRetryableSlackError(err) {
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-function postToSlackOnce(webhookUrl, payload, dispatched) {
+function postToSlackOnce(webhookUrl, payload, dispatched, confirmed) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify(payload);
         const parsed = new URL(webhookUrl);
@@ -1179,7 +1179,8 @@ function postToSlackOnce(webhookUrl, payload, dispatched) {
             },
         };
         const request = parsed.protocol === "http:" ? http.request : https.request;
-        dispatched?.();
+        const proof = currentOutboxSendContext();
+        (dispatched ?? proof?.requestDispatched)?.();
         const req = request(options, (res) => {
             let data = "";
             res.on("data", (chunk) => {
@@ -1193,7 +1194,13 @@ function postToSlackOnce(webhookUrl, payload, dispatched) {
                 // in IncomingMessage's type exists only for server-side requests.
                 const status = res.statusCode;
                 if (status >= 200 && status < 300) {
-                    resolve();
+                    try {
+                        (confirmed ?? proof?.responseConfirmed)?.();
+                        resolve();
+                    }
+                    catch (error) {
+                        reject(error);
+                    }
                 }
                 else {
                     reject(new SlackHttpError(status, `Slack webhook returned HTTP ${status}: ${data.slice(0, 200)}`, parseRetryAfterMs(res.headers["retry-after"])));
@@ -1259,19 +1266,15 @@ function resolveWindow(since, days, now = Date.now()) {
     const d = days !== undefined && Number.isFinite(days) && days > 0 ? Math.floor(days) : 7;
     return { cutoffMs: now - d * 24 * 60 * 60 * 1000, label: `last ${d} day${d === 1 ? "" : "s"}` };
 }
-function statusIsClosed(status) {
-    const s = status.toLowerCase();
-    return s === "closed" || s === "done" || s === "resolved" || s === "complete" || s === "completed";
-}
 /**
  * Aggregate store items into digest buckets for the window. An item counts as:
  *   - created     if created_at >= cutoff
  *   - closed      if it is in a closed/done status AND updated_at >= cutoff
- *   - blocked     if status === blocked AND updated_at >= cutoff
- *   - in_progress if status === in_progress AND updated_at >= cutoff
+ *   - blocked     if the shared classifier reports block AND updated_at >= cutoff
+ *   - in_progress if the shared classifier reports start AND updated_at >= cutoff
  * An item may appear in multiple buckets (e.g. created and blocked).
  */
-function aggregateDigest(items, cutoffMs, windowLabel) {
+function aggregateDigest(items, cutoffMs, windowLabel, registry) {
     const buckets = {
         created: [],
         closed: [],
@@ -1281,14 +1284,14 @@ function aggregateDigest(items, cutoffMs, windowLabel) {
     for (const item of items) {
         const created = item.created_at ? Date.parse(item.created_at) : NaN;
         const updated = item.updated_at ? Date.parse(item.updated_at) : created;
-        const status = (item.status ?? "").toLowerCase();
+        const event = classifySlackTransition({ command: "update", status: item.status }, registry);
         if (!Number.isNaN(created) && created >= cutoffMs)
             buckets.created.push(item);
-        if (statusIsClosed(status) && !Number.isNaN(updated) && updated >= cutoffMs)
+        if (event === "close" && !Number.isNaN(updated) && updated >= cutoffMs)
             buckets.closed.push(item);
-        if (status === "blocked" && !Number.isNaN(updated) && updated >= cutoffMs)
+        if (event === "block" && !Number.isNaN(updated) && updated >= cutoffMs)
             buckets.blocked.push(item);
-        if (status === "in_progress" && !Number.isNaN(updated) && updated >= cutoffMs)
+        if (event === "start" && !Number.isNaN(updated) && updated >= cutoffMs)
             buckets.in_progress.push(item);
     }
     const counts = {
@@ -1451,29 +1454,80 @@ const UPDATE_COMMANDS = new Set(["update", "edit", "set", "status"]);
 const START_COMMANDS = new Set(["claim", "start-task", "start", "begin"]);
 /** Lifecycle-alias commands that move an item back to open (e.g. pause). */
 const OPEN_COMMANDS = new Set(["pause-task", "release", "reopen", "publish"]);
-/** Map a (normalized) status string to the EventKind for a transition into it. */
-function statusToEvent(status) {
-    switch ((status ?? "").toLowerCase()) {
-        case "blocked":
-            return "block";
-        case "canceled":
-        case "cancelled":
-            return "cancel";
-        case "closed":
-        case "done":
-        case "resolved":
-        case "complete":
-        case "completed":
-            return "close";
-        case "in_progress":
-        case "in-progress":
-            return "start";
-        case "open":
-            return "open";
-        default:
-            return null;
+/** Classify a transition using SDK registry roles, with literals only when no registry definition exists. */
+export function classifySlackTransition(input, registry) {
+    const command = input.command?.toLowerCase() ?? "";
+    if (CREATE_COMMANDS.has(command))
+        return "create";
+    if (!UPDATE_COMMANDS.has(command) && !CLOSE_COMMANDS.has(command) && !START_COMMANDS.has(command) && !OPEN_COMMANDS.has(command))
+        return null;
+    const status = registry ? normalizeStatusInputWithRegistry(input.status, registry) ?? input.status : input.status;
+    const previousStatus = registry ? normalizeStatusInputWithRegistry(input.previousStatus, registry) ?? input.previousStatus : input.previousStatus;
+    if (status !== undefined && status === previousStatus)
+        return null;
+    let event = null;
+    if (status !== undefined && registry?.by_id.has(status)) {
+        if (registry.terminal_done_statuses.has(status))
+            event = "close";
+        else if (registry.terminal_canceled_statuses.has(status))
+            event = "cancel";
+        else if (registry.blocked_statuses.has(status))
+            event = "block";
+        else if (registry.active_statuses.has(status))
+            event = status === registry.in_progress_status ? "start" : "open";
     }
+    else {
+        switch ((status ?? "").toLowerCase()) {
+            case "blocked":
+                event = "block";
+                break;
+            case "canceled":
+            case "cancelled":
+                event = "cancel";
+                break;
+            case "closed":
+            case "done":
+            case "resolved":
+            case "complete":
+            case "completed":
+                event = "close";
+                break;
+            case "in_progress":
+            case "in-progress":
+                event = "start";
+                break;
+            case "open":
+                event = "open";
+                break;
+        }
+        if (status === undefined) {
+            if (CLOSE_COMMANDS.has(command))
+                event = "close";
+            else if (START_COMMANDS.has(command))
+                event = "start";
+            else if (OPEN_COMMANDS.has(command))
+                event = command === "reopen" ? "reopen" : "open";
+        }
+    }
+    if (event === "open" && previousStatus) {
+        const prior = previousStatus;
+        if (registry?.by_id.has(prior)) {
+            if (registry.blocked_statuses.has(prior))
+                return "unblock";
+            if (registry.terminal_statuses.has(prior))
+                return "reopen";
+        }
+        else {
+            if (prior.toLowerCase() === "blocked")
+                return "unblock";
+            if (["closed", "canceled", "cancelled", "done", "resolved"].includes(prior.toLowerCase()))
+                return "reopen";
+        }
+    }
+    return event;
 }
+/** Legacy test/helper adapter delegates all status semantics to the single classifier. */
+function statusToEvent(status) { return classifySlackTransition({ command: "update", status }); }
 /**
  * Type guard: confirm `ctx.result` is a structured object before reading its
  * lifecycle fields. The SDK types `result` as `unknown`; this guard keeps the
@@ -1494,41 +1548,14 @@ function isCommandLifecycleResult(value) {
  *      open→reopen (from a closed/canceled state) and open→unblock (from
  *      blocked) so terminal-recovery transitions are distinguishable.
  */
-function detectEvent(ctx) {
-    const cmd = ctx.command?.toLowerCase() ?? "";
-    if (CREATE_COMMANDS.has(cmd))
-        return "create";
-    if (CLOSE_COMMANDS.has(cmd))
-        return "close";
-    // `ctx.result` is declared `unknown` by the SDK; narrow with a type guard
-    // before reading lifecycle fields (see `isCommandLifecycleResult`).
+function detectEvent(ctx, registry) {
     const result = isCommandLifecycleResult(ctx.result) ? ctx.result : undefined;
-    const resultStatusRaw = result?.item?.status;
-    const resultStatus = typeof resultStatusRaw === "string" ? resultStatusRaw : undefined;
-    const prevStatusRaw = result?.previousStatus ?? result?.previous_status ?? "";
-    const prevStatus = (typeof prevStatusRaw === "string" ? prevStatusRaw : "").toLowerCase();
-    // Lifecycle aliases imply a target status even without --status.
-    let event = null;
-    if (START_COMMANDS.has(cmd))
-        event = "start";
-    else if (OPEN_COMMANDS.has(cmd))
-        event = cmd === "reopen" ? "reopen" : "open";
-    if (!event && UPDATE_COMMANDS.has(cmd)) {
-        const optStatus = ctx.options?.["status"];
-        event = statusToEvent(optStatus) ?? statusToEvent(resultStatus);
-    }
-    if (!event)
-        return null;
-    // Refine an "open" transition using the prior status when available:
-    //   blocked  -> open  => unblock
-    //   closed/canceled -> open => reopen
-    if (event === "open" && prevStatus) {
-        if (prevStatus === "blocked")
-            return "unblock";
-        if (["closed", "canceled", "cancelled", "done", "resolved"].includes(prevStatus))
-            return "reopen";
-    }
-    return event;
+    const raw = result?.item?.status;
+    const prior = result?.previousStatus ?? result?.previous_status;
+    const option = ctx.options?.["status"];
+    // Resulting state wins over command spelling/options; absent host results retain the old adapter fallback.
+    const status = typeof raw === "string" ? raw : typeof option === "string" ? option : undefined;
+    return classifySlackTransition({ command: ctx.command, status, previousStatus: typeof prior === "string" ? prior : undefined }, registry);
 }
 /**
  * Pull the touched item out of an afterCommand hook's result.
@@ -1642,7 +1669,8 @@ async function sendOutbox(destination, payload, context) {
     if (!target)
         throw new OutboxError("destination_changed", "Restore the original routing destination before draining; no message was posted.");
     try {
-        await postToSlackOnce(target.webhookUrl, payload, context?.requestDispatched);
+        const proof = context ?? currentOutboxSendContext();
+        await postToSlackOnce(target.webhookUrl, payload, proof?.requestDispatched, proof?.responseConfirmed);
         return "acknowledged";
     }
     catch (error) {
@@ -1773,6 +1801,7 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
     const config = loadConfig();
     if (!config)
         throw new OutboxError("destination_changed", "Restore notification configuration before recovering lifecycle history.");
+    const statusRegistry = resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema);
     let inspected = 0;
     let queued = 0;
     let failed = 0;
@@ -1817,7 +1846,7 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
                         previous = status;
                     if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior))
                         continue;
-                    const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
+                    const event = classifySlackTransition({ command: entry.op === "create" ? "create" : "update", status, previousStatus: prior }, statusRegistry);
                     const policy = outboxStorage(() => outbox.recoveryPolicyAt(entry.ts));
                     if (!event || !policy || !policy.events.includes(event) || outboxStorage(() => outbox.has(id, event, entry.after_hash)))
                         continue;
@@ -1887,27 +1916,7 @@ export async function explainSlackRouting(pmRoot, input) {
     const priorValue = index === 0 ? undefined : replayHistoryToTarget(entries, index - 1).metadata.status;
     const prior = typeof priorValue === "string" ? priorValue : undefined;
     const status = typeof metadata.status === "string" ? metadata.status : "";
-    let event;
-    if (entry.op === "create")
-        event = "create";
-    else if (status !== prior) {
-        if (registry.terminal_done_statuses.has(status))
-            event = "close";
-        else if (registry.terminal_canceled_statuses.has(status))
-            event = "cancel";
-        else if (registry.blocked_statuses.has(status))
-            event = "block";
-        else if (registry.active_statuses.has(status)) {
-            if (status === registry.in_progress_status)
-                event = "start";
-            else if (prior !== undefined && registry.blocked_statuses.has(prior))
-                event = "unblock";
-            else if (prior !== undefined && registry.terminal_statuses.has(prior))
-                event = "reopen";
-            else
-                event = "open";
-        }
-    }
+    const event = classifySlackTransition({ command: entry.op === "create" ? "create" : "update", status, previousStatus: prior }, registry);
     if (event !== input.event)
         throw new SlackRoutingError("event_not_found", "Choose the lifecycle event matching this revision under the tracker's configured status roles; non-status edits are not lifecycle events.");
     // Reuse routing semantics, but refuse malformed configuration rather than silently dropping rules.
@@ -2015,12 +2024,13 @@ export default defineExtension({
                         return;
                     if (ctx.command === "slack explain")
                         return;
+                    const statusRegistry = ctx.pm_root && existsSync(ctx.pm_root) ? resolveRuntimeStatusRegistry((await readSettings(ctx.pm_root)).schema) : undefined;
                     if (ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
                         const outbox = new SlackOutbox(ctx.pm_root);
                         try {
                             if (outbox.since()) {
                                 const item = extractItem(ctx);
-                                if (item && detectEvent(ctx)) {
+                                if (item && detectEvent(ctx, statusRegistry)) {
                                     try {
                                         await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
                                     }
@@ -2043,7 +2053,7 @@ export default defineExtension({
                     const config = loadConfig();
                     if (!config)
                         return; // no webhook → silent no-op
-                    const event = detectEvent(ctx);
+                    const event = detectEvent(ctx, statusRegistry);
                     if (!event)
                         return;
                     if (!config.events.has(event)) {
@@ -2549,7 +2559,7 @@ export default defineExtension({
                     // unbounded strict read before constructing or posting any payload.
                     // Disable nested extension hooks: this is an observational read.
                     const { items } = await listAllComplete({}, { pmRoot, noExtensions: true });
-                    const summary = aggregateDigest(items, cutoffMs, label);
+                    const summary = aggregateDigest(items, cutoffMs, label, resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema));
                     const payload = { ...buildDigestPayload(summary, format, channel), ...(threadTs ? { thread_ts: threadTs } : {}) };
                     if (dryRun) {
                         if (!asJson) {

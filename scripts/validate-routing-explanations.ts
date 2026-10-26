@@ -5,8 +5,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import https from "node:https";
 import http from "node:http";
-import { listAllComplete, readHistoryEntries } from "@unbrained/pm-cli/sdk";
-import { explainSlackRouting, __test__ } from "../index.ts";
+import { listAllComplete, readHistoryEntries, readSettings, resolveRuntimeStatusRegistry } from "@unbrained/pm-cli/sdk";
+import { explainSlackRouting, classifySlackTransition } from "../index.ts";
 import { slackRoutingToon } from "../routing-explanation.ts";
 
 /** Capture every exported byte before and after diagnosis without changing the tracker. */
@@ -22,6 +22,7 @@ function fingerprint(root: string): string {
 const pmRoot = process.argv[2];
 assert.ok(pmRoot, "Pass an exported public tracker root.");
 const before = fingerprint(pmRoot);
+const statusRegistry = resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema);
 const corpus = await listAllComplete({}, { pmRoot, cwd: pmRoot, noExtensions: true });
 let networkCalls = 0;
 /** Any attempted transport fails the measurement immediately. */
@@ -49,7 +50,7 @@ for (const item of corpus.items) {
     const prior = previous;
     if (status) previous = status;
     if (entry.op !== "create" && (!status || status === prior)) continue;
-    const event = __test__.detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
+    const event = classifySlackTransition({ command: entry.op === "create" ? "create" : "update", status, previousStatus: prior }, statusRegistry);
     if (!event) continue;
     const report = await explainSlackRouting(pmRoot, { item: item.id, event, revision: entry.after_hash, version: index + 1 });
     assert.deepEqual([...new Set(report.path.map((step) => step.stage))], ["history", "events", "priority", "route", "coalescing", "delivery"]);
