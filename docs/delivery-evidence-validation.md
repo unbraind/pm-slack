@@ -53,7 +53,8 @@ workflow labels or production normalization. The fixed late-refusal/forced-aband
 confirmed-retry scenario asserts withheld before retry and delivered afterward.
 Measured boundary run: **32 exception injections, 32 real process crashes**,
 plus **28 forced-retry and 28 forced-abandon replacement boundaries**. Every
-clean exit is checked for zero open attempts before running recovery.
+clean exit is checked for zero open attempts before running recovery. The complete
+linked journal suite passed **144 tests / 0 failures** in 146 seconds.
 
 The current behavioral revert proof and exact-head CI counts are recorded in
 the linked pm item and PR. Earlier skipped-to-withheld revert proof remains

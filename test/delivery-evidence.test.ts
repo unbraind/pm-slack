@@ -483,7 +483,7 @@ test("transient terminal and post-commit claim exceptions close the pair before 
     const statement = prepare.call(this, sql);
     if (sql.startsWith("INSERT OR IGNORE INTO delivery_attempt_terminal")) {
       const run = statement.run;
-      statement.run = function (...args) { if (once) { once = false; throw new Error("Synthetic transient terminal fault"); } return run.apply(this, args); };
+      statement.run = function (...args) { if (once) { once = false; throw new Error("Synthetic transient terminal fault"); } return Reflect.apply(run, this, args); };
     }
     return statement;
   };
