@@ -145,7 +145,7 @@ test("exact receipt identity wins over later configuration; urgent bypasses name
       assert.equal(value.outcome, ["rejected", "refused", "skipped"].includes(state) ? "withheld" : "uncertain");
     }
   }
-  for (const sql of ["UPDATE delivery SET state='foreign'", "UPDATE delivery SET state='pending',attempts=-1", "UPDATE delivery SET attempts=1.5", "UPDATE delivery SET attempts=1,revision='foreign'"]) {
+  for (const sql of ["UPDATE delivery SET state='foreign'", "UPDATE delivery SET state='pending',attempts=-1", "UPDATE delivery SET attempts=1.5", "UPDATE delivery SET attempts=1e999", "UPDATE delivery SET attempts=-1e999", "UPDATE delivery SET attempts=9007199254740992", "UPDATE delivery SET attempts='NaN'", "UPDATE delivery SET attempts=1,revision='foreign'"]) {
     db.exec(sql);
     const value = await explainSlackRouting(f.pmRoot, input); safe(value);
     assert.ok(value.uncertainty.includes("foreign_evidence_skipped")); assert.equal(value.state, undefined);
@@ -270,8 +270,10 @@ test("foreign evidence is skipped, storage failures refuse safely, and numeric/c
     db.prepare("UPDATE recovery_policy SET events=?").run(events);
     assert.ok((await explainSlackRouting(f.pmRoot, input)).uncertainty.includes("foreign_evidence_skipped"));
   }
-  db.exec("UPDATE recovery_policy SET events='[\"create\"]',min_priority=5");
-  assert.ok((await explainSlackRouting(f.pmRoot, input)).uncertainty.includes("foreign_evidence_skipped"));
+  for (const value of ["5", "0", "1.5", "1e999", "9007199254740992"]) {
+    db.exec(`UPDATE recovery_policy SET events='["create"]',min_priority=${value}`);
+    assert.ok((await explainSlackRouting(f.pmRoot, input)).uncertainty.includes("foreign_evidence_skipped"));
+  }
   db.close();
   for (const priority of ["Infinity", "NaN", "-1", "5", "1.5", "1junk", " "]) {
     process.env.PM_SLACK_MIN_PRIORITY = priority;
