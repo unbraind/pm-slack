@@ -104,7 +104,9 @@ delivery:
 pm slack outbox --action resolve --key RECEIPT_KEY --decision skip
 ```
 
-`skip` records `skipped`, a terminal state distinct from `acknowledged`. Live or
+`skip` and `abandon` record `skipped`, a terminal work state distinct from
+`acknowledged`. They stop retries without proving non-delivery. Even an operator's
+`acknowledged` resolution is a work decision, not a retained Slack response. Live or
 reused sender PIDs refuse reconciliation by default. After independently verifying
 that no sender is active, use `--force-reconcile` to override PID reuse, including
 PID 1 in containers. Forcing an active sender can duplicate delivery; it is never
@@ -118,7 +120,8 @@ Command refusals exit nonzero. SDK callers receive `OutboxError` with typed `cod
 `refused` count instead of aborting the drain.
 
 The command returns compact TOON by default or JSON with `--json`: exact counts
-for every state, at most `--limit` receipts (1–100, default 20), and an explicit
+for every work state, separate `outcomes` totals (`delivered`, `withheld`,
+`uncertain`), at most `--limit` receipts (1–100, default 20), and an explicit
 `omitted` count. Continue inspection with `--after <next_cursor>` until
 `next_cursor` is null; totals cover the whole outbox on every page. Payloads and
 destinations are excluded. A drain inspects history
@@ -127,7 +130,7 @@ without truncation, then attempts at most the requested number of pending rows.
 means delivery may have happened; it is not an acknowledgment.
 
 The package root exports `SlackOutbox`, `captureSlackOutbox`, `slackDestination`,
-`OutboxError`, and their intent/receipt/report/outcome types. The low-level
+`OutboxError`, `deriveSlackDeliveryOutcome`, and their intent/receipt/report/evidence types. The low-level
 `drain(send, limit)` callback must make one attempt and report `acknowledged`
 only on explicit success, `retry` only on a confirmed refusal, and `ambiguous`
 whenever remote acceptance is uncertain. A `retry` ends the current drain; call
@@ -588,9 +591,14 @@ Retained eligibility epochs and receipts are historical evidence. Route evaluati
 uses current configuration, which was not historically snapshotted. Coalescing
 receipts omit the historical budget/window parameters; this uncertainty is explicit.
 They are retained observations and may be stale after retries; absent receipts
-never prove delivery or non-delivery. `acknowledged` means delivered; rejected,
-refused, skipped, or a retained filter exclusion means withheld. Pending, sending,
-ambiguous and missing evidence remain uncertain. Status roles use the current
+never prove delivery or non-delivery. One reducer, `deriveSlackDeliveryOutcome`,
+uses all retained attempt results rather than the final receipt label. An unfinished
+or ambiguous attempt keeps the outcome `uncertain` through retry, skip, abandon,
+expiry, or operator acknowledgment, including when another attempt later succeeds.
+With no unresolved attempts, explicit Slack success proves `delivered`; zero
+attempts or exclusively definite rejections/pre-request refusals prove `withheld`.
+A retained eligibility exclusion also proves withholding when no receipt exists.
+Legacy attempted receipts without a complete journal remain uncertain. Status roles use the current
 tracker registry, and this limitation is explicit in every result.
 
 Output has six stages plus at most 100 indexed routing-rule decisions. Identity
@@ -615,3 +623,21 @@ Notification previews, digests, routing explanations, and local durable outbox
 inspection work on plain initialized trackers without a git executable. Slack
 posting needs an explicitly configured webhook and network connectivity. The
 explanation command needs neither. It makes zero network calls.
+
+### Retained delivery proof
+
+Each claim records an immutable attempt token under the same SQLite writer
+transaction as its work claim. Completion records that token's actual transport
+result before releasing work. A late completion can settle its own evidence after
+operator reconciliation without overwriting a peer's work state. Operator decisions
+are journaled separately. A monotonic claim count detects missing attempt records;
+unknown/foreign results and incomplete legacy history remain uncertain.
+
+`status`, plain/coalesced drain reports, coalescing manifests, and explanations all
+call `deriveSlackDeliveryOutcome`. Each report row has an `outcome`; aggregate
+`outcomes` counts are separate from compatibility `counts`, which describe work
+states only. Digest counts describe tracker activity and are unrelated to delivery.
+Neither a skipped nor an operator-acknowledged count proves a delivery result.
+The attempt journal contains keys, attempt tokens, result codes and operator
+decisions, never webhook URLs or message bodies. The explanation path still opens
+existing storage read-only and never creates or migrates it.

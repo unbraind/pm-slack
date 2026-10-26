@@ -7,6 +7,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { planSlackCoalescing } from "./coalescing.ts";
 import type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
 
+import { deriveSlackDeliveryOutcome, readDeliveryEvidenceRows, isInspectableDeliveryEvidenceRow } from "./delivery-evidence.ts";
+import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
+
 /** Stable refusal codes returned by both the SDK and CLI. */
 export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
 
@@ -76,7 +79,11 @@ export interface CoalescingReport {
   /** Original event totals and notification counts, without payloads. */
   summary: { events: number; urgent: number; coalesced: number; deferred: number; waiting: number; notifications: number };
   /** Exactly identified source events on this page. */
-  rows: (CoalescingReceipt & { state: OutboxState })[];
+  rows: (CoalescingReceipt & { state: OutboxState; outcome: SlackDeliveryOutcome })[];
+  /** Exact delivery-proof totals over the inspected plan or retained manifest. */
+  outcomes: Record<SlackDeliveryOutcome, number>;
+  /** Foreign or malformed rows skipped from the report, when any exist. */
+  foreign_skipped?: number;
   /** Evidence rows outside this page, never unreported event loss. */
   omitted: number;
   /** Offset for the next page; null denotes complete evidence. */
@@ -97,6 +104,8 @@ export interface OutboxReceipt {
   state: OutboxState;
   /** Number of claimed remote attempts, including uncertain attempts. */
   attempts: number;
+  /** Delivery proof reduced from all attempts, independent of workflow state. */
+  outcome: SlackDeliveryOutcome;
 }
 
 /** Bounded inspection with exact state totals and an explicit omission count. */
@@ -105,6 +114,10 @@ export interface OutboxReport {
   enabled_since: string | null;
   /** Exact durable state counts. */
   counts: Record<OutboxState, number>;
+  /** Proven delivery outcomes, with uncertain notifications counted separately. */
+  outcomes: Record<SlackDeliveryOutcome, number>;
+  /** Foreign or malformed rows skipped from the report, when any exist. */
+  foreign_skipped?: number;
   /** Oldest matching receipts, bounded by the requested limit. */
   rows: OutboxReceipt[];
   /** Rows omitted from this inspection. */
@@ -153,7 +166,7 @@ export interface OutboxRecoveryReport {
 }
 
 /** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
-export type OutboxDecision = "acknowledged" | "retry" | "skip";
+export type OutboxDecision = "acknowledged" | "retry" | "skip" | "abandon";
 
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
@@ -210,7 +223,7 @@ export interface SlackRoutingEvidence {
   /** Eligibility policy effective at the event time. */
   policy?: OutboxRecoveryFilter;
   /** Durable delivery evidence for this exact item/event/revision identity. */
-  receipt?: { state: OutboxState; attempts: number; disposition: string | null };
+  receipt?: { state: OutboxState; attempts: number; disposition: string | null; evidence: SlackDeliveryEvidence };
 }
 
 /** Inspect one exact revision in a read transaction without creating storage or changing permissions. */
@@ -225,8 +238,8 @@ export function readSlackRoutingEvidence(pmRoot: string, item: string, event: Ou
       db.exec("PRAGMA busy_timeout=5000; BEGIN");
       const since = db.prepare("SELECT since FROM settings WHERE id=1").get();
       const policy = db.prepare("SELECT events,CAST(min_priority AS TEXT) AS min_priority FROM recovery_policy WHERE since<=? ORDER BY since DESC,rowid DESC LIMIT 1").get(at);
-      const receipt = db.prepare(`SELECT d.item,d.event,d.revision,d.state,CAST(d.attempts AS TEXT) AS attempts,c.disposition FROM delivery d
-        LEFT JOIN coalescing_receipt c ON c.key=d.key WHERE d.key=?`).get(receiptKey(item, event, revision));
+      const journaled = Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('delivery_proof','delivery_attempt','delivery_resolution')").get()!.n) === 3;
+      const receipt = readDeliveryEvidenceRows(db, receiptKey(item, event, revision), journaled)[0];
       const result: SlackRoutingEvidence = { since: since ? String(since.since) : null };
       if (policy) {
         let parsed: unknown;
@@ -239,10 +252,10 @@ export function readSlackRoutingEvidence(pmRoot: string, item: string, event: Ou
         const state = String(receipt.state) as OutboxState;
         const attempts = Number(receipt.attempts);
         const disposition = receipt.disposition === null ? null : String(receipt.disposition);
-        if (receipt.item !== item || receipt.event !== event || receipt.revision !== revision || !["pending", "sending", "acknowledged", "ambiguous", "rejected", "refused", "skipped"].includes(state) || !Number.isSafeInteger(attempts) || attempts < 0 || (disposition !== null && !["bypass", "coalesced", "deferred", "waiting"].includes(disposition))) {
+        if (receipt.item !== item || receipt.event !== event || receipt.revision !== revision || !isInspectableDeliveryEvidenceRow(receipt) || (disposition !== null && !["bypass", "coalesced", "deferred", "waiting"].includes(disposition))) {
           result.foreign = true;
         }
-        else result.receipt = { state, attempts, disposition };
+        else result.receipt = { state, attempts, disposition, evidence: receipt.evidence };
       }
       db.exec("COMMIT");
       return result;
@@ -280,7 +293,13 @@ export class SlackOutbox {
         CREATE INDEX IF NOT EXISTS recovery_policy_since ON recovery_policy(since);`);
       this.db.exec(`CREATE TABLE IF NOT EXISTS delivery_context (key TEXT PRIMARY KEY, at INTEGER NOT NULL, priority INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS coalescing_receipt (key TEXT PRIMARY KEY, disposition TEXT NOT NULL, notification TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS delivery_group (key TEXT PRIMARY KEY, notification TEXT NOT NULL);`);
+        CREATE TABLE IF NOT EXISTS delivery_group (key TEXT PRIMARY KEY, notification TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS delivery_proof (key TEXT PRIMARY KEY, legacy_unknown INTEGER NOT NULL, claims INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS delivery_attempt (key TEXT NOT NULL, token TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(key,token));
+        CREATE TABLE IF NOT EXISTS delivery_resolution (sequence INTEGER PRIMARY KEY, key TEXT NOT NULL, decision TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS delivery_attempt_token ON delivery_attempt(token);
+        CREATE INDEX IF NOT EXISTS delivery_resolution_key ON delivery_resolution(key);
+        INSERT OR IGNORE INTO delivery_proof(key,legacy_unknown) SELECT key,CASE WHEN attempts>0 OR state IN ('sending','ambiguous','acknowledged') THEN 1 ELSE 0 END FROM delivery;`);
     } catch {
       database?.close();
       throw new OutboxError("storage_unavailable", "Restore writable local runtime storage; committed items are unchanged. Then drain again.");
@@ -375,11 +394,21 @@ export class SlackOutbox {
   coalescingReport(plan: CoalescingPlan, limit = 20, after = 0, durable = false): CoalescingReport {
     limitValue(limit);
     if (!Number.isSafeInteger(after) || after < 0) throw new OutboxError("invalid_input", "Use a nonnegative integer coalescing cursor.");
-    const total = durable ? Number(this.db.prepare("SELECT COUNT(*) AS n FROM coalescing_receipt").get()!.n) : plan.receipts.length;
-    const rows = durable ? this.db.prepare(`SELECT d.key,d.item,d.event,d.revision,c.disposition,c.notification,d.state
-      FROM coalescing_receipt c JOIN delivery d ON d.key=c.key ORDER BY d.key LIMIT ? OFFSET ?`).all(limit, after) as unknown as CoalescingReport["rows"] : plan.receipts.slice(after, after + limit).map((row) => ({ ...row, state: this.db.prepare("SELECT state FROM delivery WHERE key=?").get(row.key)!.state as OutboxState }));
-    return { summary: { events: plan.events, urgent: plan.urgent, coalesced: plan.coalesced, deferred: plan.deferred, waiting: plan.waiting, notifications: plan.notifications.length }, rows,
-      omitted: total - rows.length, next_cursor: after + rows.length < total ? after + rows.length : null };
+    const observed = readDeliveryEvidenceRows(this.db);
+    const evidenceRows = observed.filter(isInspectableDeliveryEvidenceRow);
+    let foreignSkipped = observed.length - evidenceRows.length;
+    const observedKeys = new Set(observed.map((row) => row.key));
+    const byKey = new Map(evidenceRows.map((row) => [row.key, row]));
+    const manifest = durable ? evidenceRows.filter((row) => row.disposition !== null).sort((a, b) => a.key.localeCompare(b.key)).map((row) => ({ key: row.key, item: row.item, event: row.event as OutboxEvent, revision: row.revision, disposition: row.disposition as CoalescingReceipt["disposition"], notification: row.notification! })) : plan.receipts;
+    const outcomes: Record<SlackDeliveryOutcome, number> = { delivered: 0, withheld: 0, uncertain: 0 };
+    const all = manifest.flatMap((row) => {
+      const proof = byKey.get(row.key);
+      if (!proof) { if (!observedKeys.has(row.key)) foreignSkipped += 1; return []; }
+      const outcome = deriveSlackDeliveryOutcome(proof.evidence); outcomes[outcome] += 1;
+      return [{ ...row, state: proof.state, outcome }];
+    });
+    return { summary: { events: plan.events, urgent: plan.urgent, coalesced: plan.coalesced, deferred: plan.deferred, waiting: plan.waiting, notifications: plan.notifications.length }, outcomes, ...(foreignSkipped ? { foreign_skipped: foreignSkipped } : {}), rows: all.slice(after, after + limit),
+      omitted: all.length - all.slice(after, after + limit).length, next_cursor: after + limit < all.length ? after + limit : null };
   }
 
 /**
@@ -426,10 +455,18 @@ export class SlackOutbox {
     limitValue(limit);
     if (!Number.isSafeInteger(after) || after < 0) throw new OutboxError("invalid_input", "Use a nonnegative integer status cursor.");
     const counts: Record<OutboxState, number> = { pending: 0, sending: 0, acknowledged: 0, ambiguous: 0, rejected: 0, refused: 0, skipped: 0 };
-    for (const row of this.db.prepare("SELECT state,COUNT(*) AS n FROM delivery GROUP BY state").all()) counts[row.state as OutboxState] = Number(row.n);
-    const page = this.db.prepare("SELECT rowid AS sequence,key,item,event,state,attempts FROM delivery WHERE rowid>? ORDER BY rowid LIMIT ?").all(after, limit + 1) as unknown as OutboxReceipt[];
+    const outcomes: Record<SlackDeliveryOutcome, number> = { delivered: 0, withheld: 0, uncertain: 0 };
+    const observed = readDeliveryEvidenceRows(this.db);
+    const evidenceRows = observed.filter(isInspectableDeliveryEvidenceRow);
+    const foreignSkipped = observed.length - evidenceRows.length;
+    const receipts = evidenceRows.map((row) => {
+      const outcome = deriveSlackDeliveryOutcome(row.evidence);
+      counts[row.state] += 1; outcomes[outcome] += 1;
+      return { sequence: row.sequence, key: row.key, item: row.item, event: row.event as OutboxEvent, state: row.state, attempts: row.attempts, outcome };
+    });
+    const page = receipts.filter((row) => row.sequence > after).slice(0, limit + 1);
     const rows = page.slice(0, limit);
-    return { enabled_since: this.since(), counts, rows, omitted: Object.values(counts).reduce((sum, n) => sum + n, 0) - rows.length,
+    return { enabled_since: this.since(), counts, outcomes, ...(foreignSkipped ? { foreign_skipped: foreignSkipped } : {}), rows, omitted: receipts.length - rows.length,
       next_cursor: page.length > limit ? rows[rows.length - 1]!.sequence : null };
   }
 
@@ -495,6 +532,9 @@ export class SlackOutbox {
         // Planner notification keys are stable across retries. Attempt tokens must never be reused.
         const token = randomUUID();
         for (const key of keys) {
+          this.db.prepare("INSERT OR IGNORE INTO delivery_proof(key,legacy_unknown) SELECT key,CASE WHEN attempts>0 THEN 1 ELSE 0 END FROM delivery WHERE key=?").run(key);
+          this.db.prepare("UPDATE delivery_proof SET claims=claims+1 WHERE key=?").run(key);
+          this.db.prepare("INSERT INTO delivery_attempt VALUES (?,?,'started')").run(key, token);
           this.db.prepare("UPDATE delivery SET state='sending',owner=?,attempts=attempts+1 WHERE key=?").run(process.pid, key);
           if (notification) this.db.prepare("INSERT OR REPLACE INTO coalescing_receipt VALUES (?,?,?)").run(key, notification.urgent ? "bypass" : "coalesced", notification.key);
           this.db.prepare("INSERT OR REPLACE INTO delivery_group VALUES (?,?)").run(key, token);
@@ -509,6 +549,8 @@ export class SlackOutbox {
   /** Finish only this attempt; clean its mappings before releasing members, with no observable partial state. */
   private finish(token: string, state: OutboxState, undoAttempt: boolean): void {
     this.transaction(() => {
+      // Finish evidence by its immutable attempt token even if an operator retired its work claim.
+      this.db.prepare("UPDATE delivery_attempt SET result=? WHERE token=? AND result='started'").run(undoAttempt ? "not_sent" : state === "pending" ? "retry" : state, token);
       const keys = this.db.prepare("SELECT key FROM delivery_group WHERE notification=?").all(token).map((member) => String(member.key));
       // Forced reconciliation may have retired this attempt while its sender was awaiting transport.
       if (!keys.length) return;
@@ -520,12 +562,12 @@ export class SlackOutbox {
 
   /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
   resolve(key: string, decision: OutboxDecision, options: { force?: boolean } = {}): void {
-    if (decision !== "acknowledged" && decision !== "retry" && decision !== "skip") throw new OutboxError("invalid_input", "Choose acknowledged, retry after verifying absence, or skip to discard without claiming delivery.");
+    if (decision !== "acknowledged" && decision !== "retry" && decision !== "skip" && decision !== "abandon") throw new OutboxError("invalid_input", "Choose acknowledged, retry after verifying absence, skip, or abandon; operator decisions do not prove delivery.");
     // One transaction fences concurrent reconciliation and claims across processes.
     this.transaction(() => {
       const row = this.db.prepare("SELECT state,owner FROM delivery WHERE key=?").get(key);
       if (!row) throw new OutboxError("not_found", "Inspect status and use an existing receipt key.");
-      if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected" && row.state !== "refused") throw new OutboxError("not_ambiguous", "Only reconcile sending, ambiguous, rejected, or refused receipts.");
+      if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected" && row.state !== "refused" && !(row.state === "pending" && (decision === "skip" || decision === "abandon"))) throw new OutboxError("not_ambiguous", "Only reconcile sending, ambiguous, rejected, or refused receipts.");
       if (row.state === "sending" && options.force !== true) {
         let active = true;
         try { process.kill(Number(row.owner), 0); } catch (error) { active = (error as NodeJS.ErrnoException).code !== "ESRCH"; }
@@ -534,9 +576,10 @@ export class SlackOutbox {
       // A grouped HTTP attempt has one outcome: reconcile every member together.
       const group = this.db.prepare("SELECT notification FROM delivery_group WHERE key=?").get(key);
       const keys = group ? this.db.prepare("SELECT key FROM delivery_group WHERE notification=?").all(group.notification!).map((member) => String(member.key)) : [key];
+      for (const member of keys) this.db.prepare("INSERT INTO delivery_resolution(key,decision) VALUES (?,?)").run(member, decision);
       if (group) this.db.prepare("DELETE FROM delivery_group WHERE notification=?").run(group.notification!);
       // Releasing members is the final mutation; peers see the complete transition at COMMIT.
-      for (const member of keys) this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(decision === "retry" ? "pending" : decision === "skip" ? "skipped" : decision, member);
+      for (const member of keys) this.db.prepare("UPDATE delivery SET state=?,owner=0 WHERE key=?").run(decision === "retry" ? "pending" : decision === "skip" || decision === "abandon" ? "skipped" : decision, member);
     });
   }
 }

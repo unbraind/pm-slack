@@ -29,8 +29,10 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
+export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import { SlackOutbox } from "./outbox.ts";
-import type { OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
+import type { OutboxPayload, OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
 export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
 export type { CoalescingReport } from "./outbox.ts";
@@ -616,6 +618,8 @@ declare function outboxFailure(error: unknown): {
  * @returns The durable outcome to store for that attempt.
  */
 declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
+/** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
+declare function sendOutbox(destination: string, payload: OutboxPayload): Promise<OutboxOutcome>;
 /**
  * Recover opted-in lifecycle transitions from SDK mutation events, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
@@ -641,6 +645,7 @@ export default _default;
 export declare const __test__: {
     outboxFailure: typeof outboxFailure;
     classifyOutboxSendError: typeof classifyOutboxSendError;
+    sendOutbox: typeof sendOutbox;
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;

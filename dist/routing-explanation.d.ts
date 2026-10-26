@@ -1,4 +1,5 @@
 /** Public contracts and the single strict request boundary for offline routing diagnosis. */
+import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import type { OutboxEvent, OutboxState } from "./outbox.ts";
 /** Exact committed event identity; revisions prevent conflating repeated transitions. */
 export interface SlackRoutingIdentity {
@@ -31,7 +32,7 @@ export interface SlackRoutingExplanation {
     /** Exact event being diagnosed. */
     identity: SlackRoutingIdentity;
     /** Delivery conclusions rely on durable evidence, never current routing alone. */
-    outcome: "delivered" | "withheld" | "uncertain";
+    outcome: SlackDeliveryOutcome;
     /** Exact safe filter operands, so a historical priority exclusion needs no second inspection. */
     eligibility: {
         /** Event filter result; null means no configuration evidence. */
@@ -49,6 +50,8 @@ export interface SlackRoutingExplanation {
     state?: OutboxState;
     /** Count of persisted transport attempts, if known. */
     attempts?: number;
+    /** Bounded proof over all attempts and operator resolutions when retained. */
+    attempt_evidence?: SlackDeliveryEvidence;
     /** Explicit limits on retrospective knowledge, expressed as stable codes. */
     uncertainty: string[];
 }

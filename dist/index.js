@@ -29,6 +29,8 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import https from "node:https";
+import { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
+export { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 import http from "node:http";
 import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
@@ -1581,8 +1583,10 @@ function outboxToon(report, recovered) {
         `enabled_since: ${JSON.stringify(report.enabled_since)}`,
         "counts:",
         ...Object.entries(report.counts).map(([state, count]) => `  ${state}: ${count}`),
-        `rows[${report.rows.length}]{sequence,key,item,event,state,attempts}:`,
-        ...report.rows.map((row) => `  ${[row.sequence, row.key, row.item, row.event, row.state, row.attempts].map((value) => JSON.stringify(value)).join(",")}`),
+        "outcomes:", ...Object.entries(report.outcomes).map(([outcome, count]) => `  ${outcome}: ${count}`),
+        `rows[${report.rows.length}]{sequence,key,item,event,state,attempts,outcome}:`,
+        ...report.rows.map((row) => `  ${[row.sequence, row.key, row.item, row.event, row.state, row.attempts, row.outcome].map((value) => JSON.stringify(value)).join(",")}`),
+        ...(report.foreign_skipped === undefined ? [] : [`foreign_skipped: ${report.foreign_skipped}`]),
         `omitted: ${report.omitted}`,
         `next_cursor: ${report.next_cursor}`,
         "recovered:", `  inspected: ${recovered.inspected}`, `  queued: ${recovered.queued}`, `  failed: ${recovered.failed}`,
@@ -1621,7 +1625,7 @@ function classifyOutboxSendError(error) {
     if (error instanceof SlackHttpError) {
         if (error.status === 429)
             return "retry";
-        return error.status < 500 ? "rejected" : "ambiguous";
+        return error.status >= 400 && error.status < 500 ? "rejected" : "ambiguous";
     }
     const cause = error instanceof Error ? error.cause : undefined;
     if (cause === null || typeof cause !== "object" || !("code" in cause))
@@ -1961,8 +1965,10 @@ export async function explainSlackRouting(pmRoot, input) {
     path.push({ stage: "delivery", policy: "exact_revision_receipt", decision: receipt?.state ?? "not_recorded", source: receipt ? "retained" : "unknown" });
     if (!receipt)
         uncertainty.push("delivery_receipt_not_retained");
-    const outcome = receipt?.state === "acknowledged" ? "delivered" : receipt?.state === "skipped" || receipt?.state === "rejected" || receipt?.state === "refused" || (!receipt && policy && (!eventsPass || !priorityPass)) ? "withheld" : "uncertain";
-    return { ok: true, identity: { ...input }, outcome, eligibility, path: path.map((step) => ({ ...step, rule: step.rule ?? null })), uncertainty, ...(receipt ? { state: receipt.state, attempts: receipt.attempts } : {}) };
+    const outcome = deriveSlackDeliveryOutcome(receipt?.evidence, Boolean(!receipt && policy && (!eventsPass || !priorityPass)));
+    if (receipt?.evidence.legacy_unknown)
+        uncertainty.push("attempt_history_incomplete");
+    return { ok: true, identity: { ...input }, outcome, eligibility, path: path.map((step) => ({ ...step, rule: step.rule ?? null })), uncertainty, ...(receipt ? { state: receipt.state, attempts: receipt.attempts, attempt_evidence: receipt.evidence } : {}) };
 }
 export default defineExtension({
     name: "pm-slack",
@@ -1977,8 +1983,10 @@ export default defineExtension({
             if (!report?.summary || !Array.isArray(report.rows))
                 return null;
             return ["summary:", ...Object.entries(report.summary).map(([key, count]) => `  ${key}: ${count}`),
-                `rows[${report.rows.length}]{key,item,event,revision,disposition,notification,state}:`,
-                ...report.rows.map((row) => `  ${[row.key, row.item, row.event, row.revision, row.disposition, row.notification, row.state].map((value) => JSON.stringify(value)).join(",")}`),
+                "outcomes:", ...Object.entries(report.outcomes).map(([outcome, count]) => `  ${outcome}: ${count}`),
+                `rows[${report.rows.length}]{key,item,event,revision,disposition,notification,state,outcome}:`,
+                ...report.rows.map((row) => `  ${[row.key, row.item, row.event, row.revision, row.disposition, row.notification, row.state, row.outcome].map((value) => JSON.stringify(value)).join(",")}`),
+                ...(report.foreign_skipped === undefined ? [] : [`foreign_skipped: ${report.foreign_skipped}`]),
                 `omitted: ${report.omitted}`, `next_cursor: ${report.next_cursor}`].join("\n");
         }, { commands: ["slack coalesce"] });
         api.registerRenderer("toon", (ctx) => {
@@ -2207,7 +2215,7 @@ export default defineExtension({
                     { long: "--limit", value_name: "count", description: "Receipt and delivery bound, 1..100 (default 20)" },
                     { long: "--after", value_name: "cursor", description: "Resume status after next_cursor from the previous page" },
                     { long: "--key", value_name: "key", description: "Receipt idempotency key to reconcile" },
-                    { long: "--decision", value_name: "decision", description: "acknowledged, retry, or skip; retry can duplicate an uncertain send" },
+                    { long: "--decision", value_name: "decision", description: "acknowledged, retry, skip, or abandon; operator decisions do not prove delivery" },
                     { long: "--force-reconcile", description: "Override PID reuse only after verifying no sender is active; duplicates are possible" },
                 ],
                 async run(ctx) {
@@ -2233,8 +2241,8 @@ export default defineExtension({
                             if (action === "resolve") {
                                 const key = readStrOption(options, "key");
                                 const decision = readStrOption(options, "decision");
-                                if (!key || (decision !== "acknowledged" && decision !== "retry" && decision !== "skip"))
-                                    throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry|skip after checking Slack delivery.");
+                                if (!key || (decision !== "acknowledged" && decision !== "retry" && decision !== "skip" && decision !== "abandon"))
+                                    throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry|skip|abandon; operator decisions do not prove delivery.");
                                 outbox.resolve(key, decision, { force: readBoolOption(options, "force-reconcile") });
                             }
                             let recovered = { inspected: 0, queued: 0, failed: 0 };
@@ -2581,6 +2589,7 @@ export default defineExtension({
 export const __test__ = {
     outboxFailure,
     classifyOutboxSendError,
+    sendOutbox,
     buildItemBlockKit,
     buildItemPayload,
     buildTextMessage,

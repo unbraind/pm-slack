@@ -32,6 +32,7 @@ export function slackRoutingToon(report) {
     return ["ok: true", `outcome: ${report.outcome}`, "identity:", ...Object.entries(report.identity).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
         "eligibility:", ...Object.entries(report.eligibility).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
         ...(report.state === undefined ? [] : [`state: ${report.state}`, `attempts: ${report.attempts}`]),
+        ...(report.attempt_evidence === undefined ? [] : ["attempt_evidence:", ...Object.entries(report.attempt_evidence).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`)]),
         `path[${report.path.length}]{stage,policy,decision,source,rule}:`, ...report.path.map((step) => `  ${[step.stage, step.policy, step.decision, step.source, step.rule ?? null].map((value) => JSON.stringify(value)).join(",")}`),
         `uncertainty[${report.uncertainty.length}]: ${report.uncertainty.map((value) => JSON.stringify(value)).join(",")}`].join("\n");
 }

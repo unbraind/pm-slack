@@ -29,8 +29,10 @@ async function diagnose(pmRoot: string, identity: SlackRoutingIdentity) {
 }
 ```
 
-A retained event/priority exclusion yields `withheld`. An exact acknowledged
-receipt yields `delivered`, even if today's configuration differs. A legacy event
+A retained event/priority exclusion yields `withheld`. Complete attempt evidence
+with a Slack success and no unresolved attempts yields `delivered`, even if today's
+configuration differs. A timeout followed by `resolve(key, "skip")` remains
+`uncertain`: the operator stopped retries without proving non-delivery. A legacy event
 without a retained receipt yields `uncertain`; current routing alone cannot prove
 what happened in the past. Urgent policies identify blocker or critical-priority
 bypasses, without claiming that an unrecorded bypass was actually executed.

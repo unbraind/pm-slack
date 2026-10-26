@@ -48,6 +48,7 @@ try {
     }
   }, 10);
   console.log(result);
+  console.log(result.outcomes); // Delivery proof; counts contains work states only.
   if (result.counts.refused) process.exitCode = 2;
 } catch (error) {
   if (error instanceof OutboxError) {

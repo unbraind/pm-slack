@@ -22,7 +22,8 @@
     "docs/coalescing-validation.md",
     "CHANGELOG.md",
     "docs/routing-explanation-example.md",
-    "docs/routing-explanation-validation.md"
+    "docs/routing-explanation-validation.md",
+    "docs/delivery-evidence-validation.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -101,7 +102,8 @@
       "docs/coalescing-validation.md",
       "CHANGELOG.md",
       "docs/routing-explanation-example.md",
-      "docs/routing-explanation-validation.md"
+      "docs/routing-explanation-validation.md",
+      "docs/delivery-evidence-validation.md"
     ],
     "examples": [
       "README.md",

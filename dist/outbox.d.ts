@@ -1,4 +1,5 @@
 import type { CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
+import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 /** Stable refusal codes returned by both the SDK and CLI. */
 export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
 /** Expected failure with a safe message, machine-readable code, and concrete remedy. */
@@ -69,7 +70,12 @@ export interface CoalescingReport {
     /** Exactly identified source events on this page. */
     rows: (CoalescingReceipt & {
         state: OutboxState;
+        outcome: SlackDeliveryOutcome;
     })[];
+    /** Exact delivery-proof totals over the inspected plan or retained manifest. */
+    outcomes: Record<SlackDeliveryOutcome, number>;
+    /** Foreign or malformed rows skipped from the report, when any exist. */
+    foreign_skipped?: number;
     /** Evidence rows outside this page, never unreported event loss. */
     omitted: number;
     /** Offset for the next page; null denotes complete evidence. */
@@ -89,6 +95,8 @@ export interface OutboxReceipt {
     state: OutboxState;
     /** Number of claimed remote attempts, including uncertain attempts. */
     attempts: number;
+    /** Delivery proof reduced from all attempts, independent of workflow state. */
+    outcome: SlackDeliveryOutcome;
 }
 /** Bounded inspection with exact state totals and an explicit omission count. */
 export interface OutboxReport {
@@ -96,6 +104,10 @@ export interface OutboxReport {
     enabled_since: string | null;
     /** Exact durable state counts. */
     counts: Record<OutboxState, number>;
+    /** Proven delivery outcomes, with uncertain notifications counted separately. */
+    outcomes: Record<SlackDeliveryOutcome, number>;
+    /** Foreign or malformed rows skipped from the report, when any exist. */
+    foreign_skipped?: number;
     /** Oldest matching receipts, bounded by the requested limit. */
     rows: OutboxReceipt[];
     /** Rows omitted from this inspection. */
@@ -138,7 +150,7 @@ export interface OutboxRecoveryReport {
     failures?: OutboxRecoveryFailure[];
 }
 /** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
-export type OutboxDecision = "acknowledged" | "retry" | "skip";
+export type OutboxDecision = "acknowledged" | "retry" | "skip" | "abandon";
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 /** Hash a destination without persisting a webhook credential. */
@@ -158,6 +170,7 @@ export interface SlackRoutingEvidence {
         state: OutboxState;
         attempts: number;
         disposition: string | null;
+        evidence: SlackDeliveryEvidence;
     };
 }
 /** Inspect one exact revision in a read transaction without creating storage or changing permissions. */

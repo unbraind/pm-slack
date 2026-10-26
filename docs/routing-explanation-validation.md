@@ -46,3 +46,9 @@ explanation against acknowledged lifecycle evidence with no extra HTTP sends.
 Behavioral reversion proofs force suppression to `uncertain` and remove urgent
 policy selection independently. Each targeted regression fails (1 test, 0 pass,
 1 fail); sources are restored before validation and build.
+
+
+The initial receipt-label interpretation has been superseded by
+[full-lifecycle delivery evidence](delivery-evidence-validation.md). The public
+read-only corpus measurements above are unchanged because it contains no runtime
+outbox. Current status/manifest/explanation outcomes use the shared evidence reducer.

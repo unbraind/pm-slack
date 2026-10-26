@@ -74,8 +74,9 @@ try {
     assert.equal(peer.status().counts.ambiguous, 0);
     assert.equal(peer.status().counts.acknowledged, 5);
     assert.equal(accepted, 1);
+    assert.deepEqual(peer.status().outcomes, { delivered: 3, withheld: 0, uncertain: 2 });
   } finally { peer.close(); owner.close(); }
-  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends, no git.");
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));

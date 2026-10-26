@@ -142,7 +142,7 @@ test("exact receipt identity wins over later configuration; urgent bypasses name
       db.prepare("UPDATE coalescing_receipt SET disposition=?").run(disposition);
       const value = await explainSlackRouting(f.pmRoot, input); safe(value);
       assert.equal(value.state, state);
-      assert.equal(value.outcome, ["rejected", "refused", "skipped"].includes(state) ? "withheld" : "uncertain");
+      assert.equal(value.outcome, "delivered", "a later work label cannot erase a retained transport acknowledgment");
     }
   }
   for (const sql of ["UPDATE delivery SET state='foreign'", "UPDATE delivery SET state='pending',attempts=-1", "UPDATE delivery SET attempts=1.5", "UPDATE delivery SET attempts=1e999", "UPDATE delivery SET attempts=-1e999", "UPDATE delivery SET attempts=9007199254740992", "UPDATE delivery SET attempts='NaN'", "UPDATE delivery SET attempts=1,revision='foreign'"]) {
@@ -246,15 +246,17 @@ test("read-only receipt snapshot stays consistent at every SQL boundary of a com
     DatabaseSync.prototype.exec = function (sql) { originalExec.call(this, sql); checkpoint(); };
     DatabaseSync.prototype.prepare = function (sql) {
       const statement = originalPrepare.call(this, sql);
-      const get = statement.get;
-      Object.defineProperty(statement, "get", { value: (...args: Parameters<typeof get>) => { const row = get.apply(statement, args); checkpoint(); return row; } });
+      for (const method of ["get", "all"] as const) {
+        const read = statement[method];
+        Object.defineProperty(statement, method, { value: (...args: unknown[]) => { const row: unknown = Reflect.apply(read, statement, args); checkpoint(); return row; } });
+      }
       return statement;
     };
     let report: SlackRoutingExplanation;
     try { report = await explainSlackRouting(f.pmRoot, input); }
     finally { DatabaseSync.prototype.exec = originalExec; DatabaseSync.prototype.prepare = originalPrepare; }
-    // BEGIN, since, policy, receipt, COMMIT: all actual boundaries are covered.
-    if (at < 5) assert.equal(injected, true);
+    // BEGIN, settings, policy, journal discovery, proof snapshot, COMMIT.
+    assert.equal(injected, true);
     assert.ok((report.state === "pending" && report.attempts === 0) || (report.state === "acknowledged" && report.attempts === 1));
     safe(report);
   }
@@ -302,7 +304,7 @@ test("retained priority exclusion is independently diagnosable and plain receipt
   assert.equal((await explainSlackRouting(f.pmRoot, input)).outcome, "withheld");
   box.enqueue({ ...input, destination: "synthetic", payload: { text: "PRIVATE-MESSAGE" } });
   const report = await explainSlackRouting(f.pmRoot, input); safe(report);
-  assert.equal(report.outcome, "uncertain"); assert.equal(report.state, "pending"); assert.equal(report.attempts, 0);
+  assert.equal(report.outcome, "withheld"); assert.equal(report.state, "pending"); assert.equal(report.attempts, 0);
   assert.equal(report.path.find((step) => step.stage === "coalescing")!.decision, "not_recorded");
   delete process.env.PM_SLACK_ROUTES;
   delete process.env.PM_SLACK_MIN_PRIORITY;

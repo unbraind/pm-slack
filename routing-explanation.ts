@@ -1,4 +1,5 @@
 /** Public contracts and the single strict request boundary for offline routing diagnosis. */
+import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import type { OutboxEvent, OutboxState } from "./outbox.ts";
 
 /** Exact committed event identity; revisions prevent conflating repeated transitions. */
@@ -34,7 +35,7 @@ export interface SlackRoutingExplanation {
   /** Exact event being diagnosed. */
   identity: SlackRoutingIdentity;
   /** Delivery conclusions rely on durable evidence, never current routing alone. */
-  outcome: "delivered" | "withheld" | "uncertain";
+  outcome: SlackDeliveryOutcome;
   /** Exact safe filter operands, so a historical priority exclusion needs no second inspection. */
   eligibility: {
     /** Event filter result; null means no configuration evidence. */
@@ -52,6 +53,8 @@ export interface SlackRoutingExplanation {
   state?: OutboxState;
   /** Count of persisted transport attempts, if known. */
   attempts?: number;
+  /** Bounded proof over all attempts and operator resolutions when retained. */
+  attempt_evidence?: SlackDeliveryEvidence;
   /** Explicit limits on retrospective knowledge, expressed as stable codes. */
   uncertainty: string[];
 }
@@ -91,6 +94,7 @@ export function slackRoutingToon(report: SlackRoutingExplanation): string {
   return ["ok: true", `outcome: ${report.outcome}`, "identity:", ...Object.entries(report.identity).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
     "eligibility:", ...Object.entries(report.eligibility).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
     ...(report.state === undefined ? [] : [`state: ${report.state}`, `attempts: ${report.attempts}`]),
+    ...(report.attempt_evidence === undefined ? [] : ["attempt_evidence:", ...Object.entries(report.attempt_evidence).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`)]),
     `path[${report.path.length}]{stage,policy,decision,source,rule}:`, ...report.path.map((step) => `  ${[step.stage, step.policy, step.decision, step.source, step.rule ?? null].map((value) => JSON.stringify(value)).join(",")}`),
     `uncertainty[${report.uncertainty.length}]: ${report.uncertainty.map((value) => JSON.stringify(value)).join(",")}`].join("\n");
 }
