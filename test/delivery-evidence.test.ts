@@ -512,6 +512,7 @@ test("successful post followed by typed storage error keeps confirmed delivery",
 test("500 seeded typed and untyped errors at dispatch/response/terminal boundaries follow only retained transport facts", async (t) => {
   const f = await fixture(t); let seed = 0xd15fac7;
   const totals = { delivered: 0, withheld: 0, uncertain: 0 }; const covered = new Set<string>();
+  const codePhases = new Set<string>();
   const codes = ["invalid_input", "disabled", "conflict", "not_found", "in_flight", "not_ambiguous", "destination_changed", "storage_unavailable", "history_unavailable"] as const;
   /** Reproducible fault order changes type/code independently of network phase. */
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
@@ -520,6 +521,7 @@ test("500 seeded typed and untyped errors at dispatch/response/terminal boundari
     const phase = sequence % 4; const typed = ((sequence >>> 2) % 2) === 0;
     const code = codes[(random() >>> 16) % codes.length]!;
     covered.add(`${phase}/${typed}`);
+    if (typed) codePhases.add(`${phase}/${code}`);
     const error = typed ? new OutboxError(code, "Synthetic phase fault.") : new Error("Synthetic phase fault.");
     const callsBefore = f.calls.length;
     let confirmedObserved = false;
@@ -561,8 +563,8 @@ test("500 seeded typed and untyped errors at dispatch/response/terminal boundari
     if (state !== "acknowledged") f.box().resolve(key, "skip");
     assert.deepEqual(f.box().status(1).outcomes, totals);
   }
-  assert.equal(covered.size, 8);
-  t.diagnostic(JSON.stringify({ seed: "0x0d15fac7", sequences: 500, boundaries: 4, errorKinds: 2, errorCodes: codes.length, requests: f.calls.length, ...totals }));
+  assert.equal(covered.size, 8); assert.equal(codePhases.size, codes.length * 4);
+  t.diagnostic(JSON.stringify({ seed: "0x0d15fac7", sequences: 500, boundaries: 4, errorKinds: 2, errorCodes: codes.length, codePhasePairs: codePhases.size, requests: f.calls.length, ...totals }));
 });
 
 test("package HTTP helper inherits dispatch and confirmation through an asynchronous wrapper", async (t) => {

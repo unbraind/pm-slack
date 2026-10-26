@@ -119,3 +119,15 @@ The updated public validator reproduced **90 items / 746 entries / 232 complete
 paths / 83 urgent policies**, **zero network calls**, **1415 JSON / 1094 TOON
 maximum bytes**, and unchanged tracker bytes on a read-only non-git export of
 public main `e23ecfe839fbb85c55e47a1cd325abf153593d4d`.
+
+Shared-classifier/dispatch-rule product head
+`6e68fefce4bff9c977f11af69de7b48a10780ceb` passed
+[CI 40392451931](https://github.com/unbraind/pm-slack/actions/runs/40392451931):
+npm and Bun on Node 22 and 26 each passed **795 tests / 0 failures**, with
+**100% lines / branches / functions across all five sources**, at unchanged
+thresholds. Both native Bun acceptances and
+[CodeQL](https://github.com/unbraind/pm-slack/actions/runs/40392451639) passed.
+Every model run reproduced **500 error sequences / nine codes / 250 HTTP calls /
+250 delivered / 125 withheld / 125 uncertain**, and **50 registries / 500
+transitions / 358 explained receipts**. The generator explicitly asserts all
+**36 typed code/phase pairs**. Final evidence-head CI is linked in the PR.
