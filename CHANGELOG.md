@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Use the pm SDK mutation feed for Slack outbox recovery ([pm-slack-3so4](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-3so4.toon))
+
 ## 2026.10.25 - 2026-10-25
 
 ### Added
