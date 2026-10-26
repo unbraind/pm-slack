@@ -1,7 +1,7 @@
 /** Durable, local Slack delivery receipts. Payloads and webhook credentials never appear in inspection output. */
 import type { DatabaseSync } from "node:sqlite";
 import { createRequire } from "node:module";
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { planSlackCoalescing } from "./coalescing.ts";
@@ -187,10 +187,11 @@ function limitValue(limit: number): number {
 }
 
 /** Load the synchronous SQLite API native to Node or Bun through their common statement surface. */
-function openDatabase(file: string): DatabaseSync {
+function openDatabase(file: string, readOnly = false): DatabaseSync {
   const [module, constructor] = ([ ["node:sqlite", "DatabaseSync"], ["bun:sqlite", "Database"] ] as const)[Number(Boolean(process.versions.bun))]!;
   const sqlite = createRequire(import.meta.url)(module) as Record<string, typeof DatabaseSync>;
-  return new sqlite[constructor]!(file);
+  const options: { readOnly?: boolean; readonly?: boolean } = ([{ readOnly: true }, { readonly: true }] as const)[Number(Boolean(process.versions.bun))]!;
+  return readOnly ? new sqlite[constructor]!(file, options) : new sqlite[constructor]!(file);
 }
 
 /** Validate eligibility before enabling storage or recording a future-only policy. */
@@ -198,6 +199,54 @@ function recoveryFilterValue(filter: OutboxRecoveryFilter): void {
   if (!Number.isInteger(filter.minPriority) || filter.minPriority < 1 || filter.minPriority > 4 || !filter.events.every((event) => lifecycleEvents.includes(event))) {
     throw new OutboxError("invalid_input", "Use canonical lifecycle events and a recovery priority from 1 to 4.");
   }
+}
+
+/** A consistent read-only view; private payloads and destinations are never selected. */
+export interface SlackRoutingEvidence {
+  /** Durable opt-in time, or null for a tracker without an outbox. */
+  since: string | null;
+  /** A record outside the owned schema was skipped instead of being interpreted. */
+  foreign?: true;
+  /** Eligibility policy effective at the event time. */
+  policy?: OutboxRecoveryFilter;
+  /** Durable delivery evidence for this exact item/event/revision identity. */
+  receipt?: { state: OutboxState; attempts: number; disposition: string | null };
+}
+
+/** Inspect one exact revision in a read transaction without creating storage or changing permissions. */
+export function readSlackRoutingEvidence(pmRoot: string, item: string, event: OutboxEvent, revision: string, at: string): SlackRoutingEvidence {
+  const file = join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite");
+  if (!existsSync(file)) return { since: null };
+  let db: DatabaseSync | undefined;
+  try {
+    db = openDatabase(file, true);
+    db.exec("PRAGMA busy_timeout=5000; BEGIN");
+    const since = db.prepare("SELECT since FROM settings WHERE id=1").get();
+    const policy = db.prepare("SELECT events,min_priority FROM recovery_policy WHERE since<=? ORDER BY since DESC,rowid DESC LIMIT 1").get(at);
+    const receipt = db.prepare(`SELECT d.item,d.event,d.revision,d.state,d.attempts,c.disposition FROM delivery d
+      LEFT JOIN coalescing_receipt c ON c.key=d.key WHERE d.key=?`).get(receiptKey(item, event, revision));
+    const result: SlackRoutingEvidence = { since: since ? String(since.since) : null };
+    if (policy) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(String(policy.events)); } catch { parsed = null; }
+      const filter = { events: parsed as OutboxEvent[], minPriority: Number(policy.min_priority) };
+      if (Array.isArray(filter.events) && filter.events.length <= 8 && filter.events.every((event) => lifecycleEvents.includes(event)) && Number.isInteger(filter.minPriority) && filter.minPriority >= 1 && filter.minPriority <= 4) result.policy = filter;
+      else result.foreign = true;
+    }
+    if (receipt) {
+      const state = String(receipt.state) as OutboxState;
+      const attempts = Number(receipt.attempts);
+      const disposition = receipt.disposition === null ? null : String(receipt.disposition);
+      if (receipt.item !== item || receipt.event !== event || receipt.revision !== revision || !["pending", "sending", "acknowledged", "ambiguous", "rejected", "refused", "skipped"].includes(state) || !Number.isSafeInteger(attempts) || attempts < 0 || (disposition !== null && !["bypass", "coalesced", "deferred", "waiting"].includes(disposition))) {
+        result.foreign = true;
+      }
+      else result.receipt = { state, attempts, disposition };
+    }
+    db.exec("COMMIT");
+    return result;
+  } catch {
+    throw new OutboxError("storage_unavailable", "Restore readable owned outbox evidence; no receipt or tracker state was changed.");
+  } finally { db?.close(); }
 }
 
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */

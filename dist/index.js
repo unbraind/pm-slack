@@ -30,12 +30,14 @@
  */
 import https from "node:https";
 import http from "node:http";
-import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
-import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent } from "./outbox.js";
+import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence } from "./outbox.js";
 import { CoalescingError } from "./coalescing.js";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.js";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
+import { SlackRoutingError, validateSlackRoutingIdentity, slackRoutingToon } from "./routing-explanation.js";
+export { SlackRoutingError } from "./routing-explanation.js";
 import path from "node:path";
 // ---------------------------------------------------------------------------
 // EXIT_CODE / CommandError (re-implemented locally)
@@ -465,7 +467,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"];
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce"];
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -1861,10 +1863,104 @@ export async function captureSlackOutbox(pmRoot, outbox, itemIds) {
     }
     return { inspected, queued, failed, ...(failures.length ? { failures } : {}) };
 }
+/** Diagnose one verified committed event without sending, recovering, or writing tracker/runtime state. */
+export async function explainSlackRouting(pmRoot, input) {
+    validateSlackRoutingIdentity(input);
+    const entries = await readVerifiedOutboxHistory(pmRoot, input.item);
+    if (entries instanceof OutboxError)
+        throw entries;
+    const index = entries.findIndex((entry) => entry.after_hash === input.revision);
+    if (index < 0)
+        throw new SlackRoutingError("event_not_found", "Use a committed after_hash from this item's verified SDK mutation history.");
+    const entry = entries[index];
+    const { metadata } = replayHistoryToTarget(entries, index);
+    const settings = await readSettings(pmRoot);
+    const registry = resolveRuntimeStatusRegistry(settings.schema);
+    const priorValue = index === 0 ? undefined : replayHistoryToTarget(entries, index - 1).metadata.status;
+    const prior = typeof priorValue === "string" ? priorValue : undefined;
+    const status = typeof metadata.status === "string" ? metadata.status : "";
+    let event;
+    if (entry.op === "create")
+        event = "create";
+    else if (status !== prior) {
+        if (registry.terminal_done_statuses.has(status))
+            event = "close";
+        else if (registry.terminal_canceled_statuses.has(status))
+            event = "cancel";
+        else if (registry.blocked_statuses.has(status))
+            event = "block";
+        else if (registry.active_statuses.has(status)) {
+            if (status === registry.in_progress_status)
+                event = "start";
+            else if (prior !== undefined && registry.blocked_statuses.has(prior))
+                event = "unblock";
+            else if (prior !== undefined && registry.terminal_statuses.has(prior))
+                event = "reopen";
+            else
+                event = "open";
+        }
+    }
+    if (event !== input.event)
+        throw new SlackRoutingError("event_not_found", "Choose the lifecycle event matching this revision under the tracker's configured status roles; non-status edits are not lifecycle events.");
+    // Reuse routing semantics, but refuse malformed configuration rather than silently dropping rules.
+    let raw;
+    try {
+        raw = JSON.parse(process.env.PM_SLACK_ROUTES?.trim() || "[]");
+    }
+    catch {
+        raw = null;
+    }
+    if ((process.env.PM_SLACK_ROUTES?.length ?? 0) > 250000 || (process.env.PM_SLACK_EVENTS?.length ?? 0) > 160 || (process.env.PM_SLACK_MIN_PRIORITY !== undefined && !/^[1-4]$/.test(process.env.PM_SLACK_MIN_PRIORITY)) || !Array.isArray(raw) || raw.length > 100 || raw.some((rule) => {
+        if (typeof rule !== "object" || rule === null || Array.isArray(rule))
+            return true;
+        const row = rule;
+        return Object.keys(row).some((key) => !["match", "webhook", "channel"].includes(key)) || typeof row.match !== "string" || row.match.trim().length === 0 || row.match.length > 160 || ![row.webhook, row.channel].some((value) => typeof value === "string" && value.trim().length > 0) || [row.webhook, row.channel].some((value) => value !== undefined && (typeof value !== "string" || value.length > 2048));
+    }))
+        throw new SlackRoutingError("routing_config_invalid", "Use at most 100 routing rules with only match, webhook and channel string fields; each rule needs a selector and an override.");
+    const config = loadConfig();
+    const evidence = readSlackRoutingEvidence(pmRoot, input.item, input.event, input.revision, entry.ts);
+    const path = [{ stage: "history", policy: "sdk_verified_revision_and_status_roles", decision: "verified", source: "verified_history" }];
+    const uncertainty = ["historical_routes_not_retained", "status_roles_use_current_registry"];
+    const policy = evidence.policy;
+    const eventsPass = policy ? policy.events.includes(input.event) : config?.events.has(input.event);
+    const priorityPass = policy ? meetsMinPriority(metadata, policy.minPriority) : config ? meetsMinPriority(metadata, config.minPriority) : undefined;
+    path.push({ stage: "events", policy: "eligibility_epoch_events", decision: eventsPass === undefined ? "not_recorded" : eventsPass ? "pass" : "withhold", source: policy ? "retained" : config ? "current_config" : "unknown" });
+    path.push({ stage: "priority", policy: "eligibility_epoch_priority", decision: priorityPass === undefined ? "not_recorded" : priorityPass ? "pass" : "withhold", source: policy ? "retained" : config ? "current_config" : "unknown" });
+    if (!policy)
+        uncertainty.push("eligibility_epoch_not_retained");
+    if (evidence.foreign)
+        uncertainty.push("foreign_evidence_skipped");
+    const item = metadata;
+    let selected = false;
+    for (const [rule, route] of (config?.routes ?? parseRoutes(process.env.PM_SLACK_ROUTES)).entries()) {
+        const matches = ruleMatches(route, input.event, item);
+        path.push({ stage: "route", policy: "first_matching_rule", rule, decision: selected ? "shadowed" : matches ? "selected" : "no_match", source: "current_config" });
+        if (matches)
+            selected = true;
+    }
+    const target = config ? selectRoute(input.event, item, config.routes, config.webhookUrl, config.channel) : null;
+    path.push({ stage: "route", policy: selected ? "selected_destination" : "default_destination", decision: target ? isHttpUrl(target.webhookUrl) ? "available" : "invalid_destination" : "unavailable", source: "current_config" });
+    const urgent = input.event === "block" ? "blocker_bypasses_budget_and_window" : (item.priority ?? 4) <= 1 ? "critical_priority_bypasses_budget_and_window" : "routine_item_destination_window_budget";
+    const receipt = evidence.receipt;
+    path.push({ stage: "coalescing", policy: urgent, decision: receipt?.disposition ?? "not_recorded", source: receipt?.disposition ? "retained" : "unknown" });
+    if (!receipt?.disposition)
+        uncertainty.push("coalescing_decision_not_retained");
+    if (receipt?.disposition === "deferred" || receipt?.disposition === "waiting")
+        uncertainty.push("coalescing_observation_may_be_stale");
+    path.push({ stage: "delivery", policy: "exact_revision_receipt", decision: receipt?.state ?? "not_recorded", source: receipt ? "retained" : "unknown" });
+    if (!receipt)
+        uncertainty.push("delivery_receipt_not_retained");
+    const outcome = receipt?.state === "acknowledged" ? "delivered" : receipt?.state === "skipped" || receipt?.state === "rejected" || receipt?.state === "refused" || (!receipt && policy && (!eventsPass || !priorityPass)) ? "withheld" : "uncertain";
+    return { ok: true, identity: { ...input }, outcome, path: path.map((step) => ({ ...step, rule: step.rule ?? null })), uncertainty, ...(receipt ? { state: receipt.state, attempts: receipt.attempts } : {}) };
+}
 export default defineExtension({
     name: "pm-slack",
     version: "2026.10.25",
     activate(api) {
+        api.registerRenderer("toon", (ctx) => {
+            const report = ctx.result;
+            return report?.ok === true ? slackRoutingToon(report) : null;
+        }, { commands: ["slack explain"] });
         api.registerRenderer("toon", (ctx) => {
             const report = ctx.result;
             if (!report?.summary || !Array.isArray(report.rows))
@@ -1896,6 +1992,8 @@ export default defineExtension({
                     // than the declared type and may invoke the hook with a falsy/empty
                     // context during early bootstrap; do not simplify it away.
                     if (ctx && ctx.ok === false)
+                        return;
+                    if (ctx.command === "slack explain")
                         return;
                     if (ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
                         const outbox = new SlackOutbox(ctx.pm_root);
@@ -2017,6 +2115,31 @@ export default defineExtension({
         // command — `pm slack notify` : manual rich Block Kit post.
         // -----------------------------------------------------------------------
         if (typeof api.registerCommand === "function") {
+            api.registerCommand({
+                name: "slack explain",
+                description: "Explain one committed notification's filters, routes, attention and delivery evidence offline",
+                intent: "Diagnose suppression and delivery uncertainty without exposing webhook URLs or message bodies",
+                examples: ["pm slack explain --item task-1 --event create --revision <after_hash> --json"],
+                flags: [
+                    { long: "--item", value_name: "id", description: "Exact tracker item id" },
+                    { long: "--event", value_name: "event", description: "Canonical lifecycle event" },
+                    { long: "--revision", value_name: "hash", description: "Committed SDK history after_hash" },
+                ],
+                async run(ctx) {
+                    try {
+                        return await explainSlackRouting(ctx.pm_root, {
+                            item: readStrOption(ctx.options, "item"),
+                            event: readStrOption(ctx.options, "event"),
+                            revision: readStrOption(ctx.options, "revision"),
+                        });
+                    }
+                    catch (error) {
+                        if (error instanceof SlackRoutingError)
+                            return { ok: false, exit_code: error.exitCode, code: error.code, remediation: error.remedy };
+                        return outboxFailure(error);
+                    }
+                },
+            });
             api.registerCommand({
                 name: "slack coalesce",
                 description: "Preview or drain bounded lifecycle bursts with item-level evidence and urgent bypass",

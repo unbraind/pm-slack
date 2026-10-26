@@ -20,7 +20,9 @@
     "docs/outbox-example.md",
     "docs/coalescing-example.md",
     "docs/coalescing-validation.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/routing-explanation-example.md",
+    "docs/routing-explanation-validation.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -97,12 +99,15 @@
       "docs/outbox-example.md",
       "docs/coalescing-example.md",
       "docs/coalescing-validation.md",
-      "CHANGELOG.md"
+      "CHANGELOG.md",
+      "docs/routing-explanation-example.md",
+      "docs/routing-explanation-validation.md"
     ],
     "examples": [
       "README.md",
       "docs/outbox-example.md",
-      "docs/coalescing-example.md"
+      "docs/coalescing-example.md",
+      "docs/routing-explanation-example.md"
     ]
   },
   "publishConfig": {

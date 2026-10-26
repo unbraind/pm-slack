@@ -145,6 +145,23 @@ export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 export declare function slackDestination(webhook: string, channel?: string): string;
 /** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
 export declare function validateOutboxIntent(intent: OutboxIntent): void;
+/** A consistent read-only view; private payloads and destinations are never selected. */
+export interface SlackRoutingEvidence {
+    /** Durable opt-in time, or null for a tracker without an outbox. */
+    since: string | null;
+    /** A record outside the owned schema was skipped instead of being interpreted. */
+    foreign?: true;
+    /** Eligibility policy effective at the event time. */
+    policy?: OutboxRecoveryFilter;
+    /** Durable delivery evidence for this exact item/event/revision identity. */
+    receipt?: {
+        state: OutboxState;
+        attempts: number;
+        disposition: string | null;
+    };
+}
+/** Inspect one exact revision in a read transaction without creating storage or changing permissions. */
+export declare function readSlackRoutingEvidence(pmRoot: string, item: string, event: OutboxEvent, revision: string, at: string): SlackRoutingEvidence;
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export declare class SlackOutbox {
     private readonly db;

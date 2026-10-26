@@ -562,3 +562,51 @@ npx pm github sync --repo unbraind/pm-slack --dry-run
 ```
 
 The tracked managed manifest records the extension; installed files are ignored. This preview does not enable scheduled sync. See `docs/certification-2026.10.4.md` for package gates and packed real-tracker command evidence.
+
+## Notification routing explanations
+
+Use `pm slack explain --item <id> --event <event> --revision <after_hash>`
+for a single offline diagnosis. Add `--json` for JSON; the default TOON output
+contains the same bounded evidence. Discover exact identities with the SDK
+mutation feed (`listMutationEvents`): select the lifecycle event's item and
+committed history `after_hash`. Repeated transitions require their own revision.
+
+The typed SDK export `explainSlackRouting(pmRoot, { item, event, revision })`
+verifies the complete item history against the authoritative SDK document,
+replays the requested revision through the SDK, and uses the tracker's configured
+status registry roles to classify the transition. It reports event and priority
+filters, every ordered route rule (indices only), first-match shadowing, attention
+policy, and exact-revision delivery evidence. Blockers and priority 0/1 events
+name their budget/window bypass policy; bypass does not override eligibility
+filters. Titles, bodies, selectors, channels and webhook URLs are never returned.
+
+Retained eligibility epochs and receipts are historical evidence. Route evaluation
+uses current configuration, which was not historically snapshotted. Coalescing
+receipts are retained observations and may be stale after retries; absent receipts
+never prove delivery or non-delivery. `acknowledged` means delivered; rejected,
+refused, skipped, or a retained filter exclusion means withheld. Pending, sending,
+ambiguous and missing evidence remain uncertain. Status roles use the current
+tracker registry, and this limitation is explicit in every result.
+
+Output has six stages plus at most 100 indexed routing-rule decisions. Identity
+validation accepts only the three documented fields, a bounded safe item id, a
+canonical event and a lowercase 64-character SDK history hash. Routing rules are
+strictly bounded to 100 entries and 250000 characters; selectors to 160 and overrides
+to 2048 characters. Priority configuration must be an integer 1..4. Invalid input,
+invalid routing configuration, unknown/non-lifecycle revisions, unreadable history
+and unreadable storage return typed nonzero refusals with remedies. Foreign
+receipt/policy records are skipped with `foreign_evidence_skipped` uncertainty.
+
+The command reads one item's retained history and opens existing outbox storage
+read-only in a single SQLite snapshot. It never creates an outbox, captures events,
+drains, sends, or changes tracker files. History verification reads the full
+selected item stream; work scales with that stream, while output stays bounded.
+See the [SDK/CLI example](docs/routing-explanation-example.md) and
+[public-tracker measurement](docs/routing-explanation-validation.md).
+
+### Without git
+
+Notification previews, digests, routing explanations, and local durable outbox
+inspection work on plain initialized trackers without a git executable. Slack
+posting needs an explicitly configured webhook and network connectivity. The
+explanation command needs neither. It makes zero network calls.

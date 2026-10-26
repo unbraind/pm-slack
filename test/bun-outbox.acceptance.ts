@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { init, create } from "@unbrained/pm-cli/sdk";
+import { init, create, readHistorySnapshot } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import extension, { SlackOutbox, slackDestination } from "../dist/index.js";
+import extension, { SlackOutbox, slackDestination, explainSlackRouting } from "../dist/index.js";
 import type { OutboxReport, CoalescingReport } from "../dist/index.js";
 import http from "node:http";
 
@@ -27,9 +27,16 @@ try {
   await init("bun", { defaults: true, agentGuidance: "skip" }, client);
   harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight", "renderers"] });
   await harness.runCommand({ command: "slack outbox", pmRoot, options: { action: "enable" } });
-  await create({ title: "Native Bun lifecycle", priority: 1 }, client);
+  const created = await create({ title: "Native Bun lifecycle", priority: 1 }, client);
   const result = (await harness.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } })).result as OutboxReport;
   assert.equal(result.counts.acknowledged, 1);
+  const history = await readHistorySnapshot(join(pmRoot, "history", `${created.item.id}.jsonl`), created.item.id);
+  const identity = { item: created.item.id, event: "create" as const, revision: history.entries[0]!.after_hash };
+  const explanation = await explainSlackRouting(pmRoot, identity);
+  assert.equal(explanation.outcome, "delivered");
+  assert.equal(explanation.attempts, 1);
+  assert.deepEqual((await harness.runCommand({ command: "slack explain", pmRoot, options: { ...identity }, global: { json: true } })).result, explanation);
+  assert.equal(sends, 1, "native Bun diagnosis performs zero extra HTTP requests");
   const restarted = new SlackOutbox(pmRoot);
   try {
     await restarted.drain(async () => { throw new Error("An acknowledged intent must not send again"); });
@@ -68,7 +75,7 @@ try {
     assert.equal(peer.status().counts.acknowledged, 5);
     assert.equal(accepted, 1);
   } finally { peer.close(); owner.close(); }
-  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates, no git.");
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));

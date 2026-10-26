@@ -1,0 +1,31 @@
+id: pm-slack-slyv
+title: Explain notification routing decisions offline
+description: "Expose a bounded, credential-free explanation for a verified lifecycle event, combining eligibility, ordered routing, attention policy and durable delivery evidence."
+type: Feature
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-26T00:29:46.063Z"
+updated_at: "2026-10-26T00:43:26.556Z"
+author: codex-agent
+acceptance_criteria: Each fixture event has one complete decision path; urgent bypass names its policy; suppressed events are diagnosable in one bounded command with zero network calls.
+comments[5]{created_at,author,text}:
+  "2026-10-26T00:30:06.793Z",codex-agent,"Overlap check against the current CLI and sibling pm-ops: CLI provides item/history/status SDK primitives, not Slack routing explanations. Existing pm-slack outbox records delivery and coalescing plans account for attention; pm-ops diagnostics do not own Slack attention semantics. Add an offline read-only explanation, reusing verified SDK history and existing routing/planner logic. No import/export/sync or journal mutation is introduced. Historical routes were not snapshotted, so distinguish retained evidence from current-policy evaluation and explicit uncertainty."
+  "2026-10-26T00:37:49.198Z",codex-agent,"Implemented exact-revision SDK and CLI diagnosis with verified history replay, configured status roles, retained eligibility, ordered current routing, named attention policy, and receipt outcome. Reads existing SQLite storage in one read-only snapshot; no new shared mutable state or import/export/sync/journal path. Targeted suite passes 8 tests including 500 seeded policy sequences replaying older SDK revisions with CRLF variants and SDK read-back state comparisons, 12 randomized custom registries, all transport states, foreign-record skips and competing transitions at every read SQL boundary. Core output contract coverage is 100/100/100; full unchanged release thresholds will be verified in CI."
+  "2026-10-26T00:39:48.745Z",codex-agent,"Public main snapshot e23ecfe: 90 items, 746 history entries, 232 complete verified paths, 83 named urgent policies, zero network calls, maximum JSON 1287 bytes and TOON 964 bytes; public tracked data has no runtime receipts so all 232 delivery outcomes correctly remain uncertain. Fingerprint unchanged. Revert proof: forcing outcome to uncertain fails the suppressed-event test; removing urgent policy selection fails the exact-receipt/urgent test (each 1 test, 0 pass, 1 fail). Restored production source. Historical blocked-to-in-progress transitions retain the existing start identity using registry roles."
+  "2026-10-26T00:42:23.920Z",codex-agent,"Pinned pm linked-test execution passed all 9 targeted tests (500 seeded sequences and 12 random custom status registries). Added an after-command guard so diagnosing an existing outbox does not reopen writable storage or change permissions. Local typecheck, test typecheck and docstring lint pass. Native Bun acceptance found that supplying options changes its default database create behavior; retained the original constructor for writable opens and isolated read-only options to explanation reads."
+  "2026-10-26T00:43:26.556Z",codex-agent,"Native Bun compatibility requires the exact runtime option spelling (readonly for Bun, readOnly for Node). Kept writable opens byte-equivalent in behavior and selected only the runtime-native option for read-only inspection. Full release gates are delegated to the existing npm/Bun CI matrix on Node 22 and 26; no thresholds or dependency pins changed."
+files[6]{path,scope}:
+  index.ts,project
+  outbox.ts,project
+  routing-explanation.ts,project
+  scripts/validate-routing-explanations.ts,project
+  test/bun-outbox.acceptance.ts,project
+  test/routing-explanation.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/routing-explanation.test.ts,project,codex-agent,"2026-10-26T00:38:01.172Z",local_mutation,feat/notification-routing-explanations
+docs[3]{path,scope}:
+  docs/routing-explanation-example.md,project
+  docs/routing-explanation-validation.md,project
+  README.md,project
+body: ""

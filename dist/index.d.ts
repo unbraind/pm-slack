@@ -37,6 +37,9 @@ export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
 export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
+import type { SlackRoutingIdentity, SlackRoutingExplanation } from "./routing-explanation.ts";
+export { SlackRoutingError } from "./routing-explanation.ts";
+export type { SlackRoutingIdentity, SlackRoutingExplanation, SlackRoutingStep } from "./routing-explanation.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -218,7 +221,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce", "slack explain"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -619,6 +622,8 @@ declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
 export declare function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<OutboxRecoveryReport>;
+/** Diagnose one verified committed event without sending, recovering, or writing tracker/runtime state. */
+export declare function explainSlackRouting(pmRoot: string, input: SlackRoutingIdentity): Promise<SlackRoutingExplanation>;
 declare const _default: {
     name: string;
     version: string;
