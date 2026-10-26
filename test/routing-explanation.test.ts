@@ -348,6 +348,10 @@ test("empty and unopenable outbox storage yield uncertainty or a typed refusal w
   const box = new SlackOutbox(f.pmRoot); box.close();
   safe(await explainSlackRouting(f.pmRoot, input));
   const file = join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite");
+  chmodSync(file, 0o000);
+  try {
+    await assert.rejects(explainSlackRouting(f.pmRoot, input), (error: unknown) => error instanceof OutboxError && error.code === "storage_unavailable");
+  } finally { chmodSync(file, 0o600); }
   rmSync(file); mkdirSync(file);
   await assert.rejects(explainSlackRouting(f.pmRoot, input), (error: unknown) => error instanceof OutboxError && error.code === "storage_unavailable");
 });
