@@ -64,3 +64,12 @@ Native compiled Bun acceptance verifies two uncertain proofs survive operator
 acknowledgment, alongside recovered/coalesced HTTP delivery and peer ownership.
 The complete unchanged npm/Bun release gates run in CI on Node 22 and 26; the PR
 records exact-head run URLs, source coverage and final counts.
+
+Full product-head validation at `229804683b8bb88b9505dd99c7d2809ff112f396`:
+[CI run 40334571915](https://github.com/unbraind/pm-slack/actions/runs/40334571915)
+passed npm and Bun release gates on Node 22 and 26: **744 passed / 0 failed per
+gate**, **100% lines / branches / functions across all five sources**, with
+unchanged thresholds. Both native compiled Bun acceptance jobs passed. All four
+model runs reproduced the measured sequence/request/outcome totals above.
+[CodeQL](https://github.com/unbraind/pm-slack/actions/runs/40334572040) passed.
+The PR records the final evidence commit's exact-head CI URL and counts.
