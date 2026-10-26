@@ -151,6 +151,16 @@ export class SlackOutbox {
         CREATE INDEX IF NOT EXISTS delivery_attempt_token ON delivery_attempt(token);
         CREATE INDEX IF NOT EXISTS delivery_resolution_key ON delivery_resolution(key);
         INSERT OR IGNORE INTO delivery_proof(key,legacy_unknown) SELECT key,CASE WHEN attempts>0 OR state IN ('sending','ambiguous','acknowledged') THEN 1 ELSE 0 END FROM delivery;`);
+            this.transaction(() => {
+                this.db.exec(`CREATE TABLE IF NOT EXISTS delivery_attempt_start (key TEXT NOT NULL,token TEXT NOT NULL,owner INTEGER NOT NULL,PRIMARY KEY(key,token));
+          CREATE TABLE IF NOT EXISTS delivery_request_dispatched (key TEXT NOT NULL,token TEXT NOT NULL,PRIMARY KEY(key,token));
+          CREATE TABLE IF NOT EXISTS delivery_attempt_terminal (key TEXT NOT NULL,token TEXT NOT NULL,result TEXT NOT NULL CHECK(result IN ('confirmed','not_sent','rejected','unknown_after_send')),PRIMARY KEY(key,token));
+          CREATE INDEX IF NOT EXISTS delivery_start_token ON delivery_attempt_start(token);
+          INSERT OR IGNORE INTO delivery_attempt_start SELECT key,token,0 FROM delivery_attempt;
+          INSERT OR IGNORE INTO delivery_request_dispatched SELECT key,token FROM delivery_attempt WHERE result!='not_sent';
+          INSERT OR IGNORE INTO delivery_attempt_terminal SELECT key,token,CASE result WHEN 'acknowledged' THEN 'confirmed' WHEN 'not_sent' THEN 'not_sent' WHEN 'rejected' THEN 'rejected' WHEN 'retry' THEN 'rejected' ELSE 'unknown_after_send' END FROM delivery_attempt WHERE result!='started';`);
+            });
+            this.recoverAttempts();
         }
         catch {
             database?.close();
@@ -286,23 +296,10 @@ export class SlackOutbox {
             const claim = this.claim(notification.keys, notification);
             if (!claim)
                 continue;
-            const original = JSON.parse(String(claim.members[0].payload));
-            const payload = notification.urgent ? original : { text: notification.text, mrkdwn: false, ...(original.channel === undefined ? {} : { channel: original.channel }) };
-            let state;
-            let refusal;
-            try {
-                const outcome = await send(notification.destination, payload);
-                state = outcome === "retry" ? "pending" : outcome;
-            }
-            catch (error) {
-                if (error instanceof OutboxError) {
-                    refusal = error;
-                    state = error.code === "destination_changed" ? "refused" : "pending";
-                }
-                else
-                    state = "ambiguous";
-            }
-            this.finish(claim.token, state, Boolean(refusal));
+            const { state, refusal } = await this.sendAttempt(claim.token, send, notification.destination, () => {
+                const original = JSON.parse(String(claim.members[0].payload));
+                return notification.urgent ? original : { text: notification.text, mrkdwn: false, ...(original.channel === undefined ? {} : { channel: original.channel }) };
+            });
             if (refusal && refusal.code !== "destination_changed")
                 throw refusal;
             if (state === "ambiguous")
@@ -350,7 +347,7 @@ export class SlackOutbox {
         limitValue(limit);
         if (!this.since())
             throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
-        const candidates = this.db.prepare("SELECT key,destination FROM delivery WHERE state='pending' ORDER BY attempts, rowid LIMIT ?").all(limit);
+        const candidates = this.db.prepare("SELECT key,destination FROM delivery WHERE state='pending' ORDER BY (SELECT COUNT(*) FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=delivery.key AND COALESCE(t.result,'open')!='not_sent'), rowid LIMIT ?").all(limit);
         const uncertain = new Set();
         for (const candidate of candidates) {
             if (uncertain.has(String(candidate.destination)))
@@ -359,21 +356,7 @@ export class SlackOutbox {
             if (!claim)
                 continue;
             const row = claim.members[0];
-            let state;
-            let refusal;
-            try {
-                const outcome = await send(row.destination, JSON.parse(row.payload));
-                state = outcome === "retry" ? "pending" : outcome;
-            }
-            catch (error) {
-                if (error instanceof OutboxError) {
-                    refusal = error;
-                    state = error.code === "destination_changed" ? "refused" : "pending";
-                }
-                else
-                    state = "ambiguous";
-            }
-            this.finish(claim.token, state, Boolean(refusal));
+            const { state, refusal } = await this.sendAttempt(claim.token, send, row.destination, () => JSON.parse(row.payload));
             if (refusal) {
                 if (refusal.code === "destination_changed")
                     continue;
@@ -404,6 +387,7 @@ export class SlackOutbox {
     }
     /** Claim the complete membership and persist a fresh attempt token before any remote request. */
     claim(keys, notification) {
+        const token = randomUUID();
         try {
             return this.transaction(() => {
                 const placeholders = keys.map(() => "?").join(",");
@@ -411,12 +395,10 @@ export class SlackOutbox {
                 if (members.length !== keys.length)
                     return undefined;
                 // Planner notification keys are stable across retries. Attempt tokens must never be reused.
-                const token = randomUUID();
                 for (const key of keys) {
                     this.db.prepare("INSERT OR IGNORE INTO delivery_proof(key,legacy_unknown) SELECT key,CASE WHEN attempts>0 THEN 1 ELSE 0 END FROM delivery WHERE key=?").run(key);
-                    this.db.prepare("UPDATE delivery_proof SET claims=claims+1 WHERE key=?").run(key);
-                    this.db.prepare("INSERT INTO delivery_attempt VALUES (?,?,'started')").run(key, token);
-                    this.db.prepare("UPDATE delivery SET state='sending',owner=?,attempts=attempts+1 WHERE key=?").run(process.pid, key);
+                    this.db.prepare("INSERT INTO delivery_attempt_start VALUES (?,?,?)").run(key, token, process.pid);
+                    this.db.prepare("UPDATE delivery SET state='sending',owner=? WHERE key=?").run(process.pid, key);
                     if (notification)
                         this.db.prepare("INSERT OR REPLACE INTO coalescing_receipt VALUES (?,?,?)").run(key, notification.urgent ? "bypass" : "coalesced", notification.key);
                     this.db.prepare("INSERT OR REPLACE INTO delivery_group VALUES (?,?)").run(key, token);
@@ -425,22 +407,80 @@ export class SlackOutbox {
             });
         }
         catch {
+            this.recordTerminal(token, "pending", true);
             throw new OutboxError("storage_unavailable", "Restore writable receipt storage, then drain again; the failed group was not sent.");
         }
     }
-    /** Finish only this attempt; clean its mappings before releasing members, with no observable partial state. */
-    finish(token, state, undoAttempt) {
+    /** Record dispatch intent durably before a transport can enter the network API. */
+    dispatch(token) {
+        this.db.prepare("INSERT OR IGNORE INTO delivery_request_dispatched SELECT key,token FROM delivery_attempt_start WHERE token=? AND NOT EXISTS (SELECT 1 FROM delivery_attempt_terminal t WHERE t.key=delivery_attempt_start.key AND t.token=delivery_attempt_start.token)").run(token);
+    }
+    /** Always close a cleanly exiting sender, including retired senders and thrown transport errors. */
+    async sendAttempt(token, send, destination, payload) {
+        let state = "ambiguous";
+        let refusal;
+        try {
+            const body = payload();
+            // Existing SDK callbacks cannot signal their network boundary; mark conservatively before entering them.
+            if (send.length < 3)
+                this.dispatch(token);
+            const outcome = await send(destination, body, { requestDispatched: () => this.dispatch(token) });
+            state = outcome === "retry" ? "pending" : outcome;
+        }
+        catch (error) {
+            if (error instanceof OutboxError) {
+                refusal = error;
+                state = error.code === "destination_changed" ? "refused" : "pending";
+            }
+        }
+        finally {
+            try {
+                this.finish(token, state, Boolean(refusal));
+            }
+            catch (error) {
+                this.recordTerminal(token, state, Boolean(refusal));
+                throw error;
+            }
+        }
+        return { state, ...(refusal ? { refusal } : {}) };
+    }
+    /** Recover only dead owners; a live retired sender retains the right to record its actual result. */
+    recoverAttempts() {
         this.transaction(() => {
-            // Finish evidence by its immutable attempt token even if an operator retired its work claim.
-            this.db.prepare("UPDATE delivery_attempt SET result=? WHERE token=? AND result='started'").run(undoAttempt ? "not_sent" : state === "pending" ? "retry" : state, token);
+            const owners = this.db.prepare("SELECT DISTINCT s.owner FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE t.token IS NULL").all();
+            for (const row of owners) {
+                let alive = Number(row.owner) > 0;
+                if (alive) {
+                    try {
+                        process.kill(Number(row.owner), 0);
+                    }
+                    catch (error) {
+                        alive = error.code !== "ESRCH";
+                    }
+                }
+                if (!alive)
+                    this.db.prepare("INSERT OR IGNORE INTO delivery_attempt_terminal SELECT s.key,s.token,CASE WHEN x.token IS NULL THEN 'not_sent' ELSE 'unknown_after_send' END FROM delivery_attempt_start s LEFT JOIN delivery_request_dispatched x ON x.key=s.key AND x.token=s.token WHERE s.owner=?").run(row.owner);
+            }
+        });
+    }
+    /** Append exactly one terminal fact; repeated cleanup cannot replace an earlier fact. */
+    recordTerminal(token, state, refused) {
+        this.db.prepare(`INSERT OR IGNORE INTO delivery_attempt_terminal SELECT s.key,s.token,
+      CASE WHEN ? THEN 'not_sent' WHEN ?='acknowledged' THEN 'confirmed' WHEN ? IN ('pending','rejected') THEN 'rejected'
+      WHEN x.token IS NULL THEN 'not_sent' ELSE 'unknown_after_send' END
+      FROM delivery_attempt_start s LEFT JOIN delivery_request_dispatched x ON x.key=s.key AND x.token=s.token WHERE s.token=?`).run(Number(refused), state, state, token);
+    }
+    /** Close the immutable record pair before touching scheduling state, even after a peer retires the claim. */
+    finish(token, state, refused) {
+        this.recordTerminal(token, state, refused);
+        this.transaction(() => {
             const keys = this.db.prepare("SELECT key FROM delivery_group WHERE notification=?").all(token).map((member) => String(member.key));
-            // Forced reconciliation may have retired this attempt while its sender was awaiting transport.
             if (!keys.length)
                 return;
             if (state === "pending")
                 this.db.prepare("DELETE FROM delivery_group WHERE notification=?").run(token);
             const placeholders = keys.map(() => "?").join(",");
-            this.db.prepare(`UPDATE delivery SET state=?,owner=0,attempts=attempts-? WHERE state='sending' AND key IN (${placeholders})`).run(state, Number(undoAttempt), ...keys);
+            this.db.prepare(`UPDATE delivery SET state=?,owner=0 WHERE state='sending' AND key IN (${placeholders})`).run(state, ...keys);
         });
     }
     /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
@@ -452,7 +492,7 @@ export class SlackOutbox {
             const row = this.db.prepare("SELECT state,owner FROM delivery WHERE key=?").get(key);
             if (!row)
                 throw new OutboxError("not_found", "Inspect status and use an existing receipt key.");
-            if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected" && row.state !== "refused" && !(row.state === "pending" && (decision === "skip" || decision === "abandon")))
+            if (row.state !== "sending" && row.state !== "ambiguous" && row.state !== "rejected" && row.state !== "refused" && !(row.state === "pending" && (decision === "skip" || decision === "abandon")) && !(row.state === "skipped" && decision === "retry"))
                 throw new OutboxError("not_ambiguous", "Only reconcile sending, ambiguous, rejected, or refused receipts.");
             if (row.state === "sending" && options.force !== true) {
                 let active = true;

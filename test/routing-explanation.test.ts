@@ -229,19 +229,25 @@ test("500 seeded policy operation sequences replay older SDK revisions and white
 test("read-only receipt snapshot stays consistent at every SQL boundary of a competing delivery transition", async (t) => {
   const f = await fixture(t); const input = await f.identity();
   const box = new SlackOutbox(f.pmRoot); t.after(() => box.close()); box.enable({ events: ["create"], minPriority: 4 });
-  box.enqueue({ ...input, destination: "synthetic", payload: { text: "PRIVATE-MESSAGE" } });
+  const receiptKey = box.enqueue({ ...input, destination: "synthetic", payload: { text: "PRIVATE-MESSAGE" } });
   const peer = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite")); t.after(() => peer.close()); peer.exec("PRAGMA busy_timeout=1");
   const originalExec = DatabaseSync.prototype.exec;
   const originalPrepare = DatabaseSync.prototype.prepare;
-  for (let at = 0; at < 6; at++) {
-    peer.exec("UPDATE delivery SET state='pending',attempts=0");
+  for (let at = 0; at < 7; at++) {
+    peer.exec("UPDATE delivery SET state='pending',attempts=0; DELETE FROM delivery_attempt_start; DELETE FROM delivery_attempt_terminal; DELETE FROM delivery_request_dispatched");
     let boundary = 0; let injected = false;
     /** Competing transition commits before/after the read snapshot, or loses to its read lock. */
     const checkpoint = () => {
       if (boundary++ !== at) return;
       injected = true;
-      try { originalPrepare.call(peer, "UPDATE delivery SET state='acknowledged',attempts=1").run(); }
-      catch (error) { assert.match(String(error), /locked|busy/); }
+      try {
+        originalExec.call(peer, "BEGIN IMMEDIATE");
+        originalPrepare.call(peer, "INSERT INTO delivery_attempt_start VALUES (?,'snapshot',?)").run(receiptKey, process.pid);
+        originalPrepare.call(peer, "INSERT INTO delivery_request_dispatched VALUES (?,'snapshot')").run(receiptKey);
+        originalPrepare.call(peer, "INSERT INTO delivery_attempt_terminal VALUES (?,'snapshot','confirmed')").run(receiptKey);
+        originalPrepare.call(peer, "UPDATE delivery SET state='acknowledged'").run();
+        originalExec.call(peer, "COMMIT");
+      } catch (error) { try { originalExec.call(peer, "ROLLBACK"); } catch {} assert.match(String(error), /locked|busy/); }
     };
     DatabaseSync.prototype.exec = function (sql) { originalExec.call(this, sql); checkpoint(); };
     DatabaseSync.prototype.prepare = function (sql) {
@@ -255,7 +261,7 @@ test("read-only receipt snapshot stays consistent at every SQL boundary of a com
     let report: SlackRoutingExplanation;
     try { report = await explainSlackRouting(f.pmRoot, input); }
     finally { DatabaseSync.prototype.exec = originalExec; DatabaseSync.prototype.prepare = originalPrepare; }
-    // BEGIN, settings, policy, journal discovery, proof snapshot, COMMIT.
+    // BEGIN, settings, policy, journal discovery, pair discovery, proof snapshot, COMMIT.
     assert.equal(injected, true);
     assert.ok((report.state === "pending" && report.attempts === 0) || (report.state === "acknowledged" && report.attempts === 1));
     safe(report);

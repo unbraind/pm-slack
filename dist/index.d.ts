@@ -32,12 +32,12 @@ import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import { SlackOutbox } from "./outbox.ts";
-import type { OutboxPayload, OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
+import type { OutboxPayload, OutboxOutcome, OutboxEvent, OutboxRecoveryReport, OutboxSendContext } from "./outbox.ts";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
 export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
-export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxSend, OutboxSendContext, OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import type { SlackRoutingIdentity, SlackRoutingExplanation } from "./routing-explanation.ts";
 export { SlackRoutingError } from "./routing-explanation.ts";
@@ -489,7 +489,7 @@ declare function isRetryableSlackError(err: unknown): boolean;
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void>;
+declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void): Promise<void>;
 /** Metadata used for digest aggregation and item lines, independent of notification priorities. */
 interface DigestItem {
     /** Stable SDK item identity. */
@@ -619,7 +619,7 @@ declare function outboxFailure(error: unknown): {
  */
 declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
 /** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
-declare function sendOutbox(destination: string, payload: OutboxPayload): Promise<OutboxOutcome>;
+declare function sendOutbox(destination: string, payload: OutboxPayload, context?: OutboxSendContext): Promise<OutboxOutcome>;
 /**
  * Recover opted-in lifecycle transitions from SDK mutation events, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.

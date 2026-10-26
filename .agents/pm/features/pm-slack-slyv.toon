@@ -2,14 +2,17 @@ id: pm-slack-slyv
 title: Explain notification routing decisions offline
 description: "Expose a bounded, credential-free explanation for a verified lifecycle event, combining eligibility, ordered routing, attention policy and durable delivery evidence."
 type: Feature
+pm_format_version: 2
 status: in_progress
 priority: 2
 tags: []
 created_at: "2026-10-26T00:29:46.063Z"
-updated_at: "2026-10-26T07:40:27.240Z"
+updated_at: "2026-10-26T13:39:18.244Z"
+assignee: codex-agent
+claim_principal: codex-agent
 author: codex-agent
 acceptance_criteria: Each fixture event has one complete decision path; urgent bypass names its policy; suppressed events are diagnosable in one bounded command with zero network calls.
-comments[17]{created_at,author,text}:
+comments[21]{created_at,author,text}:
   "2026-10-26T00:30:06.793Z",codex-agent,"Overlap check against the current CLI and sibling pm-ops: CLI provides item/history/status SDK primitives, not Slack routing explanations. Existing pm-slack outbox records delivery and coalescing plans account for attention; pm-ops diagnostics do not own Slack attention semantics. Add an offline read-only explanation, reusing verified SDK history and existing routing/planner logic. No import/export/sync or journal mutation is introduced. Historical routes were not snapshotted, so distinguish retained evidence from current-policy evaluation and explicit uncertainty."
   "2026-10-26T00:37:49.198Z",codex-agent,"Implemented exact-revision SDK and CLI diagnosis with verified history replay, configured status roles, retained eligibility, ordered current routing, named attention policy, and receipt outcome. Reads existing SQLite storage in one read-only snapshot; no new shared mutable state or import/export/sync/journal path. Targeted suite passes 8 tests including 500 seeded policy sequences replaying older SDK revisions with CRLF variants and SDK read-back state comparisons, 12 randomized custom registries, all transport states, foreign-record skips and competing transitions at every read SQL boundary. Core output contract coverage is 100/100/100; full unchanged release thresholds will be verified in CI."
   "2026-10-26T00:39:48.745Z",codex-agent,"Public main snapshot e23ecfe: 90 items, 746 history entries, 232 complete verified paths, 83 named urgent policies, zero network calls, maximum JSON 1287 bytes and TOON 964 bytes; public tracked data has no runtime receipts so all 232 delivery outcomes correctly remain uncertain. Fingerprint unchanged. Revert proof: forcing outcome to uncertain fails the suppressed-event test; removing urgent policy selection fails the exact-receipt/urgent test (each 1 test, 0 pass, 1 fail). Restored production source. Historical blocked-to-in-progress transitions retain the existing start identity using registry roles."
@@ -27,6 +30,10 @@ comments[17]{created_at,author,text}:
   "2026-10-26T07:22:53.914Z",codex-agent,"The final class fix also treats HTTP redirects after transmission as ambiguous, matching the existing safe SDK example and the no-definite-rejection rule. Fake Slack timers are now armed only after recorded acceptance, so timeout classification is deterministic under host contention. The 500-sequence oracle explicitly covers uncertain skip/retry/abandon. Native compiled Bun acceptance passes and retains two uncertain outcomes after operator acknowledgment. All original public read-only measurements remain applicable because the public copy contains no runtime receipts."
   "2026-10-26T07:27:17.138Z",codex-agent,"Implementation is ready for CI: deriveSlackDeliveryOutcome uses complete attempt evidence and independent operator journals, with conservative incomplete-history handling. Exact event reads push the key predicate into both journals and use indexes, so unrelated receipt histories are not scanned for one explanation. Local focused checks, typecheck, test typecheck, docstring lint and compiled native Bun acceptance pass. Existing public-copy metrics remain unchanged; the new class validation document records the oracle, concurrency boundaries and revert proof. No dependency pin or coverage threshold changed."
   "2026-10-26T07:40:27.239Z",codex-agent,"Product head 3d205aa passed CI https://github.com/unbraind/pm-slack/actions/runs/40285923492: npm and Bun release gates on Node 22 and 26, each 615 tests passed / 0 failed, 100 percent lines/branches/functions across all five sources. CodeQL run 40285923440 passed. The CI model consistently measured 500 sequences / 870 HTTP requests / 79 delivered / 114 withheld / 307 uncertain. Public replay reverified 90 items / 746 entries / 232 paths / 83 urgent policies / zero network calls / unchanged fingerprint. Final legacy guard discounts known not-sent claims when checking the network counter, preventing a refusal record from masking an unjournaled older attempt. Its focused regression, typecheck/lint and compiled native Bun acceptance pass; final exact-head CI follows this commit."
+  "2026-10-26T13:20:57.754Z",codex-agent,"Resumed PR 160 after bookkeeping re-review. Clean starting head fbbca71. Replace mutable claims/attempt-counter inference with immutable started/dispatch/terminal journal records. Read-derived open attempts and explicit confirmed-first precedence will cover retired senders, pre-request refusals, recovery and operator retry/abandon; extend real transport model and boundary interleavings, record behavioral revert proof, then rerun exact-head npm/Bun CI gates."
+  "2026-10-26T13:32:49.314Z",codex-agent,"Implemented immutable attempt_started/terminal pairs plus request_dispatched markers; explicit precedence is confirmed => delivered, else unknown/open dispatched => uncertain, else withheld. Counters no longer determine proof or scheduling. Shared finally completion records late refusals/retired senders independently of ownership; dead-owner recovery distinguishes pre/post dispatch. Seed 0xc1a551f1 model: 500 sequences, 734 recorded requests, 201 delivered/159 withheld/140 uncertain, including forced retry/abandon, late refusal, replacement, exceptions and cancellation. Boundary validation passed 67 tests: exception and real process crash at all 32 persistence/transport boundaries plus fixed regression and seven-boundary read snapshot race. Behavioral revert proof restored only the old mutable increment/decrement path and its counter-gap inference: node --test --test-name-pattern=\"500 seeded|late pre-request\" test/delivery-evidence.test.ts failed 2/2 (retirement sequence 1 and fixed late-refusal case reported uncertain instead of withheld). Exact source bytes restored in finally; passing model and boundary evidence recorded above. Final targeted verification and CI pending."
+  "2026-10-26T13:37:09.498Z",codex-agent,"Additional class coverage: forced sender retirement/replacement injected at every one of 28 before/after SQL step boundaries for retry and abandon: 57/57 tests pass. Old-journal read-only compatibility, pair migration, inaccessible/live-owner recovery and transient terminal/post-commit exceptions pass 2/2. Targeted focused suite passes 19/19; typecheck, test-source typecheck and docstring lint pass. Updated the read-snapshot race to commit attempt proof atomically with receipt state, passing all seven read boundaries. Existing targeted 245-test regression run had 244 passes plus this now-corrected fixture; the full exact-head release gates will certify the combined final state. Complete journal test command retained with a 600-second shared-host timeout."
+  "2026-10-26T13:39:18.230Z",codex-agent,"Local health verifies tracker history/integrity but strict health reports inherited extension-host version skew (pinned host 2026.10.20, installed extension 2026.10.25) plus an advisory pre-existing provenance domain warning. No pins or append-only history were changed; fresh-install CI health is the required evidence. Native compiled Bun acceptance passes (2 HTTP deliveries, 2 operator-acknowledged uncertain proofs, no git). Full linked journal command is running; changelog generation/check and typechecks/docstring lint pass."
 files[8]{path,scope}:
   delivery-evidence.ts,project
   index.ts,project
@@ -46,12 +53,14 @@ tests[2]:
       source_ref: feat/notification-routing-explanations
   - command: node --test test/delivery-evidence.test.ts
     scope: project
-    timeout_seconds: 300
+    timeout_seconds: 600
     provenance:
       author: codex-agent
       created_at: "2026-10-26T07:06:57.430Z"
       source_kind: local_mutation
       source_ref: feat/notification-routing-explanations
+    updated_by: codex-agent
+    updated_at: "2026-10-26T13:37:07.449Z"
 docs[4]{path,scope}:
   docs/delivery-evidence-validation.md,project
   docs/routing-explanation-example.md,project

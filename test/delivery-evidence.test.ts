@@ -10,7 +10,7 @@ import test, { type TestContext } from "node:test";
 import { init, create, readHistorySnapshot } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import { decode } from "@toon-format/toon";
-import extension, { SlackOutbox, explainSlackRouting, deriveSlackDeliveryOutcome, slackDestination, __test__ } from "../index.ts";
+import extension, { SlackOutbox, OutboxError, explainSlackRouting, deriveSlackDeliveryOutcome, slackDestination, __test__ } from "../index.ts";
 import type { OutboxOutcome, SlackRoutingIdentity, SlackRoutingExplanation, OutboxReport, CoalescingReport, SlackDeliveryEvidence } from "../index.ts";
 
 type Mode = "ack" | "reject" | "rate" | "timeout" | "before" | "after" | "server_error" | "crash" | "refusal" | "never" | "redirect";
@@ -97,13 +97,13 @@ async function fixture(t: TestContext) {
       child.on("error", reject); child.on("exit", (code) => code === 73 ? done() : reject(new Error(stderr)));
     });
   }
-  return { pmRoot, calls, event, send, crash, box: () => box, restart: () => { box.close(); box = new SlackOutbox(pmRoot); } };
+  return { pmRoot, calls, event, send, crash, setMode: (value: Mode) => { mode = value; }, box: () => box, restart: () => { box.close(); box = new SlackOutbox(pmRoot); } };
 }
 
 /** The oracle uses only recording Slack observations, never receipt labels or production normalization. */
 function reference(calls: readonly Call[]) {
-  if (calls.some((call) => call.couldAcceptWithoutConfirmation)) return "uncertain";
-  return calls.some((call) => call.confirmed) ? "delivered" : "withheld";
+  if (calls.some((call) => call.confirmed)) return "delivered";
+  return calls.some((call) => call.couldAcceptWithoutConfirmation) ? "uncertain" : "withheld";
 }
 
 test("accepted request with a timed-out response remains uncertain after resolve skip", async (t) => {
@@ -137,14 +137,47 @@ test("500 seeded real send/resolve lifecycles preserve evidence through retry, s
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
   const modes: Mode[] = ["ack", "reject", "rate", "timeout", "before", "after", "server_error", "crash", "refusal", "never"];
   const totals = { delivered: 0, withheld: 0, uncertain: 0 };
+  const retired = new Set<string>();
   const covered = new Set<Mode>(); const uncertainResolutions = new Set<string>(); let requests = 0;
   for (let sequence = 0; sequence < 500; sequence++) {
     const start = f.calls.length; const { identity, intent, key } = await f.event(sequence);
     let operation = modes[sequence % modes.length]!; covered.add(operation);
+    // Seeded retirement/replacement exercises late clean exits on the same non-git tracker.
+    if (sequence % 7 < 4) {
+      const kind = ["late_refusal", "exception_before", "exception_after", "cancellation"][sequence % 7]!;
+      retired.add(kind);
+      let entered!: () => void; const entering = new Promise<void>((done) => { entered = done; });
+      let release!: () => void; const releasing = new Promise<void>((done) => { release = done; });
+      const old = f.box().drain(async (destination, payload, context) => {
+        if (kind === "exception_after") { f.setMode("after"); await __test__.sendOutbox(destination, payload, context); }
+        entered(); await releasing;
+        if (kind === "late_refusal") throw new OutboxError("destination_changed", "Synthetic pre-request refusal.");
+        throw Object.assign(new Error("Synthetic clean exception or cancellation"), { name: kind === "cancellation" ? "AbortError" : "Error" });
+      });
+      await entering;
+      const decision = random() % 2 ? "retry" : "abandon";
+      f.box().resolve(key, decision, { force: true });
+      if (decision === "abandon") f.box().resolve(key, "retry");
+      // A replacement can finish before the retired sender returns or refuses.
+      await f.send(sequence % 2 ? "reject" : "ack");
+      release(); await old;
+      const current = (await explainSlackRouting(f.pmRoot, identity)).state!;
+      if (current !== "acknowledged") f.box().resolve(key, "skip");
+      const expected = reference(f.calls.slice(start));
+      assert.equal((await explainSlackRouting(f.pmRoot, identity)).outcome, expected, `retirement ${sequence} ${kind}`);
+      const journal = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+      try { assert.equal(journal.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=? AND t.token IS NULL").get(key)!.n, 0); } finally { journal.close(); }
+      totals[expected] += 1; requests += f.calls.length - start;
+      assert.deepEqual(f.box().status(1).outcomes, totals); continue;
+    }
     for (let step = 0; step < 4; step++) {
       assert.equal(f.box().enqueue(intent), key, "older input replay must not create another receipt or send");
       if (operation === "never") { f.box().resolve(key, "abandon"); break; }
       if (operation === "crash") await f.crash(); else await f.send(operation, sequence % 2 === 0);
+      if (operation !== "crash") {
+        const journal = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+        try { assert.equal(journal.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=? AND s.owner=? AND t.token IS NULL").get(key, process.pid)!.n, 0, `clean sender exit ${sequence}/${step}`); } finally { journal.close(); }
+      }
       const receipt = f.box().status(100, Number.MAX_SAFE_INTEGER); // totals must cover every page, even an empty one.
       assert.equal(Object.values(receipt.outcomes).reduce((sum, value) => sum + value, 0), sequence + 1);
       const row = f.box().status(1, 0).rows; assert.ok(row.length > 0);
@@ -170,6 +203,7 @@ test("500 seeded real send/resolve lifecycles preserve evidence through retry, s
     if (sequence % 10 === 0) { f.restart(); assert.equal((await explainSlackRouting(f.pmRoot, identity)).outcome, expected); }
     requests += f.calls.length - start;
   }
+  assert.deepEqual([...retired].sort(), ["cancellation", "exception_after", "exception_before", "late_refusal"]);
   assert.equal(covered.size, modes.length); assert.ok(requests >= 400);
   assert.deepEqual([...uncertainResolutions].sort(), ["abandon", "retry", "skip"]);
   assert.ok(totals.delivered > 0 && totals.withheld > 0 && totals.uncertain > 0);
@@ -200,7 +234,7 @@ test("one outcome reducer rejects malformed proof and never treats operator reso
   assert.equal(deriveSlackDeliveryOutcome(valid), "withheld");
   assert.equal(deriveSlackDeliveryOutcome({ ...valid, resolutions: 99 }), "withheld");
   assert.equal(deriveSlackDeliveryOutcome({ ...valid, recorded: 1, confirmed: 1 }), "delivered");
-  assert.equal(deriveSlackDeliveryOutcome({ ...valid, recorded: 2, confirmed: 1, uncertain: 1 }), "uncertain");
+  assert.equal(deriveSlackDeliveryOutcome({ ...valid, recorded: 2, confirmed: 1, uncertain: 1 }), "delivered");
   assert.equal(deriveSlackDeliveryOutcome({ ...valid, recorded: 1, definitive: 1, legacy_unknown: true }), "uncertain");
   for (const field of ["recorded", "confirmed", "uncertain", "definitive", "resolutions"]) for (const value of [Infinity, NaN, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) assert.equal(deriveSlackDeliveryOutcome({ ...valid, [field]: value }), "uncertain");
   assert.equal(deriveSlackDeliveryOutcome({ ...valid, recorded: 1 }), "uncertain");
@@ -279,24 +313,186 @@ test("claim publication fences a competing drainer at every SQL boundary", async
   for (let at = 0; at < trace.length; at++) await t.test(`claim boundary ${at + 1}`, async (subtest) => { await race(subtest, at); });
 });
 
-test("a missing earlier attempt cannot be hidden by a later pre-request refusal", async (t) => {
+test("legacy mutable attempt counters cannot change complete journal evidence", async (t) => {
   const f = await fixture(t); const { key, identity } = await f.event(0);
-  await f.send("after"); f.box().resolve(key, "retry"); await f.send("refusal");
+  await f.send("refusal");
   const db = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite")); t.after(() => db.close());
-  db.prepare("DELETE FROM delivery_attempt WHERE key=? AND result='ambiguous'").run(key);
+  db.prepare("UPDATE delivery SET attempts=9000 WHERE key=?").run(key);
   const report = await explainSlackRouting(f.pmRoot, identity);
-  assert.equal(report.outcome, "uncertain"); assert.equal(report.attempt_evidence!.legacy_unknown, true);
-  // An older writer can increment the network counter without adding a new journal record.
-  const legacy = await f.event(1); await f.send("refusal");
-  db.prepare("UPDATE delivery SET attempts=1,state='rejected' WHERE key=?").run(legacy.key);
-  const unjournaled = await explainSlackRouting(f.pmRoot, legacy.identity);
-  assert.equal(unjournaled.outcome, "uncertain"); assert.equal(unjournaled.attempt_evidence!.legacy_unknown, true);
+  assert.equal(report.outcome, "withheld"); assert.equal(report.attempts, 0);
+  f.box().resolve(key, "retry"); await f.send("ack");
+  assert.equal((await explainSlackRouting(f.pmRoot, identity)).outcome, "delivered");
 });
-
 
 test("a redirect after acceptance is not a definite rejection", async (t) => {
   const f = await fixture(t); const { identity, key } = await f.event(0);
   await f.send("redirect"); f.box().resolve(key, "skip");
   assert.equal(f.calls[0]!.accepted, true);
   assert.equal((await explainSlackRouting(f.pmRoot, identity)).outcome, "uncertain");
+});
+
+test("late pre-request refusal of a retired sender followed by confirmed retry is delivered", async (t) => {
+  const f = await fixture(t); const { key, identity } = await f.event(0);
+  let release!: () => void; const released = new Promise<void>((done) => { release = done; });
+  const retired = f.box().drain(async (_destination, _payload, _context) => {
+    await released; throw new OutboxError("destination_changed", "Synthetic pre-request refusal.");
+  });
+  f.box().resolve(key, "abandon", { force: true });
+  release(); await retired;
+  assert.equal((await explainSlackRouting(f.pmRoot, identity)).outcome, "withheld");
+  assert.equal((await explainSlackRouting(f.pmRoot, identity)).attempts, 0);
+  f.box().resolve(key, "retry"); await f.send("ack");
+  const explained = await explainSlackRouting(f.pmRoot, identity);
+  assert.equal(explained.outcome, "delivered"); assert.equal(explained.attempts, 1);
+  assert.equal(explained.attempt_evidence!.recorded, 2);
+  const db = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite")); t.after(() => db.close());
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE t.token IS NULL").get()!.n, 0);
+});
+
+test("exceptions and real process crashes at every journal step boundary preserve evidence and close clean exits", async (t) => {
+  const f = await fixture(t);
+  const module = new URL("../index.ts", import.meta.url).href;
+  let baseline: string[] = [];
+  /** Run a real transport process and fault before or after every observed persistence/transport step. */
+  async function run(boundary: number, fault: "trace" | "exception" | "crash") {
+    const event = await f.event(1000 + boundary);
+    const callsBefore = f.calls.length;
+    const source = `import {SlackOutbox,__test__} from ${JSON.stringify(module)};
+      const box=new SlackOutbox(process.argv[1]); const db=box.db;
+      let armed=true,step=0,terminal=false,dispatched=false,returned=false; const trace=[];
+      const point=(name)=>{if(!armed)return;trace.push(name);if(step++===${boundary}){armed=false;${fault === "crash" ? "process.exit(73);" : fault === "exception" ? "throw new Error('Synthetic boundary exception');" : ""}}};
+      const prepare=db.prepare,exec=db.exec;
+      db.exec=function(sql){point('before '+sql);const result=exec.call(this,sql);point('after '+sql);return result;};
+      db.prepare=function(sql){const statement=prepare.call(this,sql);for(const method of ['run','get','all']){const operation=statement[method];statement[method]=function(...args){point('before '+sql);const result=operation.apply(this,args);if(sql.startsWith('INSERT OR IGNORE INTO delivery_attempt_terminal'))terminal=true;if(sql.startsWith('INSERT OR IGNORE INTO delivery_request_dispatched'))dispatched=true;point('after '+sql);return result;};}return statement;};
+      try {await box.drain(async(d,p,c)=>{point('before transport');const result=await __test__.sendOutbox(d,p,c);point('after response');returned=true;return result;},1);}catch(error){}
+      armed=false; console.log(JSON.stringify({trace,terminal,dispatched,returned}));box.close();`;
+    let output = "";
+    const code = await new Promise<number | null>((done, reject) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", source, f.pmRoot], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+      let stderr = ""; child.stdout.on("data", (data: Buffer) => { output += String(data); }); child.stderr.on("data", (data: Buffer) => { stderr += String(data); });
+      child.on("error", reject); child.on("exit", (code) => { if (code !== 0 && code !== 73) reject(new Error(stderr)); else done(code); });
+    });
+    if (code === 0) {
+      const beforeRecovery = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+      try { assert.equal(beforeRecovery.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=? AND t.token IS NULL").get(event.key)!.n, 0, `clean exit before recovery ${boundary}`); } finally { beforeRecovery.close(); }
+    }
+    f.restart(); // Real recovery appends not_sent before dispatch, unknown_after_send after dispatch.
+    const db = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite"));
+    const rows = db.prepare("SELECT s.token,t.result,x.token dispatched FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token LEFT JOIN delivery_request_dispatched x ON x.key=s.key AND x.token=s.token WHERE s.key=?").all(event.key);
+    assert.ok(rows.every((row) => row.result !== null), `open after ${fault} boundary ${boundary}`);
+    const report = await explainSlackRouting(f.pmRoot, event.identity);
+    const info = code === 0 ? JSON.parse(output) as { trace: string[]; terminal: boolean; dispatched: boolean; returned: boolean } : undefined;
+    // Independent fault schedule: only a persisted confirmed response proves delivery; dispatch can precede a crash before HTTP.
+    const observed = f.calls.slice(callsBefore);
+    let expected: string;
+    if (fault === "trace" || (info?.terminal && info.returned && observed.some((call) => call.confirmed))) expected = "delivered";
+    else if (info) expected = observed.length > 0 || info.dispatched ? "uncertain" : "withheld";
+    else {
+      const past = baseline.slice(0, boundary + 1);
+      expected = past.some((step) => step.startsWith("after INSERT OR IGNORE INTO delivery_attempt_terminal")) ? "delivered" : past.some((step) => step.startsWith("after INSERT OR IGNORE INTO delivery_request_dispatched")) ? "uncertain" : "withheld";
+    }
+    assert.equal(report.outcome, expected, `${fault} boundary ${boundary}`);
+    db.close();
+    if (report.state === "sending" || report.state === "pending" || report.state === "ambiguous") f.box().resolve(event.key, "skip", { force: true });
+    return info?.trace ?? [];
+  }
+  const trace = await run(-1, "trace"); baseline = trace;
+  // status() runs after the send; stop after work cleanup's final COMMIT.
+  const end = trace.length - [...trace].reverse().indexOf("after COMMIT");
+  assert.ok(end > 20);
+  for (const fault of ["exception", "crash"] as const) for (let boundary = 0; boundary < end; boundary++) {
+    await t.test(`${fault} boundary ${boundary + 1}`, async () => { await run(boundary, fault); });
+  }
+  t.diagnostic(JSON.stringify({ seed: "0xc1a551f1", persistenceAndTransportBoundaries: end, exceptions: end, processCrashes: end }));
+});
+
+test("retirement and replacement at every step boundary cannot drift from late-refusal evidence", async (t) => {
+  const f = await fixture(t); const owner = f.box(); const peer = new SlackOutbox(f.pmRoot); t.after(() => peer.close());
+  const db = (owner as unknown as { db: DatabaseSync }).db;
+  (peer as unknown as { db: DatabaseSync }).db.exec("PRAGMA busy_timeout=1");
+  /** Inject a peer's forced resolution before/after each durable step of a clean refusal path. */
+  async function run(at: number, decision: "retry" | "abandon") {
+    const { key, identity } = await f.event(2000 + at);
+    const exec = db.exec; const prepare = db.prepare; const trace: string[] = [];
+    let armed = true; let replaced = false; let replacement: Promise<unknown> | undefined;
+    const point = (step: string) => {
+      if (!armed) return;
+      trace.push(step);
+      if (trace.length - 1 !== at) return;
+      try {
+        peer.resolve(key, decision, { force: true });
+        if (decision === "abandon") peer.resolve(key, "retry");
+        replaced = true; replacement = f.send("ack", false, peer);
+      } catch (error) { assert.match(String(error), /locked|busy|not_ambiguous|in_flight/); }
+    };
+    db.exec = function (sql) { point(`before ${sql}`); exec.call(this, sql); point(`after ${sql}`); };
+    db.prepare = function (sql) {
+      const statement = prepare.call(this, sql);
+      for (const method of ["get", "all", "run"] as const) {
+        const operation = statement[method];
+        Object.defineProperty(statement, method, { value: (...args: unknown[]) => { point(`before ${sql}`); const result: unknown = Reflect.apply(operation, statement, args); point(`after ${sql}`); return result; } });
+      }
+      return statement;
+    };
+    try { await owner.drain(async (_d, _p, _context) => { throw new OutboxError("destination_changed", "Synthetic late pre-request refusal."); }, 1); }
+    finally { armed = false; db.exec = exec; db.prepare = prepare; }
+    await replacement;
+    const report = await explainSlackRouting(f.pmRoot, identity);
+    assert.equal(report.outcome, replaced ? "delivered" : "withheld", `${decision} boundary ${at}`);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=? AND t.token IS NULL").get(key)!.n, 0);
+    if (report.state === "refused") peer.resolve(key, "skip");
+    return trace;
+  }
+  const baseline = await run(-1, "retry");
+  const end = baseline.length - [...baseline].reverse().indexOf("after COMMIT");
+  for (const decision of ["retry", "abandon"] as const) for (let at = 0; at < end; at++) {
+    await t.test(`${decision} boundary ${at + 1}`, async () => { await run(at, decision); });
+  }
+  t.diagnostic(JSON.stringify({ retirementBoundaries: end, forcedRetry: end, forcedAbandon: end }));
+});
+
+test("old journals migrate as record pairs and recovery leaves live or inaccessible owners alone", async (t) => {
+  const f = await fixture(t); const event = await f.event(0); await f.send("ack");
+  const db = new DatabaseSync(join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite")); t.after(() => db.close());
+  db.prepare("INSERT INTO delivery_attempt VALUES (?,'legacy','acknowledged')").run(event.key);
+  db.exec("DROP TABLE delivery_attempt_start; DROP TABLE delivery_request_dispatched; DROP TABLE delivery_attempt_terminal");
+  assert.equal((await explainSlackRouting(f.pmRoot, event.identity)).outcome, "delivered");
+  f.restart(); assert.equal((await explainSlackRouting(f.pmRoot, event.identity)).outcome, "delivered");
+  const pending = await f.event(1);
+  db.prepare("INSERT INTO delivery_attempt_start VALUES (?,'live',?)").run(pending.key, process.pid);
+  db.prepare("INSERT INTO delivery_request_dispatched VALUES (?,'live')").run(pending.key);
+  f.restart(); assert.equal(db.prepare("SELECT COUNT(*) n FROM delivery_attempt_terminal WHERE key=?").get(pending.key)!.n, 0);
+  const kill = process.kill;
+  try {
+    process.kill = (() => { throw Object.assign(new Error("Synthetic access refusal"), { code: "EPERM" }); }) as typeof process.kill;
+    f.restart(); assert.equal(db.prepare("SELECT COUNT(*) n FROM delivery_attempt_terminal WHERE key=?").get(pending.key)!.n, 0);
+    process.kill = (() => { throw Object.assign(new Error("Synthetic dead owner"), { code: "ESRCH" }); }) as typeof process.kill;
+    f.restart(); assert.equal((await explainSlackRouting(f.pmRoot, pending.identity)).outcome, "uncertain");
+  } finally { process.kill = kill; }
+  const before = await f.event(2);
+  db.prepare("INSERT INTO delivery_attempt_start VALUES (?,'dead-before',0)").run(before.key);
+  f.restart(); assert.equal((await explainSlackRouting(f.pmRoot, before.identity)).outcome, "withheld");
+  assert.equal(db.prepare("SELECT result FROM delivery_attempt_terminal WHERE key=?").get(before.key)!.result, "not_sent");
+});
+
+test("transient terminal and post-commit claim exceptions close the pair before returning an error", async (t) => {
+  const f = await fixture(t); const first = await f.event(0);
+  const db = (f.box() as unknown as { db: DatabaseSync }).db; const prepare = db.prepare;
+  let once = true;
+  db.prepare = function (sql) {
+    const statement = prepare.call(this, sql);
+    if (sql.startsWith("INSERT OR IGNORE INTO delivery_attempt_terminal")) {
+      const run = statement.run;
+      statement.run = function (...args) { if (once) { once = false; throw new Error("Synthetic transient terminal fault"); } return run.apply(this, args); };
+    }
+    return statement;
+  };
+  try { await assert.rejects(f.send("ack"), /transient terminal/); } finally { db.prepare = prepare; }
+  assert.equal((await explainSlackRouting(f.pmRoot, first.identity)).outcome, "delivered");
+  f.box().resolve(first.key, "acknowledged", { force: true });
+  const next = await f.event(1); const exec = db.exec; once = true;
+  db.exec = function (sql) { exec.call(this, sql); if (sql === "COMMIT" && once) { once = false; throw new Error("Synthetic lost commit result"); } };
+  try { await assert.rejects(f.send("ack"), /storage_unavailable/); } finally { db.exec = exec; }
+  assert.equal((await explainSlackRouting(f.pmRoot, next.identity)).outcome, "withheld");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE t.token IS NULL").get()!.n, 0);
 });

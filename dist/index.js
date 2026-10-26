@@ -1164,7 +1164,7 @@ function isRetryableSlackError(err) {
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-function postToSlackOnce(webhookUrl, payload) {
+function postToSlackOnce(webhookUrl, payload, dispatched) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify(payload);
         const parsed = new URL(webhookUrl);
@@ -1179,6 +1179,7 @@ function postToSlackOnce(webhookUrl, payload) {
             },
         };
         const request = parsed.protocol === "http:" ? http.request : https.request;
+        dispatched?.();
         const req = request(options, (res) => {
             let data = "";
             res.on("data", (chunk) => {
@@ -1636,12 +1637,12 @@ function classifyOutboxSendError(error) {
     return "retry";
 }
 /** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
-async function sendOutbox(destination, payload) {
+async function sendOutbox(destination, payload, context) {
     const target = outboxTargets().find((candidate) => slackDestination(candidate.webhookUrl, payload.channel ?? candidate.channel) === destination);
     if (!target)
         throw new OutboxError("destination_changed", "Restore the original routing destination before draining; no message was posted.");
     try {
-        await postToSlackOnce(target.webhookUrl, payload);
+        await postToSlackOnce(target.webhookUrl, payload, context?.requestDispatched);
         return "acknowledged";
     }
     catch (error) {

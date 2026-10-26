@@ -151,6 +151,13 @@ export interface OutboxRecoveryReport {
 }
 /** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
 export type OutboxDecision = "acknowledged" | "retry" | "skip" | "abandon";
+/** Dispatch-aware transports call this immediately before entering the network API. */
+export interface OutboxSendContext {
+    /** Persist dispatch intent before a request can leave this process. */
+    requestDispatched(): void;
+}
+/** Transport callback; legacy two-argument callbacks are conservatively marked before invocation. */
+export type OutboxSend = (destination: string, payload: OutboxPayload, context: OutboxSendContext) => Promise<OutboxOutcome>;
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 /** Hash a destination without persisting a webhook credential. */
@@ -205,7 +212,7 @@ export declare class SlackOutbox {
        * Claims fence concurrent plain and coalesced drains. Every original keeps its
        * state and attempt count; crashes leave all claimed members visibly sending.
        */
-    drainCoalesced(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, options?: CoalescingOptions): Promise<CoalescingPlan>;
+    drainCoalesced(send: OutboxSend, options?: CoalescingOptions): Promise<CoalescingPlan>;
     /** Check whether a verified history transition already has a durable intent. */
     has(item: string, event: OutboxEvent, revision: string): boolean;
     /** Inspect a bounded receipt page while preserving exact totals and omission evidence. */
@@ -219,12 +226,20 @@ export declare class SlackOutbox {
      * The next drain prefers fewer attempts, then older rows, so one refused
      * destination cannot block every other notification.
      */
-    drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit?: number): Promise<OutboxReport>;
+    drain(send: OutboxSend, limit?: number): Promise<OutboxReport>;
     /** Run receipt mutations under SQLite's cross-process writer fence, rolling back every partial transition. */
     private transaction;
     /** Claim the complete membership and persist a fresh attempt token before any remote request. */
     private claim;
-    /** Finish only this attempt; clean its mappings before releasing members, with no observable partial state. */
+    /** Record dispatch intent durably before a transport can enter the network API. */
+    private dispatch;
+    /** Always close a cleanly exiting sender, including retired senders and thrown transport errors. */
+    private sendAttempt;
+    /** Recover only dead owners; a live retired sender retains the right to record its actual result. */
+    private recoverAttempts;
+    /** Append exactly one terminal fact; repeated cleanup cannot replace an earlier fact. */
+    private recordTerminal;
+    /** Close the immutable record pair before touching scheduling state, even after a peer retires the claim. */
     private finish;
     /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
     resolve(key: string, decision: OutboxDecision, options?: {

@@ -38,7 +38,7 @@ import http from "node:http";
 import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence } from "./outbox.ts";
-import type { OutboxPayload, OutboxOutcome, OutboxReport, OutboxEvent, OutboxIntent, OutboxRecoveryReport } from "./outbox.ts";
+import type { OutboxPayload, OutboxOutcome, OutboxReport, OutboxEvent, OutboxIntent, OutboxRecoveryReport, OutboxSendContext } from "./outbox.ts";
 import type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import type { CoalescingReport } from "./outbox.ts";
 import { CoalescingError } from "./coalescing.ts";
@@ -46,7 +46,7 @@ export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
 export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
-export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxSend, OutboxSendContext, OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import { SlackRoutingError, validateSlackRoutingIdentity, slackRoutingToon } from "./routing-explanation.ts";
 import type { SlackRoutingIdentity, SlackRoutingExplanation, SlackRoutingStep } from "./routing-explanation.ts";
@@ -1347,7 +1347,7 @@ function isRetryableSlackError(err: unknown): boolean {
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void> {
+function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const parsed = new URL(webhookUrl);
@@ -1364,6 +1364,7 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
     };
 
     const request = parsed.protocol === "http:" ? http.request : https.request;
+    dispatched?.();
     const req = request(options, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => {
@@ -1916,11 +1917,11 @@ function classifyOutboxSendError(error: unknown): OutboxOutcome {
 }
 
 /** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
-async function sendOutbox(destination: string, payload: OutboxPayload): Promise<OutboxOutcome> {
+async function sendOutbox(destination: string, payload: OutboxPayload, context?: OutboxSendContext): Promise<OutboxOutcome> {
   const target = outboxTargets().find((candidate) => slackDestination(candidate.webhookUrl, payload.channel ?? candidate.channel) === destination);
   if (!target) throw new OutboxError("destination_changed", "Restore the original routing destination before draining; no message was posted.");
   try {
-    await postToSlackOnce(target.webhookUrl, payload);
+    await postToSlackOnce(target.webhookUrl, payload, context?.requestDispatched);
     return "acknowledged";
   } catch (error) {
     return classifyOutboxSendError(error);

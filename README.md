@@ -592,11 +592,16 @@ uses current configuration, which was not historically snapshotted. Coalescing
 receipts omit the historical budget/window parameters; this uncertainty is explicit.
 They are retained observations and may be stale after retries; absent receipts
 never prove delivery or non-delivery. One reducer, `deriveSlackDeliveryOutcome`,
-uses all retained attempt results rather than the final receipt label. An unfinished
-or ambiguous attempt keeps the outcome `uncertain` through retry, skip, abandon,
-expiry, or operator acknowledgment, including when another attempt later succeeds.
-With no unresolved attempts, explicit Slack success proves `delivered`; zero
-attempts or exclusively definite rejections/pre-request refusals prove `withheld`.
+uses immutable `attempt_started` / terminal record pairs and a durable
+`request_dispatched` marker written immediately before entering the network API.
+Terminal results are `confirmed`, `not_sent`, `rejected`, or `unknown_after_send`.
+Open attempts are derived on read. Recovery closes dead senders as `not_sent`
+before dispatch and `unknown_after_send` after dispatch; live retired senders
+can still append their actual terminal result. Counters do not establish proof.
+Any confirmed attempt proves `delivered`. Otherwise an unknown/open dispatched
+attempt gives `uncertain`; otherwise the outcome is `withheld`. Operator retry,
+skip, abandon and acknowledgment do not change past attempt records. A confirmed
+retry can therefore prove delivery after an earlier uncertain attempt.
 A retained eligibility exclusion also proves withholding when no receipt exists.
 Legacy attempted receipts without a complete journal remain uncertain. Status roles use the current
 tracker registry, and this limitation is explicit in every result.
@@ -626,11 +631,11 @@ explanation command needs neither. It makes zero network calls.
 
 ### Retained delivery proof
 
-Each claim records an immutable attempt token under the same SQLite writer
+Each claim appends an immutable started record and token under the same SQLite writer
 transaction as its work claim. Completion records that token's actual transport
 result before releasing work. A late completion can settle its own evidence after
 operator reconciliation without overwriting a peer's work state. Operator decisions
-are journaled separately. A monotonic claim count detects missing attempt records;
+are journaled separately. Open attempts are derived from started records without a terminal fact;
 unknown/foreign results and incomplete legacy history remain uncertain.
 
 `status`, plain/coalesced drain reports, coalescing manifests, and explanations all
@@ -638,6 +643,11 @@ call `deriveSlackDeliveryOutcome`. Each report row has an `outcome`; aggregate
 `outcomes` counts are separate from compatibility `counts`, which describe work
 states only. Digest counts describe tracker activity and are unrelated to delivery.
 Neither a skipped nor an operator-acknowledged count proves a delivery result.
+Dispatch-aware SDK transports accept a third `OutboxSendContext` argument and
+call `context.requestDispatched()` immediately before their network API. Existing
+two-argument transports are conservatively marked before callback invocation.
+A clean exit always closes its attempt, including cancellation and late refusal;
+a process crash leaves recovery to the durable dispatch marker.
 The attempt journal contains keys, attempt tokens, result codes and operator
 decisions, never webhook URLs or message bodies. The explanation path still opens
 existing storage read-only and never creates or migrates it.

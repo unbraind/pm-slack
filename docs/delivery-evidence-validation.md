@@ -10,22 +10,26 @@ Both JSON and TOON expose per-row outcomes and independent aggregate `outcomes`.
 Compatibility `counts` describe work states only. Tracker digest counters describe
 item activity; the package has no separate receipt doctor/metrics classifier.
 
-The reducer consumes sufficient statistics over the complete attempt journal.
-Any unfinished/ambiguous attempt or incomplete legacy journal gives `uncertain`,
-including after retry, skip, abandon, operator acknowledgment or another attempt's
-success. With no unresolved attempts, a retained transport success gives
-`delivered`; no attempts or exclusively definite rejection/pre-request refusal
-gives `withheld`. Redirect and 5xx responses after sending remain uncertain.
-Operator decisions are retained separately and never supply transport proof.
+The reducer consumes read-derived sufficient statistics over immutable
+`attempt_started` / terminal record pairs. Terminal facts are `confirmed`,
+`not_sent`, `rejected`, or `unknown_after_send`; a primary key permits one terminal
+fact per attempt. Any confirmed attempt proves `delivered`. Otherwise any
+unknown/open-after-dispatch attempt or incomplete legacy journal gives
+`uncertain`; otherwise the event is `withheld`. Operator decisions never supply
+transport proof and do not modify past records.
 
-Claims, monotonic coverage counters and attempt tokens commit together under the
-existing SQLite writer transaction. Completion records only its immutable token,
-even if an operator already retired the work claim. It cannot release or overwrite
-a peer's claim. Resolution records precede release. Missing attempts are detected
-by the independent claim counter. The network counter also discounts known
-pre-request refusals, so those records cannot mask an unjournaled older attempt.
-Read-only explanations never create or migrate
-these tables; old attempted receipts without a journal stay conservative.
+Started records commit with claim ownership under the SQLite writer transaction.
+A separate `request_dispatched` marker commits immediately before the HTTP API.
+A shared finally path closes senders after normal responses, pre-request
+refusals, exceptions, cancellation and retirement/replacement. Terminal records
+are durable before scheduling cleanup and are retried after a transient cleanup
+fault. Claim failures also close any committed start before propagating failure.
+Recovery only closes dead owners: no dispatch marker means `not_sent`; dispatch
+without a durable terminal means `unknown_after_send`. Live retired senders keep
+the right to append their real terminal result without changing a peer's claim.
+Neither the former claims counter nor the compatibility network counter supplies
+evidence or scheduling priority. Existing old journals are imported without
+rewriting them. Read-only explanations never create or migrate tables.
 
 `test/delivery-evidence.test.ts` drives 500 seeded operation sequences on one real
 non-git SDK tracker through actual HTTP sending and resolve/drain paths. The
@@ -38,17 +42,22 @@ never final receipt labels. Every sequence checks explanation and aggregate
 outcomes. The real ClientRequest timeout is armed after the fake accepted the
 request, preventing scheduler timing from changing the modeled fault.
 
-Measured seeded run: **500 sequences, 870 HTTP requests, 79 delivered, 114
-withheld, 307 uncertain**. The linked targeted run passed **18 tests**, including
-all ten claim-publication SQL boundaries. Existing targeted outbox, coalescing,
-routing and finish/reconciliation interleaving regressions passed **245 tests**.
-The final CI gate includes additional CLI-abandon and redirect regressions.
-The new evidence source measured **100% lines / branches / functions** locally.
+Seed `0xc1a551f1` additionally exercises late refusals, sender retirement and
+replacement, forced retry/abandon, exceptions before/after dispatch, cancellation,
+and replay. Measured seeded run: **500 sequences, 734 HTTP requests, 201 delivered,
+159 withheld, 140 uncertain**. Every clean sender exit has no open attempt.
+A separate test discovers every persistence/transport boundary and injects both
+an exception and a real process crash before and after each step. Its reference
+uses the scheduled dispatch/terminal boundary and recording fake Slack, never
+workflow labels or production normalization. The fixed late-refusal/forced-abandon/
+confirmed-retry scenario asserts withheld before retry and delivered afterward.
+Measured boundary run: **32 exception injections, 32 real process crashes**,
+plus **28 forced-retry and 28 forced-abandon replacement boundaries**. Every
+clean exit is checked for zero open attempts before running recovery.
 
-Behavioral revert proof restored only the skipped-to-withheld mapping in the
-explanation, retaining the new journal and reducer. The accepted-request/timeout/
-skip test failed: **1 test, 0 passed, 1 failed**. After exact source restoration,
-the same command passed **1/1**. Sources were restored before building.
+The current behavioral revert proof and exact-head CI counts are recorded in
+the linked pm item and PR. Earlier skipped-to-withheld revert proof remains
+recorded there as well.
 
 Native compiled Bun acceptance verifies two uncertain proofs survive operator
 acknowledgment, alongside recovered/coalesced HTTP delivery and peer ownership.
