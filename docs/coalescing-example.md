@@ -76,7 +76,10 @@ revision, disposition, and notification hash. `bypass` retains an individual
 urgent message; `coalesced` identifies a summary; `deferred` retains over-budget
 work; `waiting` retains events in open windows. These are planning decisions,
 not remote acknowledgment. The separate source state reports pending, sending,
-acknowledged, ambiguous, rejected, refused, or skipped. Durable receipts are
+acknowledged, ambiguous, rejected, refused, or skipped. These work labels do not
+prove delivery. Per-row `outcome` and aggregate `outcomes` use the full retained
+attempt lifecycle, with `uncertain` counted separately. Skip/abandon/operator ack
+never erase an unresolved attempt. Durable receipts are
 written before an HTTP attempt and survive a restart. Preview creates no
 delivery decisions and performs no network request or history recovery.
 
@@ -90,7 +93,7 @@ so a trusted transport can route messages.
 
 If a grouped request crashes or becomes ambiguous, all its original receipts
 retain that uncertainty. Reconcile any member using `slack outbox --action
-resolve --key KEY --decision acknowledged|retry|skip`; the whole HTTP group is
+resolve --key KEY --decision acknowledged|retry|skip|abandon`; the whole HTTP group is
 resolved atomically. Verify delivery before retrying: Slack webhooks have no
 exactly-once protocol. Concurrent plain and coalesced drains cannot claim the
 same original event. A rate limit stops the drain; uncertainty pauses that

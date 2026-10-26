@@ -104,7 +104,9 @@ delivery:
 pm slack outbox --action resolve --key RECEIPT_KEY --decision skip
 ```
 
-`skip` records `skipped`, a terminal state distinct from `acknowledged`. Live or
+`skip` and `abandon` record `skipped`, a terminal work state distinct from
+`acknowledged`. They stop retries without proving non-delivery. Even an operator's
+`acknowledged` resolution is a work decision, not a retained Slack response. Live or
 reused sender PIDs refuse reconciliation by default. After independently verifying
 that no sender is active, use `--force-reconcile` to override PID reuse, including
 PID 1 in containers. Forcing an active sender can duplicate delivery; it is never
@@ -118,7 +120,8 @@ Command refusals exit nonzero. SDK callers receive `OutboxError` with typed `cod
 `refused` count instead of aborting the drain.
 
 The command returns compact TOON by default or JSON with `--json`: exact counts
-for every state, at most `--limit` receipts (1–100, default 20), and an explicit
+for every work state, separate `outcomes` totals (`delivered`, `withheld`,
+`uncertain`), at most `--limit` receipts (1–100, default 20), and an explicit
 `omitted` count. Continue inspection with `--after <next_cursor>` until
 `next_cursor` is null; totals cover the whole outbox on every page. Payloads and
 destinations are excluded. A drain inspects history
@@ -127,7 +130,7 @@ without truncation, then attempts at most the requested number of pending rows.
 means delivery may have happened; it is not an acknowledgment.
 
 The package root exports `SlackOutbox`, `captureSlackOutbox`, `slackDestination`,
-`OutboxError`, and their intent/receipt/report/outcome types. The low-level
+`OutboxError`, `deriveSlackDeliveryOutcome`, and their intent/receipt/report/evidence types. The low-level
 `drain(send, limit)` callback must make one attempt and report `acknowledged`
 only on explicit success, `retry` only on a confirmed refusal, and `ambiguous`
 whenever remote acceptance is uncertain. A `retry` ends the current drain; call
@@ -562,3 +565,100 @@ npx pm github sync --repo unbraind/pm-slack --dry-run
 ```
 
 The tracked managed manifest records the extension; installed files are ignored. This preview does not enable scheduled sync. See `docs/certification-2026.10.4.md` for package gates and packed real-tracker command evidence.
+
+## Notification routing explanations
+
+Use `pm slack explain --item <id> --event <event> --revision <after_hash>`
+for a single offline diagnosis. Add `--json` for JSON; the default TOON output
+contains the same bounded evidence. Discover exact identities with the SDK
+mutation feed (`listMutationEvents`): select the lifecycle event's item and
+committed history `after_hash` (`full: true` includes the entry). Pass the feed's
+one-based `version` as `--event-version` when a state hash repeats. The SDK identity
+accepts the same optional `version` field. Without it, a repeated hash produces
+`event_ambiguous`; with it, history is diagnosed but a reused hash cannot safely
+attribute legacy delivery receipts and remains explicit uncertainty.
+
+The typed SDK export `explainSlackRouting(pmRoot, { item, event, revision })`
+verifies the complete item history against the authoritative SDK document,
+replays the requested revision through the SDK, and uses the tracker's configured
+status registry roles to classify the transition. It reports event and priority
+filters (including exact priority operands), every ordered route rule (indices only), first-match shadowing, attention
+policy, and exact-revision delivery evidence. Blockers and priority 0/1 events
+name their budget/window bypass policy; bypass does not override eligibility
+filters. Titles, bodies, selectors, channels and webhook URLs are never returned.
+
+Retained eligibility epochs and receipts are historical evidence. Route evaluation
+uses current configuration, which was not historically snapshotted. Coalescing
+receipts omit the historical budget/window parameters; this uncertainty is explicit.
+They are retained observations and may be stale after retries; absent receipts
+never prove delivery or non-delivery. One reducer, `deriveSlackDeliveryOutcome`,
+uses immutable `attempt_started` / terminal record pairs and a durable
+`request_dispatched` marker written immediately before entering the network API.
+Terminal results are `confirmed`, `not_sent`, `rejected`, or `unknown_after_send`.
+Open attempts are derived on read. Recovery closes dead senders as `not_sent`
+before dispatch and `unknown_after_send` after dispatch; live retired senders
+can still append their actual terminal result. Counters do not establish proof.
+Any confirmed attempt proves `delivered`. Otherwise an unknown/open dispatched
+attempt gives `uncertain`; otherwise the outcome is `withheld`. Operator retry,
+skip, abandon and acknowledgment do not change past attempt records. A confirmed
+retry can therefore prove delivery after an earlier uncertain attempt.
+A retained eligibility exclusion also proves withholding when no receipt exists.
+Legacy attempted receipts without a complete journal remain uncertain.
+`classifySlackTransition` is the exported classifier used by capture, recovery,
+explanation and digest buckets. Each uses SDK alias normalization and the status
+registry loaded from tracker settings;
+configured roles override literal names (including `done` configured as blocked).
+Literal status names are a fallback inside that classifier only. Status roles use
+the current registry, and this historical limitation is explicit in every result.
+
+Output has six stages plus at most 100 indexed routing-rule decisions. Identity
+validation accepts only item, event, revision and the optional positive safe integer version, a bounded safe item id, a
+canonical event and a lowercase 64-character SDK history hash. Routing rules are
+strictly bounded to 100 entries and 250000 characters; selectors to 160 and overrides
+to 2048 characters. Priority configuration must be an integer 1..4. Invalid input,
+invalid routing configuration, unknown/non-lifecycle or ambiguous repeated state hashes, unreadable history
+and unreadable storage return typed nonzero refusals with remedies. Foreign
+receipt/policy records are skipped with `foreign_evidence_skipped` uncertainty.
+
+The command reads one item's retained history and opens existing outbox storage
+read-only in a single SQLite snapshot. It never creates an outbox, captures events,
+drains, sends, or changes tracker files. History verification reads the full
+selected item stream; work scales with that stream, while output stays bounded.
+See the [SDK/CLI example](docs/routing-explanation-example.md) and
+[public-tracker measurement](docs/routing-explanation-validation.md).
+
+### Without git
+
+Notification previews, digests, routing explanations, and local durable outbox
+inspection work on plain initialized trackers without a git executable. Slack
+posting needs an explicitly configured webhook and network connectivity. The
+explanation command needs neither. It makes zero network calls.
+
+### Retained delivery proof
+
+Each claim appends an immutable started record and token under the same SQLite writer
+transaction as its work claim. Completion records that token's actual transport
+result before releasing work. A late completion can settle its own evidence after
+operator reconciliation without overwriting a peer's work state. Operator decisions
+are journaled separately. Open attempts are derived from started records without a terminal fact;
+unknown/foreign results and incomplete legacy history remain uncertain.
+
+`status`, plain/coalesced drain reports, coalescing manifests, and explanations all
+call `deriveSlackDeliveryOutcome`. Each report row has an `outcome`; aggregate
+`outcomes` counts are separate from compatibility `counts`, which describe work
+states only. Digest counts describe tracker activity and are unrelated to delivery.
+Neither a skipped nor an operator-acknowledged count proves a delivery result.
+Dispatch-aware SDK transports accept a third `OutboxSendContext` argument and
+call `context.requestDispatched()` immediately before their network API and
+`context.responseConfirmed()` immediately after a confirmed successful response.
+The package transport does both automatically, including through asynchronous
+wrappers that do not forward the context. A typed or untyped exception after
+dispatch is uncertain unless a response was confirmed; an error code never proves
+`not_sent`. Confirmation is retained before the caller resumes, so later callback
+errors cannot hide a successful delivery. Existing
+two-argument transports are conservatively marked before callback invocation.
+A clean exit always closes its attempt, including cancellation and late refusal;
+a process crash leaves recovery to the durable dispatch marker.
+The attempt journal contains keys, attempt tokens, result codes and operator
+decisions, never webhook URLs or message bodies. The explanation path still opens
+existing storage read-only and never creates or migrates it.

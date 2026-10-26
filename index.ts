@@ -31,11 +31,14 @@
 
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import https from "node:https";
+import { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
+export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
+export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import http from "node:http";
-import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, replayHistoryToTarget, resolveItemTypeRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, normalizeStatusInputWithRegistry, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
-import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent } from "./outbox.ts";
-import type { OutboxPayload, OutboxOutcome, OutboxReport, OutboxEvent, OutboxIntent, OutboxRecoveryReport } from "./outbox.ts";
+import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence, currentOutboxSendContext } from "./outbox.ts";
+import type { OutboxPayload, OutboxOutcome, OutboxReport, OutboxEvent, OutboxIntent, OutboxRecoveryReport, OutboxSendContext } from "./outbox.ts";
 import type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
 import type { CoalescingReport } from "./outbox.ts";
 import { CoalescingError } from "./coalescing.ts";
@@ -43,8 +46,12 @@ export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
 export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
-export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxSend, OutboxSendContext, OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
+import { SlackRoutingError, validateSlackRoutingIdentity, slackRoutingToon } from "./routing-explanation.ts";
+import type { SlackRoutingIdentity, SlackRoutingExplanation, SlackRoutingStep } from "./routing-explanation.ts";
+export { SlackRoutingError } from "./routing-explanation.ts";
+export type { SlackRoutingIdentity, SlackRoutingExplanation, SlackRoutingStep } from "./routing-explanation.ts";
 import path from "node:path";
 import type {
   AfterCommandHookContext,
@@ -563,7 +570,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"] as const;
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce"] as const;
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain"] as const;
 
 /**
  * Whether `command` is one this package gates a webhook on.
@@ -1340,7 +1347,7 @@ function isRetryableSlackError(err: unknown): boolean {
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void> {
+function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void, confirmed?: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const parsed = new URL(webhookUrl);
@@ -1357,6 +1364,8 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
     };
 
     const request = parsed.protocol === "http:" ? http.request : https.request;
+    const proof = currentOutboxSendContext();
+    (dispatched ?? proof?.requestDispatched)?.();
     const req = request(options, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => {
@@ -1370,7 +1379,7 @@ function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<voi
         // in IncomingMessage's type exists only for server-side requests.
         const status = res.statusCode as number;
         if (status >= 200 && status < 300) {
-          resolve();
+          try { (confirmed ?? proof?.responseConfirmed)?.(); resolve(); } catch (error) { reject(error); }
         } else {
           reject(new SlackHttpError(
             status,
@@ -1475,20 +1484,15 @@ interface DigestSummary {
   total: number;
 }
 
-function statusIsClosed(status: string): boolean {
-  const s = status.toLowerCase();
-  return s === "closed" || s === "done" || s === "resolved" || s === "complete" || s === "completed";
-}
-
 /**
  * Aggregate store items into digest buckets for the window. An item counts as:
  *   - created     if created_at >= cutoff
  *   - closed      if it is in a closed/done status AND updated_at >= cutoff
- *   - blocked     if status === blocked AND updated_at >= cutoff
- *   - in_progress if status === in_progress AND updated_at >= cutoff
+ *   - blocked     if the shared classifier reports block AND updated_at >= cutoff
+ *   - in_progress if the shared classifier reports start AND updated_at >= cutoff
  * An item may appear in multiple buckets (e.g. created and blocked).
  */
-function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string): DigestSummary {
+function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): DigestSummary {
   const buckets: Record<DigestBucket, DigestItem[]> = {
     created: [],
     closed: [],
@@ -1498,12 +1502,12 @@ function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: str
   for (const item of items) {
     const created = item.created_at ? Date.parse(item.created_at) : NaN;
     const updated = item.updated_at ? Date.parse(item.updated_at) : created;
-    const status = (item.status ?? "").toLowerCase();
+    const event = classifySlackTransition({ command: "update", status: item.status }, registry);
 
     if (!Number.isNaN(created) && created >= cutoffMs) buckets.created.push(item);
-    if (statusIsClosed(status) && !Number.isNaN(updated) && updated >= cutoffMs) buckets.closed.push(item);
-    if (status === "blocked" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.blocked.push(item);
-    if (status === "in_progress" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.in_progress.push(item);
+    if (event === "close" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.closed.push(item);
+    if (event === "block" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.blocked.push(item);
+    if (event === "start" && !Number.isNaN(updated) && updated >= cutoffMs) buckets.in_progress.push(item);
   }
   const counts: Record<DigestBucket, number> = {
     created: buckets.created.length,
@@ -1692,29 +1696,59 @@ const START_COMMANDS = new Set(["claim", "start-task", "start", "begin"]);
 /** Lifecycle-alias commands that move an item back to open (e.g. pause). */
 const OPEN_COMMANDS = new Set(["pause-task", "release", "reopen", "publish"]);
 
-/** Map a (normalized) status string to the EventKind for a transition into it. */
-function statusToEvent(status: string | undefined): EventKind | null {
-  switch ((status ?? "").toLowerCase()) {
-    case "blocked":
-      return "block";
-    case "canceled":
-    case "cancelled":
-      return "cancel";
-    case "closed":
-    case "done":
-    case "resolved":
-    case "complete":
-    case "completed":
-      return "close";
-    case "in_progress":
-    case "in-progress":
-      return "start";
-    case "open":
-      return "open";
-    default:
-      return null;
-  }
+/** One transition boundary shared by capture, recovery, explanation and legacy command adapters. */
+export interface SlackTransition {
+  /** Command determines creation and provides legacy aliases only when no resulting status is known. */
+  command: string | undefined;
+  /** Authoritative resulting status, when available. */
+  status?: string;
+  /** Prior committed status; unchanged statuses are not lifecycle transitions. */
+  previousStatus?: string;
 }
+
+/** Classify a transition using SDK registry roles, with literals only when no registry definition exists. */
+export function classifySlackTransition(input: SlackTransition, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): EventKind | null {
+  const command = input.command?.toLowerCase() ?? "";
+  if (CREATE_COMMANDS.has(command)) return "create";
+  if (!UPDATE_COMMANDS.has(command) && !CLOSE_COMMANDS.has(command) && !START_COMMANDS.has(command) && !OPEN_COMMANDS.has(command)) return null;
+  const status = registry ? normalizeStatusInputWithRegistry(input.status, registry) ?? input.status : input.status;
+  const previousStatus = registry ? normalizeStatusInputWithRegistry(input.previousStatus, registry) ?? input.previousStatus : input.previousStatus;
+  if (status !== undefined && status === previousStatus) return null;
+  let event: EventKind | null = null;
+  if (status !== undefined && registry?.by_id.has(status)) {
+    if (registry.terminal_done_statuses.has(status)) event = "close";
+    else if (registry.terminal_canceled_statuses.has(status)) event = "cancel";
+    else if (registry.blocked_statuses.has(status)) event = "block";
+    else if (registry.active_statuses.has(status)) event = status === registry.in_progress_status ? "start" : "open";
+  } else {
+    switch ((status ?? "").toLowerCase()) {
+      case "blocked": event = "block"; break;
+      case "canceled": case "cancelled": event = "cancel"; break;
+      case "closed": case "done": case "resolved": case "complete": case "completed": event = "close"; break;
+      case "in_progress": case "in-progress": event = "start"; break;
+      case "open": event = "open"; break;
+    }
+    if (status === undefined) {
+      if (CLOSE_COMMANDS.has(command)) event = "close";
+      else if (START_COMMANDS.has(command)) event = "start";
+      else if (OPEN_COMMANDS.has(command)) event = command === "reopen" ? "reopen" : "open";
+    }
+  }
+  if (event === "open" && previousStatus) {
+    const prior = previousStatus;
+    if (registry?.by_id.has(prior)) {
+      if (registry.blocked_statuses.has(prior)) return "unblock";
+      if (registry.terminal_statuses.has(prior)) return "reopen";
+    } else {
+      if (prior.toLowerCase() === "blocked") return "unblock";
+      if (["closed", "canceled", "cancelled", "done", "resolved"].includes(prior.toLowerCase())) return "reopen";
+    }
+  }
+  return event;
+}
+
+/** Legacy test/helper adapter delegates all status semantics to the single classifier. */
+function statusToEvent(status: string | undefined): EventKind | null { return classifySlackTransition({ command: "update", status }); }
 
 /**
  * Narrow view of the structured payload pm-cli attaches to `ctx.result` for
@@ -1758,41 +1792,14 @@ function isCommandLifecycleResult(value: unknown): value is CommandLifecycleResu
  *      open→reopen (from a closed/canceled state) and open→unblock (from
  *      blocked) so terminal-recovery transitions are distinguishable.
  */
-function detectEvent(ctx: AfterCommandHookContext): EventKind | null {
-  const cmd = ctx.command?.toLowerCase() ?? "";
-
-  if (CREATE_COMMANDS.has(cmd)) return "create";
-  if (CLOSE_COMMANDS.has(cmd)) return "close";
-
-  // `ctx.result` is declared `unknown` by the SDK; narrow with a type guard
-  // before reading lifecycle fields (see `isCommandLifecycleResult`).
+function detectEvent(ctx: AfterCommandHookContext, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): EventKind | null {
   const result = isCommandLifecycleResult(ctx.result) ? ctx.result : undefined;
-  const resultStatusRaw = result?.item?.status;
-  const resultStatus = typeof resultStatusRaw === "string" ? resultStatusRaw : undefined;
-  const prevStatusRaw = result?.previousStatus ?? result?.previous_status ?? "";
-  const prevStatus = (typeof prevStatusRaw === "string" ? prevStatusRaw : "").toLowerCase();
-
-  // Lifecycle aliases imply a target status even without --status.
-  let event: EventKind | null = null;
-  if (START_COMMANDS.has(cmd)) event = "start";
-  else if (OPEN_COMMANDS.has(cmd)) event = cmd === "reopen" ? "reopen" : "open";
-
-  if (!event && UPDATE_COMMANDS.has(cmd)) {
-    const optStatus = ctx.options?.["status"] as string | undefined;
-    event = statusToEvent(optStatus) ?? statusToEvent(resultStatus);
-  }
-
-  if (!event) return null;
-
-  // Refine an "open" transition using the prior status when available:
-  //   blocked  -> open  => unblock
-  //   closed/canceled -> open => reopen
-  if (event === "open" && prevStatus) {
-    if (prevStatus === "blocked") return "unblock";
-    if (["closed", "canceled", "cancelled", "done", "resolved"].includes(prevStatus)) return "reopen";
-  }
-
-  return event;
+  const raw = result?.item?.status;
+  const prior = result?.previousStatus ?? result?.previous_status;
+  const option = ctx.options?.["status"];
+  // Resulting state wins over command spelling/options; absent host results retain the old adapter fallback.
+  const status = typeof raw === "string" ? raw : typeof option === "string" ? option : undefined;
+  return classifySlackTransition({ command: ctx.command, status, previousStatus: typeof prior === "string" ? prior : undefined }, registry);
 }
 
 /**
@@ -1855,8 +1862,10 @@ function outboxToon(report: OutboxReport, recovered: OutboxRecoveryReport): stri
     `enabled_since: ${JSON.stringify(report.enabled_since)}`,
     "counts:",
     ...Object.entries(report.counts).map(([state, count]) => `  ${state}: ${count}`),
-    `rows[${report.rows.length}]{sequence,key,item,event,state,attempts}:`,
-    ...report.rows.map((row) => `  ${[row.sequence, row.key, row.item, row.event, row.state, row.attempts].map((value) => JSON.stringify(value)).join(",")}`),
+    "outcomes:", ...Object.entries(report.outcomes).map(([outcome, count]) => `  ${outcome}: ${count}`),
+    `rows[${report.rows.length}]{sequence,key,item,event,state,attempts,outcome}:`,
+    ...report.rows.map((row) => `  ${[row.sequence, row.key, row.item, row.event, row.state, row.attempts, row.outcome].map((value) => JSON.stringify(value)).join(",")}`),
+    ...(report.foreign_skipped === undefined ? [] : [`foreign_skipped: ${report.foreign_skipped}`]),
     `omitted: ${report.omitted}`,
     `next_cursor: ${report.next_cursor}`,
     "recovered:", `  inspected: ${recovered.inspected}`, `  queued: ${recovered.queued}`, `  failed: ${recovered.failed}`,
@@ -1897,7 +1906,7 @@ class SlackRecoveryError extends OutboxError {
 function classifyOutboxSendError(error: unknown): OutboxOutcome {
   if (error instanceof SlackHttpError) {
     if (error.status === 429) return "retry";
-    return error.status < 500 ? "rejected" : "ambiguous";
+    return error.status >= 400 && error.status < 500 ? "rejected" : "ambiguous";
   }
   const cause = error instanceof Error ? error.cause : undefined;
   if (cause === null || typeof cause !== "object" || !("code" in cause)) return "ambiguous";
@@ -1907,11 +1916,12 @@ function classifyOutboxSendError(error: unknown): OutboxOutcome {
 }
 
 /** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
-async function sendOutbox(destination: string, payload: OutboxPayload): Promise<OutboxOutcome> {
+async function sendOutbox(destination: string, payload: OutboxPayload, context?: OutboxSendContext): Promise<OutboxOutcome> {
   const target = outboxTargets().find((candidate) => slackDestination(candidate.webhookUrl, payload.channel ?? candidate.channel) === destination);
   if (!target) throw new OutboxError("destination_changed", "Restore the original routing destination before draining; no message was posted.");
   try {
-    await postToSlackOnce(target.webhookUrl, payload);
+    const proof = context ?? currentOutboxSendContext();
+    await postToSlackOnce(target.webhookUrl, payload, proof?.requestDispatched, proof?.responseConfirmed);
     return "acknowledged";
   } catch (error) {
     return classifyOutboxSendError(error);
@@ -2019,6 +2029,7 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
   if (!since) throw new OutboxError("disabled", "Run pm slack outbox --action enable first.");
   const config = loadConfig();
   if (!config) throw new OutboxError("destination_changed", "Restore notification configuration before recovering lifecycle history.");
+  const statusRegistry = resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema);
   let inspected = 0;
   let queued = 0;
   let failed = 0;
@@ -2057,7 +2068,7 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
           const prior = previous;
           if (status) previous = status;
           if (entry.ts < since || (!status && entry.op !== "create") || (entry.op !== "create" && status === prior)) continue;
-          const event = detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
+          const event = classifySlackTransition({ command: entry.op === "create" ? "create" : "update", status, previousStatus: prior }, statusRegistry);
           const policy = outboxStorage(() => outbox.recoveryPolicyAt(entry.ts));
           if (!event || !policy || !policy.events.includes(event) || outboxStorage(() => outbox.has(id, event, entry.after_hash))) continue;
           const { metadata } = replayHistoryToTarget(entries, index);
@@ -2091,17 +2102,86 @@ export async function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, it
   return { inspected, queued, failed, ...(failures.length ? { failures } : {}) };
 }
 
+/** Diagnose one verified committed event without sending, recovering, or writing tracker/runtime state. */
+export async function explainSlackRouting(pmRoot: string, input: SlackRoutingIdentity): Promise<SlackRoutingExplanation> {
+  validateSlackRoutingIdentity(input);
+  const entries = await readVerifiedOutboxHistory(pmRoot, input.item);
+  if (entries instanceof OutboxError) throw entries;
+  const matches = entries.flatMap((entry, index) => entry.after_hash === input.revision ? [index] : []);
+  if (matches.length > 1 && input.version === undefined) throw new SlackRoutingError("event_ambiguous", "Specify event-version from the SDK mutation feed version; this state hash occurs more than once.");
+  const index = input.version === undefined ? matches[0] ?? -1 : input.version - 1;
+  if (index < 0 || entries[index]?.after_hash !== input.revision) throw new SlackRoutingError("event_not_found", "Use a committed after_hash from this item's verified SDK mutation history.");
+  const entry = entries[index]!;
+  const { metadata } = replayHistoryToTarget(entries, index);
+  const settings = await readSettings(pmRoot);
+  const registry = resolveRuntimeStatusRegistry(settings.schema);
+  const priorValue = index === 0 ? undefined : replayHistoryToTarget(entries, index - 1).metadata.status;
+  const prior = typeof priorValue === "string" ? priorValue : undefined;
+  const status = typeof metadata.status === "string" ? metadata.status : "";
+  const event = classifySlackTransition({ command: entry.op === "create" ? "create" : "update", status, previousStatus: prior }, registry);
+  if (event !== input.event) throw new SlackRoutingError("event_not_found", "Choose the lifecycle event matching this revision under the tracker's configured status roles; non-status edits are not lifecycle events.");
+  // Reuse routing semantics, but refuse malformed configuration rather than silently dropping rules.
+  let raw: unknown;
+  try { raw = JSON.parse(process.env.PM_SLACK_ROUTES?.trim() || "[]"); } catch { raw = null; }
+  if ((process.env.PM_SLACK_ROUTES?.length ?? 0) > 250000 || (process.env.PM_SLACK_EVENTS?.length ?? 0) > 160 || (process.env.PM_SLACK_MIN_PRIORITY !== undefined && !/^[1-4]$/.test(process.env.PM_SLACK_MIN_PRIORITY)) || !Array.isArray(raw) || raw.length > 100 || raw.some((rule: unknown) => {
+    if (typeof rule !== "object" || rule === null || Array.isArray(rule)) return true;
+    const row = rule as Record<string, unknown>;
+    return Object.keys(row).some((key) => !["match", "webhook", "channel"].includes(key)) || typeof row.match !== "string" || row.match.trim().length === 0 || row.match.length > 160 || ![row.webhook, row.channel].some((value) => typeof value === "string" && value.trim().length > 0) || [row.webhook, row.channel].some((value) => value !== undefined && (typeof value !== "string" || value.length > 2048));
+  })) throw new SlackRoutingError("routing_config_invalid", "Use at most 100 routing rules with only match, webhook and channel string fields; each rule needs a selector and an override.");
+  const config = loadConfig();
+  const evidence = readSlackRoutingEvidence(pmRoot, input.item, input.event, input.revision, entry.ts);
+  const path: SlackRoutingStep[] = [{ stage: "history", policy: "sdk_verified_revision_and_status_roles", decision: "verified", source: "verified_history" }];
+  const uncertainty = ["historical_routes_not_retained", "status_roles_use_current_registry"];
+  const policy = evidence.policy;
+  const eventsPass = policy ? policy.events.includes(input.event) : config?.events.has(input.event);
+  const priorityPass = policy ? meetsMinPriority(metadata as unknown as PmItem, policy.minPriority as Priority) : config ? meetsMinPriority(metadata as unknown as PmItem, config.minPriority) : undefined;
+  path.push({ stage: "events", policy: "eligibility_epoch_events", decision: eventsPass === undefined ? "not_recorded" : eventsPass ? "pass" : "withhold", source: policy ? "retained" : config ? "current_config" : "unknown" });
+  path.push({ stage: "priority", policy: "eligibility_epoch_priority", decision: priorityPass === undefined ? "not_recorded" : priorityPass ? "pass" : "withhold", source: policy ? "retained" : config ? "current_config" : "unknown" });
+  if (!policy) uncertainty.push("eligibility_epoch_not_retained");
+  if (evidence.foreign) uncertainty.push("foreign_evidence_skipped");
+  const item = metadata as unknown as PmItem;
+  if (item.priority !== undefined && (!Number.isInteger(item.priority) || item.priority < 0 || item.priority > 4)) throw new SlackRecoveryError("historical_snapshot_invalid");
+  const eligibility: SlackRoutingExplanation["eligibility"] = { event_enabled: eventsPass ?? null, priority: item.priority ?? null,
+    min_priority: policy?.minPriority ?? config?.minPriority ?? null, source: policy ? "retained" : config ? "current_config" : "unknown" };
+  let selected = false;
+  for (const [rule, route] of (config?.routes ?? parseRoutes(process.env.PM_SLACK_ROUTES)).entries()) {
+    const matches = ruleMatches(route, input.event, item);
+    path.push({ stage: "route", policy: "first_matching_rule", rule, decision: selected ? "shadowed" : matches ? "selected" : "no_match", source: "current_config" });
+    if (matches) selected = true;
+  }
+  const target = config ? selectRoute(input.event, item, config.routes, config.webhookUrl, config.channel) : null;
+  path.push({ stage: "route", policy: selected ? "selected_destination" : "default_destination", decision: target ? isHttpUrl(target.webhookUrl) ? "available" : "invalid_destination" : "unavailable", source: "current_config" });
+  const urgent = input.event === "block" ? "blocker_bypasses_budget_and_window" : (item.priority ?? 4) <= 1 ? "critical_priority_bypasses_budget_and_window" : "routine_item_destination_window_budget";
+  const receipt = matches.length > 1 ? undefined : evidence.receipt;
+  if (matches.length > 1) uncertainty.push("receipt_revision_not_unique");
+  path.push({ stage: "coalescing", policy: urgent, decision: receipt?.disposition ?? "not_recorded", source: receipt?.disposition ? "retained" : "unknown" });
+  if (!receipt?.disposition) uncertainty.push("coalescing_decision_not_retained");
+  if (receipt?.disposition && receipt.disposition !== "bypass") uncertainty.push("coalescing_parameters_not_retained");
+  if (receipt?.disposition === "deferred" || receipt?.disposition === "waiting") uncertainty.push("coalescing_observation_may_be_stale");
+  path.push({ stage: "delivery", policy: "exact_revision_receipt", decision: receipt?.state ?? "not_recorded", source: receipt ? "retained" : "unknown" });
+  if (!receipt) uncertainty.push("delivery_receipt_not_retained");
+  const outcome = deriveSlackDeliveryOutcome(receipt?.evidence, Boolean(!receipt && policy && (!eventsPass || !priorityPass)));
+  if (receipt?.evidence.legacy_unknown) uncertainty.push("attempt_history_incomplete");
+  return { ok: true, identity: { ...input }, outcome, eligibility, path: path.map((step) => ({ ...step, rule: step.rule ?? null })), uncertainty, ...(receipt ? { state: receipt.state, attempts: receipt.attempts, attempt_evidence: receipt.evidence } : {}) };
+}
+
 export default defineExtension({
   name: "pm-slack",
   version: "2026.10.26",
 
   activate(api: ExtensionApi) {
     api.registerRenderer("toon", (ctx) => {
+      const report = ctx.result as SlackRoutingExplanation;
+      return report?.ok === true ? slackRoutingToon(report) : null;
+    }, { commands: ["slack explain"] });
+    api.registerRenderer("toon", (ctx) => {
       const report = ctx.result as CoalescingReport | null;
       if (!report?.summary || !Array.isArray(report.rows)) return null;
       return ["summary:", ...Object.entries(report.summary).map(([key, count]) => `  ${key}: ${count}`),
-        `rows[${report.rows.length}]{key,item,event,revision,disposition,notification,state}:`,
-        ...report.rows.map((row) => `  ${[row.key, row.item, row.event, row.revision, row.disposition, row.notification, row.state].map((value) => JSON.stringify(value)).join(",")}`),
+        "outcomes:", ...Object.entries(report.outcomes).map(([outcome, count]) => `  ${outcome}: ${count}`),
+        `rows[${report.rows.length}]{key,item,event,revision,disposition,notification,state,outcome}:`,
+        ...report.rows.map((row) => `  ${[row.key, row.item, row.event, row.revision, row.disposition, row.notification, row.state, row.outcome].map((value) => JSON.stringify(value)).join(",")}`),
+        ...(report.foreign_skipped === undefined ? [] : [`foreign_skipped: ${report.foreign_skipped}`]),
         `omitted: ${report.omitted}`, `next_cursor: ${report.next_cursor}`].join("\n");
     }, { commands: ["slack coalesce"] });
     api.registerRenderer("toon", (ctx) => {
@@ -2125,13 +2205,15 @@ export default defineExtension({
           // than the declared type and may invoke the hook with a falsy/empty
           // context during early bootstrap; do not simplify it away.
           if (ctx && ctx.ok === false) return;
+          if (ctx.command === "slack explain") return;
+          const statusRegistry = ctx.pm_root && existsSync(ctx.pm_root) ? resolveRuntimeStatusRegistry((await readSettings(ctx.pm_root)).schema) : undefined;
 
           if (ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
             const outbox = new SlackOutbox(ctx.pm_root);
             try {
               if (outbox.since()) {
                 const item = extractItem(ctx);
-                if (item && detectEvent(ctx)) {
+                if (item && detectEvent(ctx, statusRegistry)) {
                   try { await captureSlackOutbox(ctx.pm_root, outbox, [item.id]); }
                   catch (error) { if (outboxFailure(error).code !== "history_unavailable") throw error; }
                   if (process.env.PM_SLACK_COALESCE === "1") await outbox.drainCoalesced(sendOutbox, { budget: 0 });
@@ -2145,7 +2227,7 @@ export default defineExtension({
           const config = loadConfig();
           if (!config) return; // no webhook → silent no-op
 
-          const event = detectEvent(ctx);
+          const event = detectEvent(ctx, statusRegistry);
           if (!event) return;
 
           if (!config.events.has(event)) {
@@ -2252,6 +2334,32 @@ export default defineExtension({
     // -----------------------------------------------------------------------
     if (typeof api.registerCommand === "function") {
       api.registerCommand({
+        name: "slack explain",
+        description: "Explain one committed notification's filters, routes, attention and delivery evidence offline",
+        intent: "Diagnose suppression and delivery uncertainty without exposing webhook URLs or message bodies",
+        examples: ["pm slack explain --item task-1 --event create --revision <after_hash> --json"],
+        flags: [
+          { long: "--item", value_name: "id", description: "Exact tracker item id" },
+          { long: "--event", value_name: "event", description: "Canonical lifecycle event" },
+          { long: "--revision", value_name: "hash", description: "Committed SDK history after_hash" },
+          { long: "--event-version", value_name: "version", description: "One-based SDK mutation version; disambiguates repeated state hashes" },
+        ],
+        async run(ctx) {
+          try {
+            const version = readStrOption(ctx.options, "event-version");
+            return await explainSlackRouting(ctx.pm_root, {
+              ...(version === undefined ? {} : { version: Number(version) }),
+              item: readStrOption(ctx.options, "item")!,
+              event: readStrOption(ctx.options, "event")! as EventKind,
+              revision: readStrOption(ctx.options, "revision")!,
+            });
+          } catch (error) {
+            if (error instanceof SlackRoutingError) return { ok: false, exit_code: error.exitCode, code: error.code, remediation: error.remedy };
+            return outboxFailure(error);
+          }
+        },
+      });
+      api.registerCommand({
         name: "slack coalesce",
         description: "Preview or drain bounded lifecycle bursts with item-level evidence and urgent bypass",
         intent: "Reduce routine delivery interruptions while preserving every original outbox receipt",
@@ -2297,7 +2405,7 @@ export default defineExtension({
           { long: "--limit", value_name: "count", description: "Receipt and delivery bound, 1..100 (default 20)" },
           { long: "--after", value_name: "cursor", description: "Resume status after next_cursor from the previous page" },
           { long: "--key", value_name: "key", description: "Receipt idempotency key to reconcile" },
-          { long: "--decision", value_name: "decision", description: "acknowledged, retry, or skip; retry can duplicate an uncertain send" },
+          { long: "--decision", value_name: "decision", description: "acknowledged, retry, skip, or abandon; operator decisions do not prove delivery" },
           { long: "--force-reconcile", description: "Override PID reuse only after verifying no sender is active; duplicates are possible" },
         ],
         async run(ctx) {
@@ -2320,7 +2428,7 @@ export default defineExtension({
               if (action === "resolve") {
                 const key = readStrOption(options, "key");
                 const decision = readStrOption(options, "decision");
-                if (!key || (decision !== "acknowledged" && decision !== "retry" && decision !== "skip")) throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry|skip after checking Slack delivery.");
+                if (!key || (decision !== "acknowledged" && decision !== "retry" && decision !== "skip" && decision !== "abandon")) throw new OutboxError("invalid_input", "Supply --key and --decision acknowledged|retry|skip|abandon; operator decisions do not prove delivery.");
                 outbox.resolve(key, decision, { force: readBoolOption(options, "force-reconcile") });
               }
               let recovered: OutboxRecoveryReport = { inspected: 0, queued: 0, failed: 0 };
@@ -2662,7 +2770,7 @@ export default defineExtension({
           // unbounded strict read before constructing or posting any payload.
           // Disable nested extension hooks: this is an observational read.
           const { items } = await listAllComplete({}, { pmRoot, noExtensions: true });
-          const summary = aggregateDigest(items, cutoffMs, label);
+          const summary = aggregateDigest(items, cutoffMs, label, resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema));
           const payload = { ...buildDigestPayload(summary, format, channel), ...(threadTs ? { thread_ts: threadTs } : {}) };
 
           if (dryRun) {
@@ -2710,6 +2818,7 @@ export default defineExtension({
 export const __test__ = {
   outboxFailure,
   classifyOutboxSendError,
+  sendOutbox,
   buildItemBlockKit,
   buildItemPayload,
   buildTextMessage,

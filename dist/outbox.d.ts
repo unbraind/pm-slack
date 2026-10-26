@@ -1,4 +1,5 @@
 import type { CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
+import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 /** Stable refusal codes returned by both the SDK and CLI. */
 export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
 /** Expected failure with a safe message, machine-readable code, and concrete remedy. */
@@ -69,7 +70,12 @@ export interface CoalescingReport {
     /** Exactly identified source events on this page. */
     rows: (CoalescingReceipt & {
         state: OutboxState;
+        outcome: SlackDeliveryOutcome;
     })[];
+    /** Exact delivery-proof totals over the inspected plan or retained manifest. */
+    outcomes: Record<SlackDeliveryOutcome, number>;
+    /** Foreign or malformed rows skipped from the report, when any exist. */
+    foreign_skipped?: number;
     /** Evidence rows outside this page, never unreported event loss. */
     omitted: number;
     /** Offset for the next page; null denotes complete evidence. */
@@ -89,6 +95,8 @@ export interface OutboxReceipt {
     state: OutboxState;
     /** Number of claimed remote attempts, including uncertain attempts. */
     attempts: number;
+    /** Delivery proof reduced from all attempts, independent of workflow state. */
+    outcome: SlackDeliveryOutcome;
 }
 /** Bounded inspection with exact state totals and an explicit omission count. */
 export interface OutboxReport {
@@ -96,6 +104,10 @@ export interface OutboxReport {
     enabled_since: string | null;
     /** Exact durable state counts. */
     counts: Record<OutboxState, number>;
+    /** Proven delivery outcomes, with uncertain notifications counted separately. */
+    outcomes: Record<SlackDeliveryOutcome, number>;
+    /** Foreign or malformed rows skipped from the report, when any exist. */
+    foreign_skipped?: number;
     /** Oldest matching receipts, bounded by the requested limit. */
     rows: OutboxReceipt[];
     /** Rows omitted from this inspection. */
@@ -138,13 +150,42 @@ export interface OutboxRecoveryReport {
     failures?: OutboxRecoveryFailure[];
 }
 /** Explicit reconciliation decisions; skipping never claims remote acknowledgment. */
-export type OutboxDecision = "acknowledged" | "retry" | "skip";
+export type OutboxDecision = "acknowledged" | "retry" | "skip" | "abandon";
+/** Dispatch-aware transports call this immediately before entering the network API. */
+export interface OutboxSendContext {
+    /** Persist dispatch intent before a request can leave this process. */
+    requestDispatched(): void;
+    /** Record a successful Slack response immediately, before later callback code can fail. */
+    responseConfirmed(): void;
+}
+/** Read this asynchronous attempt's context without exposing or sharing it with another sender. */
+export declare function currentOutboxSendContext(): OutboxSendContext | undefined;
+/** Transport callback; legacy two-argument callbacks are conservatively marked before invocation. */
+export type OutboxSend = (destination: string, payload: OutboxPayload, context: OutboxSendContext) => Promise<OutboxOutcome>;
 /** HTTP transport outcome; only an explicit remote acknowledgment permits ack. */
 export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 /** Hash a destination without persisting a webhook credential. */
 export declare function slackDestination(webhook: string, channel?: string): string;
 /** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
 export declare function validateOutboxIntent(intent: OutboxIntent): void;
+/** A consistent read-only view; private payloads and destinations are never selected. */
+export interface SlackRoutingEvidence {
+    /** Durable opt-in time, or null for a tracker without an outbox. */
+    since: string | null;
+    /** A record outside the owned schema was skipped instead of being interpreted. */
+    foreign?: true;
+    /** Eligibility policy effective at the event time. */
+    policy?: OutboxRecoveryFilter;
+    /** Durable delivery evidence for this exact item/event/revision identity. */
+    receipt?: {
+        state: OutboxState;
+        attempts: number;
+        disposition: string | null;
+        evidence: SlackDeliveryEvidence;
+    };
+}
+/** Inspect one exact revision in a read transaction without creating storage or changing permissions. */
+export declare function readSlackRoutingEvidence(pmRoot: string, item: string, event: OutboxEvent, revision: string, at: string): SlackRoutingEvidence;
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export declare class SlackOutbox {
     private readonly db;
@@ -175,7 +216,7 @@ export declare class SlackOutbox {
        * Claims fence concurrent plain and coalesced drains. Every original keeps its
        * state and attempt count; crashes leave all claimed members visibly sending.
        */
-    drainCoalesced(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, options?: CoalescingOptions): Promise<CoalescingPlan>;
+    drainCoalesced(send: OutboxSend, options?: CoalescingOptions): Promise<CoalescingPlan>;
     /** Check whether a verified history transition already has a durable intent. */
     has(item: string, event: OutboxEvent, revision: string): boolean;
     /** Inspect a bounded receipt page while preserving exact totals and omission evidence. */
@@ -189,12 +230,20 @@ export declare class SlackOutbox {
      * The next drain prefers fewer attempts, then older rows, so one refused
      * destination cannot block every other notification.
      */
-    drain(send: (destination: string, payload: OutboxPayload) => Promise<OutboxOutcome>, limit?: number): Promise<OutboxReport>;
+    drain(send: OutboxSend, limit?: number): Promise<OutboxReport>;
     /** Run receipt mutations under SQLite's cross-process writer fence, rolling back every partial transition. */
     private transaction;
     /** Claim the complete membership and persist a fresh attempt token before any remote request. */
     private claim;
-    /** Finish only this attempt; clean its mappings before releasing members, with no observable partial state. */
+    /** Record dispatch intent durably before a transport can enter the network API. */
+    private dispatch;
+    /** Always close a cleanly exiting sender, including retired senders and thrown transport errors. */
+    private sendAttempt;
+    /** Recover only dead owners; a live retired sender retains the right to record its actual result. */
+    private recoverAttempts;
+    /** Append exactly one terminal fact; repeated cleanup cannot replace an earlier fact. */
+    private recordTerminal;
+    /** Close the immutable record pair before touching scheduling state, even after a peer retires the claim. */
     private finish;
     /** Reconcile uncertainty or refusal; force overrides PID reuse only after an operator verifies sender absence. */
     resolve(key: string, decision: OutboxDecision, options?: {

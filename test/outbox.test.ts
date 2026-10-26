@@ -128,7 +128,7 @@ test("uncertainty is held, active senders refuse reconciliation and changed dest
   assert.equal(sends, 0);
   box.resolve(key, "acknowledged");
   const second = box.enqueue(intent("retry"));
-  assert.equal((await box.drain(async () => { throw new OutboxError("destination_changed", "Restore the original route."); })).counts.refused, 1);
+  assert.equal((await box.drain(async (_destination, _payload, _context) => { throw new OutboxError("destination_changed", "Restore the original route."); })).counts.refused, 1);
   assert.equal(box.status().rows[1]!.attempts, 0);
   box.resolve(second, "retry");
   await box.drain(async () => "rejected");
@@ -311,7 +311,7 @@ test("pre-request route refusals preserve pending receipts and attempts until co
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await ext.runCommand({ command: "slack outbox", pmRoot, options: { action: "drain" }, global: { json: true } });
     assert.equal(response.exitCode ?? 0, 0);
-    assert.deepEqual(box.status().rows.map((row) => ({ ...row })), [{ ...original, state: "acknowledged", attempts: 1 }]);
+    assert.deepEqual(box.status().rows.map((row) => ({ ...row })), [{ ...original, state: "acknowledged", attempts: 1, outcome: "delivered" }]);
     assert.equal(sends, 1, "repairing routing must acknowledge exactly one send without manual reconciliation");
   }
 });

@@ -94,8 +94,9 @@ async function race(t: TestContext, scenario: Scenario, boundary = -1): Promise<
     if (scenario.from === "crash") await crash(pmRoot, directory);
     else {
       const from = scenario.from;
-      await box.drainCoalesced(async () => {
+      await box.drainCoalesced(async (_destination, _payload, context) => {
         if (from === "refused") throw new OutboxError("destination_changed", "Restore synthetic route.");
+        context.requestDispatched();
         return from;
       });
     }
@@ -107,13 +108,15 @@ async function race(t: TestContext, scenario: Scenario, boundary = -1): Promise<
   });
   try {
     if ("outcome" in scenario) {
-      const draining = box.drainCoalesced(async () => {
+      const transport = async () => {
         armed = true;
         if (scenario.outcome === "typed-retry") throw new OutboxError("invalid_input", "Repair synthetic configuration.");
         if (scenario.outcome === "typed-refusal") throw new OutboxError("destination_changed", "Restore synthetic route.");
         if (scenario.outcome === "ambiguous") throw new Error("Synthetic connection lost after transmission");
         return scenario.outcome;
-      });
+      };
+      const preflight = scenario.outcome === "typed-retry" || scenario.outcome === "typed-refusal";
+      const draining = box.drainCoalesced(preflight ? async (_destination, _payload, _context) => transport() : transport);
       if (scenario.outcome === "typed-retry") await assert.rejects(draining, OutboxError);
       else await draining;
     } else {
@@ -178,9 +181,10 @@ test("stale grouped and plain sender completions cannot overwrite or delete a ne
     await t.test(`${mode} ${outcome}`, async (subtest) => {
       const { box, peer, keys } = await fixture(subtest);
       let releaseOld!: () => void;
-      const sendOld = async (): Promise<OutboxOutcome> => {
+      const sendOld = async (_destination: string, _payload: unknown, context: { requestDispatched(): void }): Promise<OutboxOutcome> => {
         await new Promise<void>((done) => { releaseOld = done; });
         if (outcome === "typed-retry") throw new OutboxError("invalid_input", "Repair synthetic configuration.");
+        context.requestDispatched();
         return outcome;
       };
       const old = mode === "grouped" ? box.drainCoalesced(sendOld) : box.drain(sendOld, 1);

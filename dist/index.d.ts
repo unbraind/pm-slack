@@ -29,14 +29,20 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
+export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
+import { resolveRuntimeStatusRegistry } from "@unbrained/pm-cli/sdk";
 import { SlackOutbox } from "./outbox.ts";
-import type { OutboxOutcome, OutboxEvent, OutboxRecoveryReport } from "./outbox.ts";
+import type { OutboxPayload, OutboxOutcome, OutboxEvent, OutboxRecoveryReport, OutboxSendContext } from "./outbox.ts";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
 export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
 export type { CoalescingReport } from "./outbox.ts";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.ts";
-export type { OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
+export type { OutboxSend, OutboxSendContext, OutboxIntent, OutboxPayload, OutboxReceipt, OutboxReport, OutboxState, OutboxEvent, OutboxOutcome, OutboxRefusalCode, OutboxDecision, OutboxRecoveryFilter, OutboxRecoveryPolicy, OutboxRecoveryReport } from "./outbox.ts";
 export type { OutboxRecoveryFailure, OutboxRecoveryFailureReason } from "./outbox.ts";
+import type { SlackRoutingIdentity, SlackRoutingExplanation } from "./routing-explanation.ts";
+export { SlackRoutingError } from "./routing-explanation.ts";
+export type { SlackRoutingIdentity, SlackRoutingExplanation, SlackRoutingStep } from "./routing-explanation.ts";
 import type { AfterCommandHookContext } from "@unbrained/pm-cli/sdk";
 declare class CommandError extends Error {
     exitCode: number;
@@ -218,7 +224,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce", "slack explain"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -484,7 +490,7 @@ declare function isRetryableSlackError(err: unknown): boolean;
  * @param payload - The Slack message payload to JSON-encode and send.
  * @returns Resolves once Slack acknowledges the post with a 2xx status.
  */
-declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload): Promise<void>;
+declare function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void, confirmed?: () => void): Promise<void>;
 /** Metadata used for digest aggregation and item lines, independent of notification priorities. */
 interface DigestItem {
     /** Stable SDK item identity. */
@@ -519,11 +525,11 @@ interface DigestSummary {
  * Aggregate store items into digest buckets for the window. An item counts as:
  *   - created     if created_at >= cutoff
  *   - closed      if it is in a closed/done status AND updated_at >= cutoff
- *   - blocked     if status === blocked AND updated_at >= cutoff
- *   - in_progress if status === in_progress AND updated_at >= cutoff
+ *   - blocked     if the shared classifier reports block AND updated_at >= cutoff
+ *   - in_progress if the shared classifier reports start AND updated_at >= cutoff
  * An item may appear in multiple buckets (e.g. created and blocked).
  */
-declare function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string): DigestSummary;
+declare function aggregateDigest(items: DigestItem[], cutoffMs: number, windowLabel: string, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): DigestSummary;
 /**
  * Build the plain-text (mrkdwn) activity digest message.
  *
@@ -568,7 +574,18 @@ declare function buildDigestBlockKit(summary: DigestSummary, channel?: string): 
  * @returns The assembled Slack payload.
  */
 declare function buildDigestPayload(summary: DigestSummary, format: MessageFormat, channel?: string): SlackPayload;
-/** Map a (normalized) status string to the EventKind for a transition into it. */
+/** One transition boundary shared by capture, recovery, explanation and legacy command adapters. */
+export interface SlackTransition {
+    /** Command determines creation and provides legacy aliases only when no resulting status is known. */
+    command: string | undefined;
+    /** Authoritative resulting status, when available. */
+    status?: string;
+    /** Prior committed status; unchanged statuses are not lifecycle transitions. */
+    previousStatus?: string;
+}
+/** Classify a transition using SDK registry roles, with literals only when no registry definition exists. */
+export declare function classifySlackTransition(input: SlackTransition, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): EventKind | null;
+/** Legacy test/helper adapter delegates all status semantics to the single classifier. */
 declare function statusToEvent(status: string | undefined): EventKind | null;
 /**
  * Detect the lifecycle event for a completed command. Strategy:
@@ -580,7 +597,7 @@ declare function statusToEvent(status: string | undefined): EventKind | null;
  *      open→reopen (from a closed/canceled state) and open→unblock (from
  *      blocked) so terminal-recovery transitions are distinguishable.
  */
-declare function detectEvent(ctx: AfterCommandHookContext): EventKind | null;
+declare function detectEvent(ctx: AfterCommandHookContext, registry?: ReturnType<typeof resolveRuntimeStatusRegistry>): EventKind | null;
 /**
  * Pull the touched item out of an afterCommand hook's result.
  *
@@ -613,12 +630,16 @@ declare function outboxFailure(error: unknown): {
  * @returns The durable outcome to store for that attempt.
  */
 declare function classifyOutboxSendError(error: unknown): OutboxOutcome;
+/** Send once: 429 and pre-request socket failures stay retryable; uncertain transmission stays ambiguous. */
+declare function sendOutbox(destination: string, payload: OutboxPayload, context?: OutboxSendContext): Promise<OutboxOutcome>;
 /**
  * Recover opted-in lifecycle transitions from SDK mutation events, including commits whose hook never ran.
  * History and items are read only. Invalid streams are counted and isolated before intent publication.
  * Existing receipts win over later environment changes; frozen intents are never reformatted.
  */
 export declare function captureSlackOutbox(pmRoot: string, outbox: SlackOutbox, itemIds?: readonly string[]): Promise<OutboxRecoveryReport>;
+/** Diagnose one verified committed event without sending, recovering, or writing tracker/runtime state. */
+export declare function explainSlackRouting(pmRoot: string, input: SlackRoutingIdentity): Promise<SlackRoutingExplanation>;
 declare const _default: {
     name: string;
     version: string;
@@ -636,6 +657,7 @@ export default _default;
 export declare const __test__: {
     outboxFailure: typeof outboxFailure;
     classifyOutboxSendError: typeof classifyOutboxSendError;
+    sendOutbox: typeof sendOutbox;
     buildItemBlockKit: typeof buildItemBlockKit;
     buildItemPayload: typeof buildItemPayload;
     buildTextMessage: typeof buildTextMessage;
