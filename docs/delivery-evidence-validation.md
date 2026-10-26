@@ -22,7 +22,9 @@ Claims, monotonic coverage counters and attempt tokens commit together under the
 existing SQLite writer transaction. Completion records only its immutable token,
 even if an operator already retired the work claim. It cannot release or overwrite
 a peer's claim. Resolution records precede release. Missing attempts are detected
-by the independent claim counter. Read-only explanations never create or migrate
+by the independent claim counter. The network counter also discounts known
+pre-request refusals, so those records cannot mask an unjournaled older attempt.
+Read-only explanations never create or migrate
 these tables; old attempted receipts without a journal stay conservative.
 
 `test/delivery-evidence.test.ts` drives 500 seeded operation sequences on one real

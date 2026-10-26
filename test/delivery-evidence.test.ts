@@ -286,6 +286,11 @@ test("a missing earlier attempt cannot be hidden by a later pre-request refusal"
   db.prepare("DELETE FROM delivery_attempt WHERE key=? AND result='ambiguous'").run(key);
   const report = await explainSlackRouting(f.pmRoot, identity);
   assert.equal(report.outcome, "uncertain"); assert.equal(report.attempt_evidence!.legacy_unknown, true);
+  // An older writer can increment the network counter without adding a new journal record.
+  const legacy = await f.event(1); await f.send("refusal");
+  db.prepare("UPDATE delivery SET attempts=1,state='rejected' WHERE key=?").run(legacy.key);
+  const unjournaled = await explainSlackRouting(f.pmRoot, legacy.identity);
+  assert.equal(unjournaled.outcome, "uncertain"); assert.equal(unjournaled.attempt_evidence!.legacy_unknown, true);
 });
 
 

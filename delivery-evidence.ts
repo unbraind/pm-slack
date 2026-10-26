@@ -63,11 +63,11 @@ export function readDeliveryEvidenceRows(db: DatabaseSync, key?: string, journal
   const journalWhere = key === undefined ? "" : " WHERE key=?";
   const journal = journaled ? `,CASE WHEN COALESCE(p.legacy_unknown,0)=0 AND COALESCE(p.claims,0)=COALESCE(a.recorded,0) THEN 0 ELSE 1 END AS legacy_unknown,
     COALESCE(a.recorded,0) AS recorded,COALESCE(a.confirmed,0) AS confirmed,
-    COALESCE(a.uncertain,0) AS uncertain,COALESCE(a.definitive,0) AS definitive,COALESCE(r.resolutions,0) AS resolutions` : ",0 AS legacy_unknown,0 AS recorded,0 AS confirmed,0 AS uncertain,0 AS definitive,0 AS resolutions";
+    COALESCE(a.uncertain,0) AS uncertain,COALESCE(a.definitive,0) AS definitive,COALESCE(a.not_sent,0) AS not_sent,COALESCE(r.resolutions,0) AS resolutions` : ",0 AS legacy_unknown,0 AS recorded,0 AS confirmed,0 AS uncertain,0 AS definitive,0 AS not_sent,0 AS resolutions";
   const joins = journaled ? ` LEFT JOIN delivery_proof p ON p.key=d.key
     LEFT JOIN (SELECT key,COUNT(*) AS recorded,SUM(result='acknowledged') AS confirmed,
       SUM(result NOT IN ('acknowledged','rejected','retry','not_sent')) AS uncertain,
-      SUM(result IN ('rejected','retry','not_sent')) AS definitive FROM delivery_attempt${journalWhere} GROUP BY key) a ON a.key=d.key
+      SUM(result IN ('rejected','retry','not_sent')) AS definitive,SUM(result='not_sent') AS not_sent FROM delivery_attempt${journalWhere} GROUP BY key) a ON a.key=d.key
     LEFT JOIN (SELECT key,COUNT(*) AS resolutions FROM delivery_resolution${journalWhere} GROUP BY key) r ON r.key=d.key` : "";
   const query = db.prepare(`SELECT CAST(d.rowid AS TEXT) AS sequence,d.key,d.item,d.event,d.revision,d.state,CAST(d.attempts AS TEXT) AS attempts,c.disposition,c.notification${journal}
     FROM delivery d LEFT JOIN coalescing_receipt c ON c.key=d.key${joins}${where} ORDER BY d.rowid`);
@@ -79,7 +79,7 @@ export function readDeliveryEvidenceRows(db: DatabaseSync, key?: string, journal
     const attempts = Number(row.attempts);
     return { sequence: Number(row.sequence), key: String(row.key), item: String(row.item), event: String(row.event), revision: String(row.revision), state: row.state as OutboxState, attempts,
       disposition: row.disposition as string | null, notification: row.notification as string | null,
-      evidence: { legacy_unknown: row.legacy_unknown !== 0 || attempts > recorded || (!journaled && ["sending", "ambiguous", "acknowledged"].includes(String(row.state))),
+      evidence: { legacy_unknown: row.legacy_unknown !== 0 || attempts > recorded - Number(row.not_sent) || (!journaled && ["sending", "ambiguous", "acknowledged"].includes(String(row.state))),
         recorded, confirmed: Number(row.confirmed), uncertain: Number(row.uncertain), definitive: Number(row.definitive), resolutions: Number(row.resolutions) } };
   });
 }
