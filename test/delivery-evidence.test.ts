@@ -564,3 +564,15 @@ test("500 seeded typed and untyped errors at dispatch/response/terminal boundari
   assert.equal(covered.size, 8);
   t.diagnostic(JSON.stringify({ seed: "0x0d15fac7", sequences: 500, boundaries: 4, errorKinds: 2, errorCodes: codes.length, requests: f.calls.length, ...totals }));
 });
+
+test("package HTTP helper inherits dispatch and confirmation through an asynchronous wrapper", async (t) => {
+  const f = await fixture(t); const { identity } = await f.event(4000);
+  await assert.rejects(f.box().drain(async (_destination, payload, _context) => {
+    await __test__.postToSlackOnce(process.env.PM_SLACK_WEBHOOK!, { text: payload.text });
+    throw new OutboxError("storage_unavailable", "Synthetic wrapper error after response.");
+  }), OutboxError);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.confirmed, true);
+  const report = await explainSlackRouting(f.pmRoot, identity);
+  assert.equal(report.outcome, "delivered"); assert.equal(report.attempts, 1);
+  assert.equal(report.attempt_evidence!.confirmed, 1);
+});
