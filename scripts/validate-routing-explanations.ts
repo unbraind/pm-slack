@@ -42,7 +42,7 @@ let maxToonBytes = 0;
 for (const item of corpus.items) {
   const history = await readHistoryEntries(join(pmRoot, "history", `${item.id}.jsonl`), item.id);
   let previous: string | undefined;
-  for (const entry of history) {
+  for (const [index, entry] of history.entries()) {
     historyEntries += 1;
     const change = entry.patch.find((patch) => patch.path === "/metadata/status" || patch.path === "/front_matter/status");
     const status = change && "value" in change ? String(change.value) : undefined;
@@ -51,7 +51,7 @@ for (const item of corpus.items) {
     if (entry.op !== "create" && (!status || status === prior)) continue;
     const event = __test__.detectEvent({ command: entry.op === "create" ? "create" : "update", args: [], pm_root: pmRoot, ok: true, result: { item: { status }, previousStatus: prior } });
     if (!event) continue;
-    const report = await explainSlackRouting(pmRoot, { item: item.id, event, revision: entry.after_hash });
+    const report = await explainSlackRouting(pmRoot, { item: item.id, event, revision: entry.after_hash, version: index + 1 });
     assert.deepEqual([...new Set(report.path.map((step) => step.stage))], ["history", "events", "priority", "route", "coalescing", "delivery"]);
     diagnosed += 1;
     if (report.path.some((step) => step.policy.includes("bypasses"))) urgentPolicies += 1;

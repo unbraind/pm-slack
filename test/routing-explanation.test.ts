@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync, chmodSync, statSync, existsSync, readFileSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { init, create, update, resolveRuntimeStatusRegistry, readHistorySnapshot, readSettings, locateItem, readLocatedItem, resolveItemTypeRegistry, getActiveExtensionRegistrations } from "@unbrained/pm-cli/sdk";
+import { init, create, update, createHistoryEntry, appendHistoryEntry, resolveRuntimeStatusRegistry, readHistorySnapshot, readSettings, locateItem, readLocatedItem, resolveItemTypeRegistry, getActiveExtensionRegistrations } from "@unbrained/pm-cli/sdk";
+import type { ItemDocument } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import { decode } from "@toon-format/toon";
 import extension, { explainSlackRouting, SlackRoutingError, SlackOutbox, OutboxError } from "../index.ts";
@@ -52,6 +53,7 @@ async function document(pmRoot: string, item: string) {
 function safe(report: SlackRoutingExplanation) {
   assert.deepEqual([...new Set(report.path.map((step) => step.stage))], ["history", "events", "priority", "route", "coalescing", "delivery"]);
   assert.ok(report.path.length <= 106);
+  for (const value of [report.eligibility.priority, report.eligibility.min_priority]) if (value !== null) assert.ok(Number.isInteger(value) && value >= 0 && value <= 4);
   const text = JSON.stringify(report);
   assert.doesNotMatch(text, /SECRET-WEBHOOK|PRIVATE-MESSAGE|private-channel/);
   assert.ok(text.length < 18000);
@@ -71,6 +73,7 @@ test("a suppressed event has one complete offline path with retained filters and
   const report = await explainSlackRouting(f.pmRoot, input);
   safe(report);
   assert.equal(report.outcome, "withheld");
+  assert.deepEqual(report.eligibility, { event_enabled: false, priority: 4, min_priority: 1, source: "retained" });
   assert.deepEqual(report.path.filter((step) => step.stage === "route").map((step) => step.decision), ["no_match", "selected", "shadowed", "available"]);
   assert.deepEqual(report.path.filter((step) => step.source === "retained").map((step) => step.decision), ["withhold", "withhold"]);
   assert.deepEqual(await document(f.pmRoot, input.item), before);
@@ -88,6 +91,9 @@ test("a suppressed event has one complete offline path with retained filters and
   assert.deepEqual(readFileSync(receiptFile), bytes);
   assert.equal(statSync(receiptFile).mode & 0o777, 0o400);
   chmodSync(receiptFile, 0o600);
+  const versioned = await ext.runCommand({ command: "slack explain", pmRoot: f.pmRoot, options: { ...input, "event-version": "1" } });
+  assert.equal((versioned.result as SlackRoutingExplanation).identity.version, 1);
+  assert.deepEqual(decode((await ext.runRendererOverride({ command: "slack explain", format: "toon", result: versioned.result })).rendered!), versioned.result);
   const invalid = await ext.runCommand({ command: "slack explain", pmRoot: f.pmRoot, options: {} });
   assert.equal((invalid.result as { code: string }).code, "invalid_routing_input");
   writeFileSync(join(f.pmRoot, "history", `${input.item}.jsonl`), "broken");
@@ -152,11 +158,15 @@ test("strict input boundary rejects extreme values and invalid configuration wit
   for (const value of [null, undefined, 1, NaN, Infinity, -Infinity, "", " ", "\r\n", "../secret", "a".repeat(10000)]) {
     invalid.push({ ...input, item: value }, { ...input, revision: value }, { ...input, event: value });
   }
+  for (const version of [undefined, null, 0, -1, Infinity, NaN, 0.5, Number.MAX_SAFE_INTEGER + 1, "1"]) invalid.push({ ...input, version });
   for (const value of invalid) assert.throws(() => validateSlackRoutingIdentity(value), (error: unknown) => error instanceof SlackRoutingError && error.exitCode === 2 && error.remedy.length > 0 && error.code === "invalid_routing_input");
   for (const raw of ["broken", "null", "{}", "[null]", "[[]]", '[{"match":1}]', '[{"match":"x"}]', '[{"match":"","channel":"x"}]', '[{"match":"x","channel":1}]', '[{"match":"x","channel":"x","extra":1}]', JSON.stringify([{ match: "a".repeat(161), channel: "x" }]), JSON.stringify([{ match: "x", webhook: "x".repeat(2049) }]), JSON.stringify(Array.from({ length: 101 }, () => ({ match: "*", channel: "x" })))]) {
     process.env.PM_SLACK_ROUTES = raw;
     await assert.rejects(explainSlackRouting(f.pmRoot, input), (error: unknown) => error instanceof SlackRoutingError && error.code === "routing_config_invalid");
   }
+  process.env.PM_SLACK_ROUTES = JSON.stringify(Array.from({ length: 100 }, () => ({ match: "*", channel: "private-channel" })));
+  const bounded = await explainSlackRouting(f.pmRoot, input); safe(bounded);
+  assert.equal(bounded.path.length, 106);
 });
 
 test("random custom status registries classify lifecycle by SDK roles and preserve old revision diagnoses", async (t) => {
@@ -296,4 +306,48 @@ test("retained priority exclusion is independently diagnosable and plain receipt
   delete process.env.PM_SLACK_MIN_PRIORITY;
   delete process.env.PM_SLACK_EVENTS;
   safe(await explainSlackRouting(f.pmRoot, input));
+});
+
+test("verified legacy snapshots preserve unspecified-priority behavior and refuse nonfinite or out-of-domain priority", async (t) => {
+  const f = await fixture(t);
+  const before = await document(f.pmRoot, f.item);
+  const original = await f.identity();
+  const file = join(f.pmRoot, "history", `${f.item}.jsonl`);
+  /** Append SDK-generated transitions and restore authoritative state; no normalization is reimplemented. */
+  async function historical(metadata: Record<string, unknown>) {
+    const old = { ...before, metadata } as unknown as ItemDocument;
+    const options = { nowIso: new Date().toISOString(), author: "fixture-agent", op: "update" };
+    const entry = createHistoryEntry({ ...options, before, after: old });
+    const intermediate = { ...before, body: before.body + JSON.stringify(metadata) };
+    const restored = createHistoryEntry({ ...options, before: old, after: intermediate });
+    const final = createHistoryEntry({ ...options, before: intermediate, after: before });
+    await appendHistoryEntry(file, entry); await appendHistoryEntry(file, restored); await appendHistoryEntry(file, final);
+    return [entry, restored];
+  }
+  const noStatus: Record<string, unknown> = { ...before.metadata }; delete noStatus.status;
+  const [missingStatus, restored] = await historical(noStatus);
+  await assert.rejects(explainSlackRouting(f.pmRoot, { item: f.item, event: "open", revision: missingStatus!.after_hash }), /event_not_found/);
+  safe(await explainSlackRouting(f.pmRoot, { item: f.item, event: "open", revision: restored!.after_hash }));
+  await assert.rejects(explainSlackRouting(f.pmRoot, original), (error: unknown) => error instanceof SlackRoutingError && error.code === "event_ambiguous");
+  const withVersion = await explainSlackRouting(f.pmRoot, { ...original, version: 1 }); safe(withVersion);
+  assert.ok(withVersion.uncertainty.includes("receipt_revision_not_unique"));
+  await assert.rejects(explainSlackRouting(f.pmRoot, { ...original, version: 999 }), /event_not_found/);
+  const noPriority: Record<string, unknown> = { ...before.metadata, status: "in_progress" }; delete noPriority.priority;
+  const [unknownPriority] = await historical(noPriority);
+  const report = await explainSlackRouting(f.pmRoot, { item: f.item, event: "start", revision: unknownPriority!.after_hash }); safe(report);
+  assert.equal(report.eligibility.priority, null); assert.equal(report.path.find((step) => step.stage === "priority")!.decision, "pass");
+  for (const priority of [-1, 5, 1.5, "2", null]) {
+    const [invalid] = await historical({ ...before.metadata, status: "in_progress", priority });
+    await assert.rejects(explainSlackRouting(f.pmRoot, { item: f.item, event: "start", revision: invalid!.after_hash }), (error: unknown) => error instanceof OutboxError && error.code === "history_unavailable");
+  }
+  assert.deepEqual(await document(f.pmRoot, f.item), before);
+});
+
+test("empty and unopenable outbox storage yield uncertainty or a typed refusal without mutation", async (t) => {
+  const f = await fixture(t); const input = await f.identity();
+  const box = new SlackOutbox(f.pmRoot); box.close();
+  safe(await explainSlackRouting(f.pmRoot, input));
+  const file = join(f.pmRoot, "runtime", "slack-outbox", "delivery.sqlite");
+  rmSync(file); mkdirSync(file);
+  await assert.rejects(explainSlackRouting(f.pmRoot, input), (error: unknown) => error instanceof OutboxError && error.code === "storage_unavailable");
 });

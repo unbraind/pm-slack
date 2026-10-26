@@ -2100,8 +2100,10 @@ export async function explainSlackRouting(pmRoot: string, input: SlackRoutingIde
   validateSlackRoutingIdentity(input);
   const entries = await readVerifiedOutboxHistory(pmRoot, input.item);
   if (entries instanceof OutboxError) throw entries;
-  const index = entries.findIndex((entry) => entry.after_hash === input.revision);
-  if (index < 0) throw new SlackRoutingError("event_not_found", "Use a committed after_hash from this item's verified SDK mutation history.");
+  const matches = entries.flatMap((entry, index) => entry.after_hash === input.revision ? [index] : []);
+  if (matches.length > 1 && input.version === undefined) throw new SlackRoutingError("event_ambiguous", "Specify event-version from the SDK mutation feed version; this state hash occurs more than once.");
+  const index = input.version === undefined ? matches[0] ?? -1 : input.version - 1;
+  if (index < 0 || entries[index]?.after_hash !== input.revision) throw new SlackRoutingError("event_not_found", "Use a committed after_hash from this item's verified SDK mutation history.");
   const entry = entries[index]!;
   const { metadata } = replayHistoryToTarget(entries, index);
   const settings = await readSettings(pmRoot);
@@ -2143,6 +2145,9 @@ export async function explainSlackRouting(pmRoot: string, input: SlackRoutingIde
   if (!policy) uncertainty.push("eligibility_epoch_not_retained");
   if (evidence.foreign) uncertainty.push("foreign_evidence_skipped");
   const item = metadata as unknown as PmItem;
+  if (item.priority !== undefined && (!Number.isInteger(item.priority) || item.priority < 0 || item.priority > 4)) throw new SlackRecoveryError("historical_snapshot_invalid");
+  const eligibility: SlackRoutingExplanation["eligibility"] = { event_enabled: eventsPass ?? null, priority: item.priority ?? null,
+    min_priority: policy?.minPriority ?? config?.minPriority ?? null, source: policy ? "retained" : config ? "current_config" : "unknown" };
   let selected = false;
   for (const [rule, route] of (config?.routes ?? parseRoutes(process.env.PM_SLACK_ROUTES)).entries()) {
     const matches = ruleMatches(route, input.event, item);
@@ -2152,14 +2157,16 @@ export async function explainSlackRouting(pmRoot: string, input: SlackRoutingIde
   const target = config ? selectRoute(input.event, item, config.routes, config.webhookUrl, config.channel) : null;
   path.push({ stage: "route", policy: selected ? "selected_destination" : "default_destination", decision: target ? isHttpUrl(target.webhookUrl) ? "available" : "invalid_destination" : "unavailable", source: "current_config" });
   const urgent = input.event === "block" ? "blocker_bypasses_budget_and_window" : (item.priority ?? 4) <= 1 ? "critical_priority_bypasses_budget_and_window" : "routine_item_destination_window_budget";
-  const receipt = evidence.receipt;
+  const receipt = matches.length > 1 ? undefined : evidence.receipt;
+  if (matches.length > 1) uncertainty.push("receipt_revision_not_unique");
   path.push({ stage: "coalescing", policy: urgent, decision: receipt?.disposition ?? "not_recorded", source: receipt?.disposition ? "retained" : "unknown" });
   if (!receipt?.disposition) uncertainty.push("coalescing_decision_not_retained");
+  if (receipt?.disposition && receipt.disposition !== "bypass") uncertainty.push("coalescing_parameters_not_retained");
   if (receipt?.disposition === "deferred" || receipt?.disposition === "waiting") uncertainty.push("coalescing_observation_may_be_stale");
   path.push({ stage: "delivery", policy: "exact_revision_receipt", decision: receipt?.state ?? "not_recorded", source: receipt ? "retained" : "unknown" });
   if (!receipt) uncertainty.push("delivery_receipt_not_retained");
   const outcome = receipt?.state === "acknowledged" ? "delivered" : receipt?.state === "skipped" || receipt?.state === "rejected" || receipt?.state === "refused" || (!receipt && policy && (!eventsPass || !priorityPass)) ? "withheld" : "uncertain";
-  return { ok: true, identity: { ...input }, outcome, path: path.map((step) => ({ ...step, rule: step.rule ?? null })), uncertainty, ...(receipt ? { state: receipt.state, attempts: receipt.attempts } : {}) };
+  return { ok: true, identity: { ...input }, outcome, eligibility, path: path.map((step) => ({ ...step, rule: step.rule ?? null })), uncertainty, ...(receipt ? { state: receipt.state, attempts: receipt.attempts } : {}) };
 }
 
 export default defineExtension({
@@ -2336,10 +2343,13 @@ export default defineExtension({
           { long: "--item", value_name: "id", description: "Exact tracker item id" },
           { long: "--event", value_name: "event", description: "Canonical lifecycle event" },
           { long: "--revision", value_name: "hash", description: "Committed SDK history after_hash" },
+          { long: "--event-version", value_name: "version", description: "One-based SDK mutation version; disambiguates repeated state hashes" },
         ],
         async run(ctx) {
           try {
+            const version = readStrOption(ctx.options, "event-version");
             return await explainSlackRouting(ctx.pm_root, {
+              ...(version === undefined ? {} : { version: Number(version) }),
               item: readStrOption(ctx.options, "item")!,
               event: readStrOption(ctx.options, "event")! as EventKind,
               revision: readStrOption(ctx.options, "revision")!,

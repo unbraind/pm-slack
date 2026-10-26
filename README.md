@@ -569,31 +569,36 @@ Use `pm slack explain --item <id> --event <event> --revision <after_hash>`
 for a single offline diagnosis. Add `--json` for JSON; the default TOON output
 contains the same bounded evidence. Discover exact identities with the SDK
 mutation feed (`listMutationEvents`): select the lifecycle event's item and
-committed history `after_hash`. Repeated transitions require their own revision.
+committed history `after_hash` (`full: true` includes the entry). Pass the feed's
+one-based `version` as `--event-version` when a state hash repeats. The SDK identity
+accepts the same optional `version` field. Without it, a repeated hash produces
+`event_ambiguous`; with it, history is diagnosed but a reused hash cannot safely
+attribute legacy delivery receipts and remains explicit uncertainty.
 
 The typed SDK export `explainSlackRouting(pmRoot, { item, event, revision })`
 verifies the complete item history against the authoritative SDK document,
 replays the requested revision through the SDK, and uses the tracker's configured
 status registry roles to classify the transition. It reports event and priority
-filters, every ordered route rule (indices only), first-match shadowing, attention
+filters (including exact priority operands), every ordered route rule (indices only), first-match shadowing, attention
 policy, and exact-revision delivery evidence. Blockers and priority 0/1 events
 name their budget/window bypass policy; bypass does not override eligibility
 filters. Titles, bodies, selectors, channels and webhook URLs are never returned.
 
 Retained eligibility epochs and receipts are historical evidence. Route evaluation
 uses current configuration, which was not historically snapshotted. Coalescing
-receipts are retained observations and may be stale after retries; absent receipts
+receipts omit the historical budget/window parameters; this uncertainty is explicit.
+They are retained observations and may be stale after retries; absent receipts
 never prove delivery or non-delivery. `acknowledged` means delivered; rejected,
 refused, skipped, or a retained filter exclusion means withheld. Pending, sending,
 ambiguous and missing evidence remain uncertain. Status roles use the current
 tracker registry, and this limitation is explicit in every result.
 
 Output has six stages plus at most 100 indexed routing-rule decisions. Identity
-validation accepts only the three documented fields, a bounded safe item id, a
+validation accepts only item, event, revision and the optional positive safe integer version, a bounded safe item id, a
 canonical event and a lowercase 64-character SDK history hash. Routing rules are
 strictly bounded to 100 entries and 250000 characters; selectors to 160 and overrides
 to 2048 characters. Priority configuration must be an integer 1..4. Invalid input,
-invalid routing configuration, unknown/non-lifecycle revisions, unreadable history
+invalid routing configuration, unknown/non-lifecycle or ambiguous repeated state hashes, unreadable history
 and unreadable storage return typed nonzero refusals with remedies. Foreign
 receipt/policy records are skipped with `foreign_evidence_skipped` uncertainty.
 

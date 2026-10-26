@@ -9,6 +9,8 @@ export interface SlackRoutingIdentity {
   event: OutboxEvent;
   /** SDK history after_hash identifying the committed transition. */
   revision: string;
+  /** Optional one-based SDK mutation version; required when a state hash repeats. */
+  version?: number;
 }
 
 /** One ordered policy decision; rule indices expose neither selectors nor destinations. */
@@ -33,6 +35,17 @@ export interface SlackRoutingExplanation {
   identity: SlackRoutingIdentity;
   /** Delivery conclusions rely on durable evidence, never current routing alone. */
   outcome: "delivered" | "withheld" | "uncertain";
+  /** Exact safe filter operands, so a historical priority exclusion needs no second inspection. */
+  eligibility: {
+    /** Event filter result; null means no configuration evidence. */
+    event_enabled: boolean | null;
+    /** Priority at the requested revision; null means unspecified and passes the filter. */
+    priority: number | null;
+    /** Inclusive priority ceiling, from 1 through 4, or null without evidence. */
+    min_priority: number | null;
+    /** Retained epoch, current configuration, or no evidence. */
+    source: "retained" | "current_config" | "unknown";
+  };
   /** One complete ordered path through filters, routes, coalescing and transport. */
   path: SlackRoutingStep[];
   /** Durable state when an exact receipt was retained. */
@@ -48,7 +61,7 @@ export class SlackRoutingError extends Error {
   /** Host-compatible nonzero usage status. */
   readonly exitCode = 2;
   /** Machine-readable cause suitable for agent branching. */
-  readonly code: "invalid_routing_input" | "event_not_found" | "routing_config_invalid";
+  readonly code: "invalid_routing_input" | "event_not_found" | "event_ambiguous" | "routing_config_invalid";
   /** Concrete recovery action, free of user input and local paths. */
   readonly remedy: string;
   /** Construct a safe expected refusal. */
@@ -65,17 +78,18 @@ export function validateSlackRoutingIdentity(input: unknown): asserts input is S
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw invalidIdentity();
   const value = input as Record<string, unknown>;
   const keys = Object.keys(value);
-  if (keys.length !== 3 || !keys.every((key) => ["item", "event", "revision"].includes(key)) || typeof value.item !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}$/.test(value.item) || typeof value.revision !== "string" || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.event !== "string" || !["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"].includes(value.event)) throw invalidIdentity();
+  if ((keys.length !== 3 && keys.length !== 4) || !keys.every((key) => ["item", "event", "revision", "version"].includes(key)) || (Object.hasOwn(value, "version") && (!Number.isSafeInteger(value.version) || Number(value.version) < 1)) || typeof value.item !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}$/.test(value.item) || typeof value.revision !== "string" || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.event !== "string" || !["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"].includes(value.event)) throw invalidIdentity();
 }
 
 /** Give every schema failure the same bounded remedy. */
 function invalidIdentity(): SlackRoutingError {
-  return new SlackRoutingError("invalid_routing_input", "Supply exactly item, canonical event and a 64-character lowercase SDK history revision; use the SDK mutation feed to discover event identities.");
+  return new SlackRoutingError("invalid_routing_input", "Supply item, canonical event, a lowercase 64-character SDK history revision and optionally a positive safe integer mutation version; use the SDK mutation feed to discover identities.");
 }
 
 /** Render only the fixed diagnostic schema; JSON quoting preserves TOON scalar boundaries. */
 export function slackRoutingToon(report: SlackRoutingExplanation): string {
   return ["ok: true", `outcome: ${report.outcome}`, "identity:", ...Object.entries(report.identity).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
+    "eligibility:", ...Object.entries(report.eligibility).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
     ...(report.state === undefined ? [] : [`state: ${report.state}`, `attempts: ${report.attempts}`]),
     `path[${report.path.length}]{stage,policy,decision,source,rule}:`, ...report.path.map((step) => `  ${[step.stage, step.policy, step.decision, step.source, step.rule ?? null].map((value) => JSON.stringify(value)).join(",")}`),
     `uncertainty[${report.uncertainty.length}]: ${report.uncertainty.map((value) => JSON.stringify(value)).join(",")}`].join("\n");

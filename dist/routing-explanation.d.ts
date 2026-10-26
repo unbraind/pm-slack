@@ -8,6 +8,8 @@ export interface SlackRoutingIdentity {
     event: OutboxEvent;
     /** SDK history after_hash identifying the committed transition. */
     revision: string;
+    /** Optional one-based SDK mutation version; required when a state hash repeats. */
+    version?: number;
 }
 /** One ordered policy decision; rule indices expose neither selectors nor destinations. */
 export interface SlackRoutingStep {
@@ -30,6 +32,17 @@ export interface SlackRoutingExplanation {
     identity: SlackRoutingIdentity;
     /** Delivery conclusions rely on durable evidence, never current routing alone. */
     outcome: "delivered" | "withheld" | "uncertain";
+    /** Exact safe filter operands, so a historical priority exclusion needs no second inspection. */
+    eligibility: {
+        /** Event filter result; null means no configuration evidence. */
+        event_enabled: boolean | null;
+        /** Priority at the requested revision; null means unspecified and passes the filter. */
+        priority: number | null;
+        /** Inclusive priority ceiling, from 1 through 4, or null without evidence. */
+        min_priority: number | null;
+        /** Retained epoch, current configuration, or no evidence. */
+        source: "retained" | "current_config" | "unknown";
+    };
     /** One complete ordered path through filters, routes, coalescing and transport. */
     path: SlackRoutingStep[];
     /** Durable state when an exact receipt was retained. */
@@ -44,7 +57,7 @@ export declare class SlackRoutingError extends Error {
     /** Host-compatible nonzero usage status. */
     readonly exitCode = 2;
     /** Machine-readable cause suitable for agent branching. */
-    readonly code: "invalid_routing_input" | "event_not_found" | "routing_config_invalid";
+    readonly code: "invalid_routing_input" | "event_not_found" | "event_ambiguous" | "routing_config_invalid";
     /** Concrete recovery action, free of user input and local paths. */
     readonly remedy: string;
     /** Construct a safe expected refusal. */

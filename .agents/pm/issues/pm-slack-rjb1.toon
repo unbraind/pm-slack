@@ -1,0 +1,14 @@
+id: pm-slack-rjb1
+title: Disambiguate outbox receipt identities when historical state hashes repeat
+description: "SDK history state hashes can repeat at different mutation versions. Existing delivery receipt keys use item, event and state hash, so an imported or replayed repeated state can share a receipt with another occurrence. Offline explanations now accept the SDK event version and explicitly withhold receipt attribution when a state hash repeats; migrating durable receipt identity is separate mutating-state work."
+type: Issue
+status: open
+priority: 2
+tags[2]: follow-up,outbox
+created_at: "2026-10-26T00:50:17.457Z"
+updated_at: "2026-10-26T00:51:27.279Z"
+author: codex-agent
+acceptance_criteria: "Bind new delivery idempotency keys to the SDK mutation version and expected target revision, preserve and qualify legacy receipts, and verify old-input replay and concurrent recovery/draining with real no-git SDK trackers."
+comments[1]{created_at,author,text}:
+  "2026-10-26T00:51:27.279Z",codex-agent,Discovered while implementing pm-slack-slyv. Read-only explanations conservatively handle repeated state hashes; this item tracks the separate durable-key migration and replay/concurrency verification.
+body: ""

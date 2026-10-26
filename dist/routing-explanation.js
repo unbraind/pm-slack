@@ -20,16 +20,17 @@ export function validateSlackRoutingIdentity(input) {
         throw invalidIdentity();
     const value = input;
     const keys = Object.keys(value);
-    if (keys.length !== 3 || !keys.every((key) => ["item", "event", "revision"].includes(key)) || typeof value.item !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}$/.test(value.item) || typeof value.revision !== "string" || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.event !== "string" || !["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"].includes(value.event))
+    if ((keys.length !== 3 && keys.length !== 4) || !keys.every((key) => ["item", "event", "revision", "version"].includes(key)) || (Object.hasOwn(value, "version") && (!Number.isSafeInteger(value.version) || Number(value.version) < 1)) || typeof value.item !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}$/.test(value.item) || typeof value.revision !== "string" || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.event !== "string" || !["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"].includes(value.event))
         throw invalidIdentity();
 }
 /** Give every schema failure the same bounded remedy. */
 function invalidIdentity() {
-    return new SlackRoutingError("invalid_routing_input", "Supply exactly item, canonical event and a 64-character lowercase SDK history revision; use the SDK mutation feed to discover event identities.");
+    return new SlackRoutingError("invalid_routing_input", "Supply item, canonical event, a lowercase 64-character SDK history revision and optionally a positive safe integer mutation version; use the SDK mutation feed to discover identities.");
 }
 /** Render only the fixed diagnostic schema; JSON quoting preserves TOON scalar boundaries. */
 export function slackRoutingToon(report) {
     return ["ok: true", `outcome: ${report.outcome}`, "identity:", ...Object.entries(report.identity).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
+        "eligibility:", ...Object.entries(report.eligibility).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
         ...(report.state === undefined ? [] : [`state: ${report.state}`, `attempts: ${report.attempts}`]),
         `path[${report.path.length}]{stage,policy,decision,source,rule}:`, ...report.path.map((step) => `  ${[step.stage, step.policy, step.decision, step.source, step.rule ?? null].map((value) => JSON.stringify(value)).join(",")}`),
         `uncertainty[${report.uncertainty.length}]: ${report.uncertainty.map((value) => JSON.stringify(value)).join(",")}`].join("\n");

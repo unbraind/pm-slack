@@ -18,8 +18,8 @@ against the same public snapshot to repeat the measurement.
 | Named urgent policies | 83 |
 | Uncertain without retained runtime receipts | 232 |
 | Network calls | 0 |
-| Maximum JSON bytes | 1287 |
-| Maximum TOON bytes | 964 |
+| Maximum JSON bytes | 1415 |
+| Maximum TOON bytes | 1094 |
 | Tracker bytes unchanged | true |
 
 Before/after fingerprint:
@@ -30,7 +30,7 @@ behavior; it is not a live Slack delivery claim.
 
 `test/routing-explanation.test.ts` covers retained suppression, route ordering
 and shadowing, all durable transport states, named urgent policies, typed safe
-refusals, foreign evidence, numeric extremes, 12 randomized configured status
+refusals, foreign evidence, numeric extremes, repeated-state mutation versions, legacy snapshots, 12 randomized configured status
 registries, and 500 seeded policy sequences. Each sequence replays an older
 SDK revision with JSON/CRLF policy variants and compares the current document
 read back through the SDK, including native fields and a parent relationship.

@@ -1,11 +1,12 @@
 # Diagnose a suppressed event
 
 ```sh
-pm slack explain --item demo-task --event create --revision "$REVISION" --json
+pm slack explain --item demo-task --event create --revision "$REVISION" --event-version "$EVENT_VERSION" --json
 ```
 
 `REVISION` is the committed SDK history `after_hash`, available through
-`listMutationEvents`. The command returns a complete ordered path, even when
+`listMutationEvents({ full: true })`. `EVENT_VERSION` is the feed event's one-based
+`version`, which disambiguates repeated state hashes. The command returns a complete ordered path, even when
 filters withheld an event. Route rules appear only as zero-based indices with
 `no_match`, `selected`, or `shadowed` decisions. No message content or destination
 is disclosed. Omitting `--json` renders the same fields as compact TOON.
