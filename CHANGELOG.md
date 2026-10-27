@@ -1,10 +1,12 @@
 # Changelog
 
-## 2026.10.27 - 2026-10-27
+## Unreleased
 
 ### Added
 
 - Explain notification routing decisions offline ([pm-slack-slyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-slyv.toon))
+
+## 2026.10.27 - 2026-10-27
 
 ### Other
 
