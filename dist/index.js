@@ -1982,7 +1982,7 @@ export async function explainSlackRouting(pmRoot, input) {
 }
 export default defineExtension({
     name: "pm-slack",
-    version: "2026.10.26",
+    version: "2026.10.27",
     activate(api) {
         api.registerRenderer("toon", (ctx) => {
             const report = ctx.result;
