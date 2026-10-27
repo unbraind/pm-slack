@@ -1,0 +1,19 @@
+id: pm-slack-health-legacy-1027
+title: Review inherited provenance health advisories without rewriting history
+description: "Untouched main 09d45956761b0547d955258b59d63103168c217c and the closure branch report the same inherited provenance advisory: provenance_value_domain_invalid:claude-code:role:single_digit:23. Preserve append-only historical records and review the compatibility expectation separately from the delivered implementation. Default health additionally sees a local global-extension version mismatch. No source or history repair is part of the closure audit."
+type: Chore
+status: open
+priority: 3
+tags[3]: legacy-history,owner-review,tracker-health
+created_at: "2026-10-27T10:40:20.544Z"
+updated_at: "2026-10-27T11:46:08.138Z"
+author: codex-agent
+acceptance_criteria: Determine the backward-compatible health expectation for inherited provenance; preserve every historical byte; validate any future change against both older and newly written provenance
+comments[2]{created_at,author,text}:
+  "2026-10-27T10:40:49.479Z",codex-agent,"Read-only baseline proof: extracted tracked .agents/pm from main 09d45956761b0547d955258b59d63103168c217c into a plain scratch tracker and ran the repository-pinned pm --no-extensions health --full --json. It reports the identical advisory provenance_value_domain_invalid:claude-code:role:single_digit:23 as this branch, with no new structural failures. This item stays open for owner review. No history-repair, normalization, dependency-floor change or historical rewrite is performed."
+  "2026-10-27T11:46:08.137Z",codex-agent,"After current-main integration, repeated the untouched-main baseline at ca8ec9addd13a27cd24c79947ed870abe40b9508. The identical 23 legacy provenance-role advisories remain. Keep open; no history or telemetry rewrite is performed."
+files[1]{path,scope}:
+  .agents/pm/settings.json,project
+docs[1]{path,scope}:
+  README.md,project
+body: ""
