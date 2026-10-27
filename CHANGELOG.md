@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Explain notification routing decisions offline ([pm-slack-slyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-slyv.toon))
+
 ### Other
 
 - Use the pm SDK mutation feed for Slack outbox recovery ([pm-slack-3so4](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-3so4.toon))
