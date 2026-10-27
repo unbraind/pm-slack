@@ -26,16 +26,18 @@
 
 ### Fixed
 
-- Propagate the docstring gate entry guard fix ([pm-slack-5icn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-5icn.toon))
-- Fix release publish ordering before protected main push ([pm-slack-1aeu](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-1aeu.toon))
-- Shell scalar assignments are read from raw text, so a comment can flag an unattested publish ([pm-slack-cxyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-cxyv.toon))
 - The release job authenticated with a stored npm token that expired, so publishing stopped while every other gate stayed green ([pm-slack-280u](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-280u.toon))
 - A release run bumped and committed a new version every night while publishing was impossible, because the only externally-failable step runs last ([pm-slack-0jzg](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-0jzg.toon))
 
 ### Other
 
-- Record statement coverage as duplicate of blocked pm-slack-5fb5 ([pm-slack-stcv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-stcv.toon))
 - Certify pm-slack on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates ([pm-slack-c104](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-c104.toon))
+
+### Closed
+
+- Closed: Propagate the docstring gate entry guard fix ([pm-slack-5icn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-5icn.toon))
+- Closed: Fix release publish ordering before protected main push ([pm-slack-1aeu](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-1aeu.toon))
+- Closed: Shell scalar assignments are read from raw text, so a comment can flag an unattested publish ([pm-slack-cxyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-cxyv.toon))
 
 ## 2026.10.5 - 2026-10-05
 
@@ -104,9 +106,9 @@
 
 ## 2026.8.31 - 2026-08-31
 
-### Fixed
+### Closed
 
-- The release changelog remained Unreleased after the release tag was created ([pm-slack-53pp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-53pp.toon))
+- Closed: The release changelog remained Unreleased after the release tag was created ([pm-slack-53pp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-53pp.toon))
 
 ## 2026.8.29 - 2026-08-29
 
@@ -124,13 +126,13 @@
 
 - changelog scripts read the pm workspace with default budgets instead of canonical complete reads ([pm-slack-wwrw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-wwrw.toon))
 
-### Security
-
-- The identity gate deadlocks the one remediation its own failure message prescribes ([pm-slack-fopw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fopw.toon))
-
 ### Other
 
 - Drop inert pm manifest key and guard the closed manifest vocabulary ([pm-slack-kaku](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-kaku.toon))
+
+### Closed
+
+- Closed: The identity gate deadlocks the one remediation its own failure message prescribes ([pm-slack-fopw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fopw.toon))
 
 ## 2026.8.17 - 2026-08-17
 
@@ -197,13 +199,13 @@
 
 ## 2026.7.27 - 2026-07-27
 
-### Fixed
-
-- slack notify, slack test, and slack digest fail to register on pm-cli 2026.7.27 because they redeclare the host-owned --json global ([pm-slack-e78x](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-e78x.toon))
-
 ### Removed
 
 - Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim ([pm-slack-5il8](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-5il8.toon))
+
+### Closed
+
+- Closed: slack notify, slack test, and slack digest fail to register on pm-cli 2026.7.27 because they redeclare the host-owned --json global ([pm-slack-e78x](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-e78x.toon))
 
 ## 2026.7.26 - 2026-07-26
 
@@ -223,13 +225,13 @@
 
 ## 2026.7.23 - 2026-07-23
 
-### Fixed
-
-- Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-slack-nyfb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-nyfb.toon))
-
 ### Other
 
 - Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-slack-zi5t](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-zi5t.toon))
+
+### Closed
+
+- Closed: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-slack-nyfb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-nyfb.toon))
 
 ## 2026.7.19 - 2026-07-19
 
