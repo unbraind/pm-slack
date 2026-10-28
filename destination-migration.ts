@@ -1,8 +1,10 @@
 /** Reviewed route transitions share the durable outbox's SQLite writer fence and immutable event identities. */
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { OutboxError } from "./outbox.ts";
+import { OutboxError, validateOutboxIntent } from "./outbox.ts";
+import type { OutboxEvent, OutboxPayload } from "./outbox.ts";
 import { readDeliveryEvidenceRows, isInspectableDeliveryEvidenceRow, deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
+import type { DeliveryEvidenceRow } from "./delivery-evidence.ts";
 
 /** One strict command union; fingerprints come from configured routes, never webhook credentials. */
 export type DestinationMigrationInput =
@@ -153,21 +155,35 @@ function safeCount(value: number): number {
 
 /** Evaluate owned pending events using the outbox's authoritative full-lifecycle proof. Preview and apply call this same function. */
 function evaluate(db: DatabaseSync, source: PrivateBinding): EvaluatedRow[] {
-  const observed = db.prepare(`SELECT d.key,d.destination,d.payload,v.generation,c.at,c.priority,
+  const observed = db.prepare(`SELECT d.key,d.destination,d.payload,CAST(v.generation AS TEXT) AS generation,CAST(c.at AS TEXT) AS at,CAST(c.priority AS TEXT) AS priority,
     EXISTS(SELECT 1 FROM delivery_group g WHERE g.key=d.key) AS grouped,
     EXISTS(SELECT 1 FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=d.key AND t.token IS NULL) AS unfinished
     FROM delivery d LEFT JOIN destination_version v ON v.key=d.key LEFT JOIN delivery_context c ON c.key=d.key WHERE d.destination=? ORDER BY d.key LIMIT 10001`).all(source.destination);
   if (observed.length > maximumEvents) throw new OutboxError("capacity_exceeded", "Migrate at most 10000 matching events in one atomic plan; drain or reconcile retained events before previewing again.");
-  const proof = new Map(readDeliveryEvidenceRows(db).map((row) => [row.key, row]));
+  let proof: Map<string, DeliveryEvidenceRow>;
+  try { proof = new Map(readDeliveryEvidenceRows(db).map((row) => [row.key, row])); }
+  catch {
+    proof = new Map();
+    for (const row of observed) {
+      try {
+        const evidence = readDeliveryEvidenceRows(db, String(row.key))[0];
+        if (evidence) proof.set(evidence.key, evidence);
+      } catch { /* A malformed foreign proof must fail alone. */ }
+    }
+  }
   return observed.map((row) => {
     const key = String(row.key);
     const revision = Number(row.generation);
+    const at = Number(row.at ?? NaN);
+    const priority = Number(row.priority ?? NaN);
     const base: DestinationMigrationRow = { key: hashPattern.test(key) ? key : createHash("sha256").update(key).digest("hex"), revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, decision: "foreign" };
     const evidence = proof.get(key);
-    if (!evidence || !isInspectableDeliveryEvidenceRow(evidence) || !Number.isSafeInteger(revision) || revision < 1 || !Number.isSafeInteger(row.at) || Number(row.at) < 0 || !Number.isInteger(row.priority) || Number(row.priority) < 0 || Number(row.priority) > 4 || typeof row.payload !== "string" || row.payload.length > 1048576) return base;
+    if (!evidence || !isInspectableDeliveryEvidenceRow(evidence) || !Number.isSafeInteger(revision) || revision < 1 || typeof row.payload !== "string" || row.payload.length > 1048576) return base;
     let payload: unknown;
     try { payload = JSON.parse(row.payload); } catch { return base; }
     if (typeof payload !== "object" || payload === null || Array.isArray(payload) || typeof (payload as Record<string, unknown>).text !== "string" || !preservableJson(payload)) return base;
+    try { validateOutboxIntent({ item: evidence.item, event: evidence.event as OutboxEvent, revision: evidence.revision, destination: String(row.destination), payload: payload as OutboxPayload, at, priority }); }
+    catch { return base; }
     if (evidence.evidence.legacy_unknown || evidence.evidence.uncertain > 0 || row.unfinished !== 0 || deriveSlackDeliveryOutcome(evidence.evidence) === "uncertain" || evidence.state === "sending" || evidence.state === "ambiguous") return { ...base, decision: "retain_uncertain" };
     if (evidence.state !== "pending" || evidence.evidence.confirmed > 0 || row.grouped !== 0) return { ...base, decision: "retain_state" };
     return { ...base, decision: "move", payload: row.payload, destination: String(row.destination) };
@@ -191,8 +207,9 @@ function replay(db: DatabaseSync, manifest: string): DestinationMigrationRow[] {
   return value.map((entry: unknown, index: number) => {
     if (typeof entry !== "object" || entry === null || typeof (entry as Record<string, unknown>).key !== "string" || !hashPattern.test(String((entry as Record<string, unknown>).key)) || !Number.isSafeInteger((entry as Record<string, unknown>).revision) || Number((entry as Record<string, unknown>).revision) < 1) return { key: createHash("sha256").update(`foreign-journal-${index}`).digest("hex"), revision: 0, decision: "foreign" };
     const saved = entry as { key: string; revision: number };
-    const current = db.prepare("SELECT v.generation FROM delivery d JOIN destination_version v ON v.key=d.key WHERE d.key=?").get(saved.key);
-    const revision = current ? safeCount(Number(current.generation)) : 0;
+    const current = db.prepare("SELECT CAST(v.generation AS TEXT) AS generation FROM delivery d JOIN destination_version v ON v.key=d.key WHERE d.key=?").get(saved.key);
+    const revision = current ? Number(current.generation) : 0;
+    if (!Number.isSafeInteger(revision) || revision < 0) return { key: saved.key, revision: 0, decision: "foreign" };
     return { key: saved.key, revision, decision: revision === saved.revision ? "already_moved" : "superseded" };
   });
 }

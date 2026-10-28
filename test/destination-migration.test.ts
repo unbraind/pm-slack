@@ -528,7 +528,7 @@ test("capacity, corrupt journal records and extreme persisted counters refuse sa
 test("extreme foreign JSON fails alone while all finite producer payload values survive migration", async (t) => {
   const f = await fixture(t); f.bind("old", oldRoute); f.bind("new", newRoute);
   const foreign: string[] = [];
-  for (const [index, text] of ['{"text":"extreme","value":1e309}', '{"text":"nested","value":' + '['.repeat(65) + '0' + ']'.repeat(65) + '}'].entries()) {
+  for (const [index, text] of ['{"text":"extreme","value":1e309}', '{"text":"nested","value":' + '['.repeat(65) + '0' + ']'.repeat(65) + '}', '{"text":""}'].entries()) {
     const key = f.box.enqueue(intent(`extreme-${index}`));
     foreign.push(key);
     f.db.prepare("UPDATE delivery SET payload=? WHERE key=?").run(text, key);
@@ -536,11 +536,27 @@ test("extreme foreign JSON fails alone while all finite producer payload values 
   const original = intent("finite"); original.payload.blocks!.push({ type: "section", values: [0, -1, Number.MAX_VALUE, Number.MIN_VALUE, true, null, "\r\n"] });
   f.box.enqueue(original);
   const preview = f.run({ action: "preview", from: "old", to: "new" });
-  assert.equal(preview.counts.foreign, 2); assert.equal(preview.counts.movable, 1);
+  assert.equal(preview.counts.foreign, 3); assert.equal(preview.counts.movable, 1);
   assert.equal(f.run(applyInput(preview)).counts.moved, 1);
   const { channel: _channel, ...expected } = original.payload;
   foreign.forEach((key) => f.box.resolve(key, "skip"));
   let reads = 0;
   await f.box.drain(async (destination, payload) => { reads++; assert.equal(destination, newRoute); assert.deepEqual(payload, expected); return "acknowledged"; });
   assert.equal(reads, 1);
+});
+
+test("oversized SQLite integers and one unreadable foreign proof fail alone, including journal replay", async (t) => {
+  const f = await fixture(t); f.bind("old", oldRoute); f.bind("new", newRoute);
+  const healthy = f.box.enqueue(intent("healthy"));
+  const oversized = f.box.enqueue(intent("oversized"));
+  const unreadable = f.box.enqueue(intent("unreadable"));
+  f.db.prepare("UPDATE destination_version SET generation=9223372036854775807 WHERE key=?").run(oversized);
+  f.db.prepare("INSERT INTO delivery_proof(key,legacy_unknown) VALUES (?,9223372036854775807)").run(unreadable);
+  f.db.prepare("INSERT INTO delivery(key,item,event,revision,destination,payload) VALUES (x'00','foreign','unknown','foreign',?,'{}')").run(oldRoute);
+  const preview = f.run({ action: "preview", from: "old", to: "new" });
+  assert.equal(preview.counts.movable, 1); assert.equal(preview.counts.foreign, 3); roundtrip(preview);
+  assert.equal(f.run(applyInput(preview)).counts.moved, 1);
+  f.db.prepare("UPDATE destination_version SET generation=9223372036854775807 WHERE key=?").run(healthy);
+  const replayed = f.run(applyInput(preview));
+  assert.equal(replayed.status, "superseded"); assert.equal(replayed.counts.foreign, 1); roundtrip(replayed);
 });
