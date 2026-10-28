@@ -48,3 +48,9 @@ executed step. There are no SDK mocks. Packed acceptance is reproducible with
 `npm run acceptance:migration`; it captures one artifact and exercises npm
 global, Bun global, npx, bunx and project-local pm hosts. Native Bun acceptance
 also exercises a move, old-input replay and committed-plan retry with zero posts.
+
+Exact-boundary tests also compare preview/apply decisions at exhausted per-event
+and global revisions. The shared producer validates UTF-8 payload size after
+replacing the channel, retains oversized records without writes, and proves a
+payload exactly at the 1 MiB cap remains valid through reverse migration and
+SDK read-back. Multibyte payloads use byte counts rather than string length.

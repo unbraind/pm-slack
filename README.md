@@ -660,9 +660,11 @@ JSON and default compact TOON report exact totals, safe receipt keys, skipped
 foreign records, `omitted`, and `next_cursor`. Use `--limit 1..100` and `--after`
 to page the evidence; applying always considers the complete plan. Limits are
 100 aliases, 10000 matching events per atomic plan, 64-character lowercase alias
-names and 256-character channel overrides. Existing payloads over 1 MiB or
-malformed/foreign records, nonfinite JSON numbers or nesting over 64 levels stay
-untouched with a `foreign` receipt. Alias bindings
+names and 256-character channel overrides. Existing payloads and target mappings
+over 1 MiB of UTF-8 JSON, malformed/foreign records, nonfinite JSON numbers and
+nesting over 64 levels stay untouched with a `foreign` receipt. Events with
+exhausted revisions also remain in place; exhausted global revision capacity
+returns the same typed refusal in preview and apply. Alias bindings
 contain only a route fingerprint and optional channel in private runtime storage;
 public output includes neither webhooks, channels nor message bodies. Keep the
 target route configured: ordinary delivery refuses if its fingerprint disappears.

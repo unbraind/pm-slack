@@ -104,7 +104,7 @@ function safeCount(value) {
     return value;
 }
 /** Evaluate owned pending events using the outbox's authoritative full-lifecycle proof. Preview and apply call this same function. */
-function evaluate(db, source) {
+function evaluate(db, source, target) {
     const observed = db.prepare(`SELECT d.key,d.destination,d.payload,CAST(v.generation AS TEXT) AS generation,CAST(c.at AS TEXT) AS at,CAST(c.priority AS TEXT) AS priority,
     EXISTS(SELECT 1 FROM delivery_group g WHERE g.key=d.key) AS grouped,
     EXISTS(SELECT 1 FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=d.key AND t.token IS NULL) AS unfinished
@@ -133,7 +133,7 @@ function evaluate(db, source) {
         const priority = Number(row.priority ?? NaN);
         const base = { key: hashPattern.test(key) ? key : createHash("sha256").update(key).digest("hex"), revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, decision: "foreign" };
         const evidence = proof.get(key);
-        if (!evidence || !isInspectableDeliveryEvidenceRow(evidence) || !Number.isSafeInteger(revision) || revision < 1 || typeof row.payload !== "string" || row.payload.length > 1048576)
+        if (!evidence || !isInspectableDeliveryEvidenceRow(evidence) || !Number.isSafeInteger(revision) || revision < 1 || revision === Number.MAX_SAFE_INTEGER || typeof row.payload !== "string" || Buffer.byteLength(row.payload, "utf8") > 1048576)
             return base;
         let payload;
         try {
@@ -154,7 +154,14 @@ function evaluate(db, source) {
             return { ...base, decision: "retain_uncertain" };
         if (evidence.state !== "pending" || evidence.evidence.confirmed > 0 || row.grouped !== 0)
             return { ...base, decision: "retain_state" };
-        return { ...base, decision: "move", payload: row.payload, destination: String(row.destination) };
+        const mapped = payload;
+        delete mapped.channel;
+        if (target.channel !== null)
+            mapped.channel = target.channel;
+        const targetPayload = JSON.stringify(mapped);
+        if (Buffer.byteLength(targetPayload, "utf8") > 1048576)
+            return base;
+        return { ...base, decision: "move", payload: row.payload, targetPayload, destination: String(row.destination) };
     });
 }
 /** Build and bound the public producer output; all numbers are verified before returning ok. */
@@ -227,24 +234,20 @@ export function runDestinationMigration(db, input) {
                 result = report(rows.some((row) => row.decision !== "already_moved") ? "superseded" : "already_applied", inventory, input, rows, input.planRevision);
             }
             else {
-                const rows = evaluate(db, from);
+                const rows = evaluate(db, from, to);
                 const epoch = safeCount(Number(db.prepare("SELECT generation FROM destination_epoch WHERE id=1").get().generation));
+                if (epoch > Number.MAX_SAFE_INTEGER - rows.filter((row) => row.decision === "move").length)
+                    throw new OutboxError("capacity_exceeded", "Preserve the outbox ledger: its monotonic revision capacity is exhausted. Review supported recovery before further route changes; no event was moved.");
                 const plan = createHash("sha256").update(JSON.stringify([inventory.revision, epoch, from, to, rows.map(({ key, revision, decision }) => ({ key, revision, decision }))])).digest("hex");
                 const moved = [];
                 if (input.action === "apply") {
                     if (input.planRevision !== plan)
                         throw new OutboxError("plan_changed", "Preview current queue state again; a peer changed a target revision, so no event was moved.");
-                    safeCount(epoch + rows.filter((row) => row.decision === "move").length);
                     for (const row of rows) {
                         if (row.decision !== "move")
                             continue;
-                        safeCount(row.revision + 1);
-                        const payload = JSON.parse(row.payload);
-                        delete payload.channel;
-                        if (to.channel !== null)
-                            payload.channel = to.channel;
                         db.prepare("INSERT OR IGNORE INTO destination_original VALUES (?,?,?)").run(row.key, row.destination, row.payload);
-                        db.prepare("UPDATE delivery SET destination=?,payload=? WHERE key=?").run(to.destination, JSON.stringify(payload), row.key);
+                        db.prepare("UPDATE delivery SET destination=?,payload=? WHERE key=?").run(to.destination, row.targetPayload, row.key);
                         const current = db.prepare("SELECT generation FROM destination_version WHERE key=?").get(row.key);
                         row.revision = safeCount(Number(current.generation));
                         moved.push({ key: row.key, revision: row.revision });

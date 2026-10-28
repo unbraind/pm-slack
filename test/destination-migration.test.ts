@@ -560,3 +560,49 @@ test("oversized SQLite integers and one unreadable foreign proof fail alone, inc
   const replayed = f.run(applyInput(preview));
   assert.equal(replayed.status, "superseded"); assert.equal(replayed.counts.foreign, 1); roundtrip(replayed);
 });
+
+test("preview and apply share revision-exhaustion decisions without blocking other healthy targets", async (t) => {
+  const f = await fixture(t); f.bind("old", oldRoute); f.bind("new", newRoute);
+  const exhausted = f.box.enqueue(intent("exhausted"));
+  f.box.enqueue(intent("healthy"));
+  f.db.prepare("UPDATE destination_version SET generation=9007199254740991 WHERE key=?").run(exhausted);
+  const preview = f.run({ action: "preview", from: "old", to: "new" });
+  assert.equal(preview.counts.foreign, 1); assert.equal(preview.counts.movable, 1); roundtrip(preview);
+  assert.equal(f.run(applyInput(preview)).counts.moved, 1);
+  f.box.enqueue(intent("global-exhaustion"));
+  const current = f.run({ action: "preview", from: "old", to: "new" });
+  const before = f.box.status(100);
+  f.db.exec("UPDATE destination_epoch SET generation=9007199254740991");
+  assert.throws(() => f.run({ action: "preview", from: "old", to: "new" }), refusal("capacity_exceeded"));
+  assert.throws(() => f.run(applyInput(current)), refusal("capacity_exceeded"));
+  assert.deepEqual(f.box.status(100), before);
+});
+
+test("every mapped producer payload fits its UTF-8 cap and remains migratable at the exact boundary", async (t) => {
+  const f = await fixture(t); f.bind("old", oldRoute, "#old");
+  const target = slackDestination("http://127.0.0.1:1/new", "#new");
+  f.bind("new", target, "#new");
+  const maximum = 1048576;
+  const bareOverhead = Buffer.byteLength(JSON.stringify({ text: "" }), "utf8");
+  const mappedOverhead = Buffer.byteLength(JSON.stringify({ text: "", channel: "#new" }), "utf8");
+  const texts = ["x".repeat(maximum - bareOverhead), "🙂".repeat(300000), "x".repeat(maximum - mappedOverhead)];
+  const originals = texts.map((text, index): OutboxIntent => ({ item: "payload-boundary", event: "close", revision: `boundary-${index}`, destination: oldRoute, payload: { text }, priority: 1 }));
+  const keys = originals.map((original) => f.box.enqueue(original));
+  const before = f.box.status(100);
+  const preview = f.run({ action: "preview", from: "old", to: "new" });
+  assert.equal(preview.counts.foreign, 2); assert.equal(preview.counts.movable, 1); roundtrip(preview);
+  assert.equal(f.run(applyInput(preview)).counts.moved, 1);
+  assert.deepEqual(f.box.status(100), before);
+  const reverse = f.run({ action: "preview", from: "new", to: "old" });
+  assert.equal(reverse.counts.movable, 1); assert.equal(reverse.counts.foreign, 0);
+  assert.equal(f.run(applyInput(reverse)).counts.moved, 1);
+  assert.equal(f.box.enqueue(originals[2]!), keys[2]);
+  keys.slice(0, 2).forEach((key) => f.box.resolve(key, "skip"));
+  let reads = 0;
+  await f.box.drain(async (destination, payload) => {
+    reads++; assert.equal(destination, oldRoute); assert.equal(payload.text, texts[2]); assert.equal(payload.channel, "#old");
+    assert.equal(Buffer.byteLength(JSON.stringify(payload), "utf8"), maximum);
+    return "acknowledged";
+  });
+  assert.equal(reads, 1);
+});
