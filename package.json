@@ -23,7 +23,9 @@
     "CHANGELOG.md",
     "docs/routing-explanation-example.md",
     "docs/routing-explanation-validation.md",
-    "docs/delivery-evidence-validation.md"
+    "docs/delivery-evidence-validation.md",
+    "docs/destination-migration-example.md",
+    "docs/destination-migration-validation.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -46,7 +48,8 @@
     "merge:install": "pm merge install",
     "coverage": "npm run build && npm run build:test && node scripts/coverage-gate.ts",
     "verify:release-publish-attestation": "node scripts/verify-release-publish-attestation.ts",
-    "verify:release-changelog-date": "node scripts/verify-release-changelog-date.ts"
+    "verify:release-changelog-date": "node scripts/verify-release-changelog-date.ts",
+    "acceptance:migration": "node scripts/accept-destination-package.ts"
   },
   "peerDependencies": {
     "@unbrained/pm-cli": ">=2026.10.15"
@@ -106,13 +109,16 @@
       "CHANGELOG.md",
       "docs/routing-explanation-example.md",
       "docs/routing-explanation-validation.md",
-      "docs/delivery-evidence-validation.md"
+      "docs/delivery-evidence-validation.md",
+      "docs/destination-migration-example.md",
+      "docs/destination-migration-validation.md"
     ],
     "examples": [
       "README.md",
       "docs/outbox-example.md",
       "docs/coalescing-example.md",
-      "docs/routing-explanation-example.md"
+      "docs/routing-explanation-example.md",
+      "docs/destination-migration-example.md"
     ]
   },
   "publishConfig": {

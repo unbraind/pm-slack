@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { init, create, readHistorySnapshot } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import extension, { SlackOutbox, slackDestination, explainSlackRouting } from "../dist/index.js";
+import extension, { SlackOutbox, slackDestination, explainSlackRouting, migrateSlackDestinations } from "../dist/index.js";
 import type { OutboxReport, CoalescingReport } from "../dist/index.js";
 import http from "node:http";
 
@@ -76,6 +76,22 @@ try {
     assert.equal(accepted, 1);
     assert.deepEqual(peer.status().outcomes, { delivered: 3, withheld: 0, uncertain: 2 });
   } finally { peer.close(); owner.close(); }
+  const migration = new SlackOutbox(pmRoot);
+  try {
+    const source = slackDestination("http://127.0.0.1:1/migration-old", "#old");
+    const target = slackDestination("http://127.0.0.1:1/migration-new");
+    const original = { item: "bun-migration", event: "close" as const, revision: "migration-r1", destination: source, payload: { text: "Native Bun migration", channel: "#old" }, priority: 1 };
+    const key = migration.enqueue(original);
+    migrateSlackDestinations(pmRoot, { action: "bind", alias: "old", destination: source, channel: "#old", bindingRevision: 0 });
+    migrateSlackDestinations(pmRoot, { action: "bind", alias: "new", destination: target, channel: null, bindingRevision: 1 });
+    const preview = migrateSlackDestinations(pmRoot, { action: "preview", from: "old", to: "new" });
+    const input = { action: "apply" as const, from: "old", to: "new", bindingRevision: preview.binding_revision, planRevision: preview.plan_revision! };
+    assert.equal(migrateSlackDestinations(pmRoot, input).counts.moved, 1);
+    assert.equal(migrateSlackDestinations(pmRoot, input).status, "already_applied");
+    assert.equal(migration.enqueue(original), key);
+    assert.equal(migration.planCoalescing().notifications[0]!.destination, target);
+    assert.equal(sends, 2, "native Bun preview and apply perform no HTTP requests");
+  } finally { migration.close(); }
   console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment, no git.");
 } finally {
   await harness?.deactivate();

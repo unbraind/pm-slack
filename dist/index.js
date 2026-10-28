@@ -34,7 +34,9 @@ export { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 import http from "node:http";
 import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, normalizeStatusInputWithRegistry, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
-import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence, currentOutboxSendContext } from "./outbox.js";
+import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence, currentOutboxSendContext, migrateSlackDestinations } from "./outbox.js";
+import { destinationMigrationToon } from "./destination-migration.js";
+export { migrateSlackDestinations } from "./outbox.js";
 import { CoalescingError } from "./coalescing.js";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.js";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
@@ -469,7 +471,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"];
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain"];
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -1986,6 +1988,10 @@ export default defineExtension({
     activate(api) {
         api.registerRenderer("toon", (ctx) => {
             const report = ctx.result;
+            return report?.ok === true ? destinationMigrationToon(report) : null;
+        }, { commands: ["slack migrate"] });
+        api.registerRenderer("toon", (ctx) => {
+            const report = ctx.result;
             return report?.ok === true ? slackRoutingToon(report) : null;
         }, { commands: ["slack explain"] });
         api.registerRenderer("toon", (ctx) => {
@@ -2145,6 +2151,61 @@ export default defineExtension({
         // command — `pm slack notify` : manual rich Block Kit post.
         // -----------------------------------------------------------------------
         if (typeof api.registerCommand === "function") {
+            api.registerCommand({
+                name: "slack migrate",
+                description: "Preview and review pending events moving between explicit destination aliases",
+                intent: "Apply one reviewed route transition atomically without posting or erasing uncertain delivery",
+                examples: ["pm slack migrate --action bindings --json", "pm slack migrate --from old --to new --json", "pm slack migrate --action apply --from old --to new --binding-revision 2 --plan-revision <preview-hash>"],
+                flags: [
+                    { long: "--action", value_name: "action", description: "preview (default), bindings, bind, or apply; none post" },
+                    { long: "--alias", value_name: "name", description: "Explicit lowercase destination alias to bind" },
+                    { long: "--route", value_name: "selector", description: "Configured route selector, or default, to bind without exposing its webhook" },
+                    { long: "--from", value_name: "alias", description: "Source destination alias" },
+                    { long: "--to", value_name: "alias", description: "Target destination alias" },
+                    { long: "--binding-revision", value_name: "revision", description: "Reviewed revision from bindings or preview" },
+                    { long: "--plan-revision", value_name: "hash", description: "Exact plan revision returned by preview" },
+                    { long: "--limit", value_name: "count", description: "Receipt page size, 1..100 (default 20)" },
+                    { long: "--after", value_name: "cursor", description: "Receipt offset, 0..10000 (default 0)" },
+                ],
+                async run(ctx) {
+                    try {
+                        const action = readStrOption(ctx.options, "action") ?? "preview";
+                        /** Refuse empty or nondecimal guards instead of coercing them to zero. */
+                        const integer = (name, fallback) => {
+                            const value = readStrOption(ctx.options, name);
+                            const supplied = Object.hasOwn(ctx.options, name) || Object.hasOwn(ctx.options, camelCase(name));
+                            if (!supplied && fallback !== undefined)
+                                return fallback;
+                            if (value === undefined || !/^(0|[1-9][0-9]*)$/.test(value))
+                                throw new OutboxError("invalid_input", `Supply --${name} as a nonnegative decimal integer from the reviewed preview.`);
+                            return Number(value);
+                        };
+                        if (action === "bindings")
+                            return migrateSlackDestinations(ctx.pm_root, { action });
+                        if (action === "bind") {
+                            const routeName = readStrOption(ctx.options, "route");
+                            const config = loadConfig();
+                            const route = config?.routes.find((row) => row.match === routeName);
+                            if (!config || !routeName || (routeName !== "default" && !route))
+                                throw new OutboxError("invalid_input", "Supply --route default or an existing PM_SLACK_ROUTES selector; configure the route before binding.");
+                            const webhook = route?.webhook ?? config.webhookUrl;
+                            const channel = route?.channel ?? config.channel ?? null;
+                            if (!isHttpUrl(webhook))
+                                throw new OutboxError("invalid_input", "Configure an HTTP or HTTPS webhook for the selected route before binding.");
+                            return migrateSlackDestinations(ctx.pm_root, { action, alias: readStrOption(ctx.options, "alias"), destination: slackDestination(webhook, channel ?? undefined), channel, bindingRevision: integer("binding-revision") });
+                        }
+                        const common = { from: readStrOption(ctx.options, "from"), to: readStrOption(ctx.options, "to"), limit: integer("limit", 20), after: integer("after", 0) };
+                        if (action === "preview")
+                            return migrateSlackDestinations(ctx.pm_root, { action, ...common });
+                        if (action !== "apply")
+                            throw new OutboxError("invalid_input", "Choose bindings, bind, preview or apply; preview posts nothing.");
+                        return migrateSlackDestinations(ctx.pm_root, { action, ...common, bindingRevision: integer("binding-revision"), planRevision: readStrOption(ctx.options, "plan-revision") });
+                    }
+                    catch (error) {
+                        return outboxFailure(error);
+                    }
+                },
+            });
             api.registerCommand({
                 name: "slack explain",
                 description: "Explain one committed notification's filters, routes, attention and delivery evidence offline",

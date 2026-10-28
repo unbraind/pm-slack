@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { planSlackCoalescing } from "./coalescing.js";
 import { deriveSlackDeliveryOutcome, readDeliveryEvidenceRows, isInspectableDeliveryEvidenceRow } from "./delivery-evidence.js";
+import { parseDestinationMigrationInput, runDestinationMigration, isOriginalMigrationIntent } from "./destination-migration.js";
 /** Expected failure with a safe message, machine-readable code, and concrete remedy. */
 export class OutboxError extends Error {
     /** Host extension runtime's expected-error status. */
@@ -63,6 +64,33 @@ function openDatabase(file, readOnly = false) {
     const sqlite = createRequire(import.meta.url)(module);
     const options = [{ readOnly: true }, { readonly: true }][Number(Boolean(process.versions.bun))];
     return readOnly ? new sqlite[constructor](file, options) : new sqlite[constructor](file);
+}
+/** Preview or commit a route transition in existing outbox storage; previews open SQLite read-only and never recover or send. */
+export function migrateSlackDestinations(pmRoot, input) {
+    const parsed = parseDestinationMigrationInput(input);
+    const file = join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite");
+    if (!existsSync(file))
+        throw new OutboxError("disabled", "Enable the outbox before binding or migrating destinations.");
+    let db;
+    try {
+        db = openDatabase(file, parsed.action === "preview" || parsed.action === "bindings");
+    }
+    catch {
+        throw new OutboxError("storage_unavailable", "Restore readable owned outbox storage and retry the reviewed operation; no notification was posted.");
+    }
+    let result;
+    try {
+        result = runDestinationMigration(db, parsed);
+    }
+    catch (error) {
+        if (error instanceof OutboxError)
+            throw error;
+        throw new OutboxError("storage_unavailable", "Restore readable owned outbox storage and retry the reviewed operation; no notification was posted.");
+    }
+    finally {
+        db.close();
+    }
+    return result;
 }
 /** Validate eligibility before enabling storage or recording a future-only policy. */
 function recoveryFilterValue(filter) {
@@ -239,7 +267,7 @@ export class SlackOutbox {
             this.db.prepare("INSERT OR IGNORE INTO delivery(key,item,event,revision,destination,payload) VALUES (?,?,?,?,?,?)")
                 .run(key, intent.item, intent.event, intent.revision, intent.destination, payload);
             const row = this.db.prepare("SELECT destination,payload FROM delivery WHERE key=?").get(key);
-            if (row.destination !== intent.destination || row.payload !== payload) {
+            if ((row.destination !== intent.destination || row.payload !== payload) && !isOriginalMigrationIntent(this.db, key, intent.destination, payload)) {
                 throw new OutboxError("conflict", "Keep the original intent and configuration; inspect the existing receipt before changing routing or message formatting.");
             }
             this.db.prepare("INSERT OR IGNORE INTO delivery_context VALUES (?,?,?)").run(key, intent.at ?? 0, intent.priority ?? 4);
@@ -399,6 +427,8 @@ export class SlackOutbox {
                 const placeholders = keys.map(() => "?").join(",");
                 const members = this.db.prepare(`SELECT key,payload,destination FROM delivery WHERE state='pending' AND key IN (${placeholders})`).all(...keys);
                 if (members.length !== keys.length)
+                    return undefined;
+                if (notification && members.some((member) => member.destination !== notification.destination))
                     return undefined;
                 // Planner notification keys are stable across retries. Attempt tokens must never be reused.
                 for (const key of keys) {

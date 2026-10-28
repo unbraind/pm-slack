@@ -1,0 +1,34 @@
+id: pm-slack-destination-migration-plans
+title: Preview and review destination changes for pending Slack events
+description: "Preview explicit alias-to-alias route transitions on the durable Slack outbox. The outbox remains the delivery engine; route configuration changes are separate from reliability, notification disclosure and standup digest policies."
+type: Feature
+status: in_progress
+priority: 2
+tags[3]: outbox,routing,slack
+created_at: "2026-10-28T20:32:57.205Z"
+updated_at: "2026-10-28T21:01:48.360Z"
+author: codex-agent
+acceptance_criteria: No event silently targets both old and new destinations; already uncertain sends retain uncertainty; replay creates no duplicate queue entries; preview posts nothing; queued use of the new route requires a reviewed binding revision.
+comments[5]{created_at,author,text}:
+  "2026-10-28T20:33:39.405Z",codex-agent,"Overlap rechecked on 2026-10-28: pm-slack main 911d78a owns SQLite delivery, history recovery, coalescing and route explanations; no open destination-migration PR or issue exists. CLI public SDK declarations expose tracker transactions, status registries, history and complete reads, but no Slack route migration API. Standup main f1d1187 builds reports; observer main 7aba36e queues PM evidence notes; ops has no Slack routing transition. This feature reuses the durable outbox and its delivery proof, not another delivery engine or disclosure policy. Planned design: explicit aliases bind to credential-free existing configured routes; monotonic binding revision and exact queue-plan revision require review; preview uses the same evaluator as atomic apply; uncertainty and receipt identities survive. Plans cover only currently pending, proven-unsent owned receipts. Tracker records are observed through SDK complete/history reads and never rewritten."
+  "2026-10-28T20:41:06.665Z",codex-agent,"Implemented typed migrateSlackDestinations and offline slack migrate CLI. Alias binding writes are revision-fenced; preview uses SQLite read-only with byte-equality proof; atomic apply reuses the same evaluator and triggers fence old/new drainers plus ABA edits. Replays retain one immutable delivery identity and re-read every applied target. Uncertain and unfinished attempts remain on the original route, including force-retired live senders. Found and fixed coalesced-drain stale-route race by revalidating destination inside claim. First focused regressions passed 7/7; typecheck and docstring gate passed. Building 500-sequence model and exhaustive statement-boundary concurrency/crash tests next."
+  "2026-10-28T20:52:04.707Z",codex-agent,"Public read-only tracker validation at main 911d78a: 94 items and verified streams, 849 history entries, 240 lifecycle events and unique queue entries. Reviewed revision 2 moved 237 events and retained 3 uncertain sends, including a pending retry. Replay moved zero; duplicate entries and remote posts zero. Preview database bytes, full SDK-read native state and all source tracker bytes unchanged. Focused suite passed 84 tests with migration module 100 percent lines, branches and functions, including 500 seeded sequences and exhaustive peer/interruption boundaries. Typecheck, test typecheck and docstring gate passed. npm/Bun full release checks remain assigned to CI; packed host-shape acceptance is in progress."
+  "2026-10-28T20:58:55.207Z",codex-agent,"Behavioral revert proof in a disposable source copy: reverting route reassignment, the queue revision guard, uncertainty retention, original-intent replay acceptance or coalesced claim destination revalidation independently made its focused regression fail. Restored functions passed all four selected regression scenarios. Native Bun SDK/CLI acceptance passed including migration and old-input replay. The captured package passed five real host installation shapes (project local, npm global, Bun global, npx and bunx) with one move, one receipt and zero posts each; final artifact is being recaptured after the last output-safety test. A transient CLI fixture omitted a required routing override; corrected it and the isolated CLI test passed. Linked tests are rerunning with a 300-second bound. Local health is blocked only by pre-existing pm-github host 2026.10.28 versus pinned host 2026.10.24 skew, plus an inherited advisory already tracked separately; history remains append-only."
+  "2026-10-28T21:01:46.690Z",codex-agent,"Final linked runner passed 3 of 3 commands: the 89-test migration regression suite (500 seeded random sequences, 4000 generated operations plus 500 fresh preview/apply comparisons), typecheck and docstring gate. The runner retains its inherited test-result tracking-disabled policy; evidence is recorded in this comment instead of changing policy. Five packed host shapes and native Bun acceptance passed. Read-only public validation remains 94 items, 849 entries, 240 events, 237 moves, 3 retained uncertain and zero duplicates/posts. Output-safety tests cover nonfinite JSON, deep payloads, bounds, invalid counters and isolated foreign records. Full unchanged npm/Bun release gates and source coverage are required on the pushed head in CI; final run URLs and counts will be attached to the PR. No merge, release or upstream repository write is authorized."
+files[7]{path,scope}:
+  destination-migration.ts,project
+  index.ts,project
+  outbox.ts,project
+  scripts/accept-destination-package.ts,project
+  scripts/validate-destination-migration.ts,project
+  test/bun-outbox.acceptance.ts,project
+  test/destination-migration.test.ts,project
+tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/destination-migration.test.ts,project,codex-agent,"2026-10-28T20:54:32.802Z",local_mutation,feat/destination-migration-plans
+  npm run typecheck,project,codex-agent,"2026-10-28T20:54:35.904Z",local_mutation,feat/destination-migration-plans
+  npm run docstring,project,codex-agent,"2026-10-28T20:54:39.975Z",local_mutation,feat/destination-migration-plans
+docs[3]{path,scope}:
+  docs/destination-migration-example.md,project
+  docs/destination-migration-validation.md,project
+  README.md,project
+body: ""

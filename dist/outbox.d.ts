@@ -1,7 +1,8 @@
 import type { CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
 import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
+import type { DestinationMigrationInput, DestinationMigrationReport } from "./destination-migration.ts";
 /** Stable refusal codes returned by both the SDK and CLI. */
-export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
+export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable" | "binding_changed" | "plan_changed" | "capacity_exceeded";
 /** Expected failure with a safe message, machine-readable code, and concrete remedy. */
 export declare class OutboxError extends Error {
     /** Host extension runtime's expected-error status. */
@@ -168,6 +169,8 @@ export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 export declare function slackDestination(webhook: string, channel?: string): string;
 /** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
 export declare function validateOutboxIntent(intent: OutboxIntent): void;
+/** Preview or commit a route transition in existing outbox storage; previews open SQLite read-only and never recover or send. */
+export declare function migrateSlackDestinations(pmRoot: string, input: DestinationMigrationInput): DestinationMigrationReport;
 /** A consistent read-only view; private payloads and destinations are never selected. */
 export interface SlackRoutingEvidence {
     /** Durable opt-in time, or null for a tracker without an outbox. */

@@ -627,10 +627,59 @@ selected item stream; work scales with that stream, while output stays bounded.
 See the [SDK/CLI example](docs/routing-explanation-example.md) and
 [public-tracker measurement](docs/routing-explanation-validation.md).
 
+### Destination migration plans
+
+`pm slack migrate` previews a route change between two explicitly named aliases.
+Bind each alias to `default` or an existing `PM_SLACK_ROUTES` selector, then review
+the returned `binding_revision` and `plan_revision` before applying:
+
+```bash
+pm slack migrate --action bindings --json
+pm slack migrate --action bind --alias old --route default --binding-revision 0
+pm slack migrate --action bind --alias new --route close --binding-revision 1
+pm slack migrate --from old --to new --json
+pm slack migrate --action apply --from old --to new \
+  --binding-revision 2 --plan-revision <reviewed-preview-hash>
+```
+
+Both preview and apply post nothing. Apply moves each eligible existing receipt
+atomically; the regular outbox drain uses its new route afterward. Only pending
+events with proven non-delivery can move. Sending, ambiguous, previously uncertain
+and terminal receipts retain their original route and evidence, even after an
+operator retries an uncertain send. The target binding replaces the channel
+override, including clearing it when the target has no channel override.
+
+Alias revisions and queue generations grow monotonically. A configuration or
+queue change invalidates an old preview, including change-and-change-back edits.
+`binding_changed` and `plan_changed` refusals explain how to preview again. Replaying
+an applied plan reads the current targets and returns `already_applied` or
+`superseded`, moving zero events. Replaying original lifecycle inputs keeps the
+same queue key. Automatic recovery continues using the existing outbox.
+
+JSON and default compact TOON report exact totals, safe receipt keys, skipped
+foreign records, `omitted`, and `next_cursor`. Use `--limit 1..100` and `--after`
+to page the evidence; applying always considers the complete plan. Limits are
+100 aliases, 10000 matching events per atomic plan, 64-character lowercase alias
+names and 256-character channel overrides. Existing payloads over 1 MiB or
+malformed/foreign records, nonfinite JSON numbers or nesting over 64 levels stay
+untouched with a `foreign` receipt. Alias bindings
+contain only a route fingerprint and optional channel in private runtime storage;
+public output includes neither webhooks, channels nor message bodies. Keep the
+target route configured: ordinary delivery refuses if its fingerprint disappears.
+Bindings govern the explicitly reviewed queued transition, while routing rules
+still select destinations for future events.
+
+The typed SDK exports `migrateSlackDestinations(pmRoot, input)`,
+`DestinationMigrationInput`, `DestinationMigrationReport`, `DestinationMigrationRow`
+and `DestinationBinding`. It uses the same strict input schema and atomic evaluator
+as the CLI. No tracker item, relationship, status or native field is rewritten.
+See the [complete example](docs/destination-migration-example.md) and
+[measured public-data validation](docs/destination-migration-validation.md).
+
 ### Without git
 
 Notification previews, digests, routing explanations, and local durable outbox
-inspection work on plain initialized trackers without a git executable. Slack
+inspection and destination migration work on plain initialized trackers without a git executable. Slack
 posting needs an explicitly configured webhook and network connectivity. The
 explanation command needs neither. It makes zero network calls.
 
