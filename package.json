@@ -57,9 +57,9 @@
   "devDependencies": {
     "@toon-format/toon": "4.4.0",
     "@types/node": "26.6.5",
-    "@unbrained/pm-cli": "2026.10.24",
-    "pm-changelog": "2026.10.24",
-    "pm-ops": "2026.10.24",
+    "@unbrained/pm-cli": "2026.10.25",
+    "pm-changelog": "2026.10.25",
+    "pm-ops": "2026.10.25",
     "typescript": "7.0.2"
   },
   "engines": {
