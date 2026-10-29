@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { makeSnapshotReadOnly, removeScratchTree } from "./snapshot-filesystem.ts";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { PmClient, listAllComplete, locateItem, readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
@@ -12,8 +13,6 @@ const source = process.argv[2] ?? ".";
 const ref = process.argv[3] ?? "origin/main";
 const directory = mkdtempSync(join(tmpdir(), "slack-public-payload-"));
 const pmRoot = join(directory, ".agents", "pm");
-const revision = execFileSync("git", ["rev-parse", ref], { cwd: source, encoding: "utf8" }).trim();
-const archive = execFileSync("git", ["archive", ref, ".agents/pm"], { cwd: source, maxBuffer: 64 * 1024 * 1024 });
 const previousPath = process.env.PATH, previousCeiling = process.env.GIT_CEILING_DIRECTORIES;
 
 /** Enumerate only the disposable snapshot, recording exact file bytes and permission bits. */
@@ -25,20 +24,12 @@ function snapshot(path: string): string[] {
   });
 }
 
-/** Change only copied files and directories, never the source tracker. */
-function permissions(path: string, readonly: boolean): void {
-  chmodSync(path, readonly ? 0o555 : 0o755);
-  for (const name of readdirSync(path)) {
-    const full = join(path, name);
-    if (lstatSync(full).isDirectory()) permissions(full, readonly);
-    else chmodSync(full, readonly ? 0o444 : 0o644);
-  }
-}
-
 try {
+  const revision = execFileSync("git", ["rev-parse", ref], { cwd: source, encoding: "utf8" }).trim();
+  const archive = execFileSync("git", ["archive", ref, ".agents/pm"], { cwd: source, maxBuffer: 64 * 1024 * 1024 });
   execFileSync("tar", ["xf", "-", "-C", directory], { input: archive });
   mkdirSync(join(directory, "no-executables"));
-  permissions(pmRoot, true);
+  makeSnapshotReadOnly(directory);
   const before = snapshot(directory);
   process.env.PATH = join(directory, "no-executables"); process.env.GIT_CEILING_DIRECTORIES = tmpdir();
   const options = { cwd: directory, pmRoot, noExtensions: true };
@@ -67,5 +58,5 @@ try {
 } finally {
   if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
   if (previousCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES; else process.env.GIT_CEILING_DIRECTORIES = previousCeiling;
-  permissions(directory, false); rmSync(directory, { recursive: true, force: true });
+  removeScratchTree(directory);
 }

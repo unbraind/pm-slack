@@ -737,3 +737,10 @@ The SDK exports `compileSlackPayload`, `compileSlackItem`, `validateSlackWirePay
 ### Without git: payload compilation
 
 Item and file compilation work in a plain SDK tracker without git. Both are read-only and require no Slack credentials. No new operation needs a git repository.
+
+Compilation work is bounded as well as wire size: source-field passes are linear,
+and byte budgeting encodes each block once. Archive probes refuse linked entries
+before changing permissions and never chmod link targets during cleanup. Outbox
+write paths refuse linked storage/sidecars with `storage_unavailable`; existing
+read-only observations remain compatible. See the [class-wide regression and
+revert evidence](docs/payload-compilation-validation.md#re-review-r1-bounded-work-and-owned-permission-changes).

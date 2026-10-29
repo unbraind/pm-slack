@@ -184,21 +184,33 @@ export function compileSlackPayload(input) {
     const paths = new Set(leaves.map((leaf) => leaf.path));
     if ([...preserve].some((path) => !paths.has(path)))
         invalid();
-    const required = new Set(leaves.filter((leaf) => preserve.has(leaf.path)).map((leaf) => leaf.block));
-    // URL buttons are always recovery-critical, even when a caller forgets to protect their labels.
-    payload.blocks?.forEach((block, i) => { if (block.type === "actions") {
-        required.add(i);
-        leaves.filter((leaf) => leaf.block === i).forEach((leaf) => preserve.add(leaf.path));
-    } });
+    const blocks = payload.blocks;
+    const required = new Set();
+    const blockLeafCounts = new Uint32Array(blocks?.length ?? 0);
     const losses = [];
     const omitted = new Map();
     const excludedElements = new Set();
     /** Protected source content must be split upstream instead of disappearing. */
     const overflow = () => { throw new SlackCompilationError("protected_overflow", "Split the message or raise the configured budget; identity, status and recovery fields must fit intact."); };
-    if ([...required].filter((i) => i !== null).length > bounds.blocks)
+    // Each leaf is inspected once, independently of the number of blocks and excess elements.
+    for (const leaf of leaves)
+        if (leaf.block !== null) {
+            blockLeafCounts[leaf.block]++;
+            const actions = blocks[leaf.block].type === "actions";
+            if (actions)
+                preserve.add(leaf.path); // Recovery links and labels are always critical.
+            if (preserve.has(leaf.path))
+                required.add(leaf.block);
+            if (leaf.element !== null && leaf.element >= (actions ? 25 : 10)) {
+                if (preserve.has(leaf.path))
+                    overflow();
+                excludedElements.add(leaf.path);
+            }
+        }
+    if (required.size > bounds.blocks)
         overflow();
-    let remaining = bounds.blocks - [...required].filter((i) => i !== null).length;
-    payload.blocks?.forEach((block, i) => {
+    let remaining = bounds.blocks - required.size;
+    blocks?.forEach((block, i) => {
         if (!required.has(i)) {
             if (remaining-- <= 0)
                 omitted.set(i, "block_limit");
@@ -207,12 +219,6 @@ export function compileSlackPayload(input) {
             if (Array.isArray(block[key])) {
                 const elements = block[key];
                 const cap = block.type === "actions" ? 25 : 10;
-                for (let j = cap; j < elements.length; j++) {
-                    const affected = leaves.filter((leaf) => leaf.block === i && leaf.element === j);
-                    if (affected.some((leaf) => preserve.has(leaf.path)))
-                        overflow();
-                    affected.forEach((leaf) => excludedElements.add(leaf.path));
-                }
                 block[key] = elements.slice(0, cap);
             }
     });
@@ -229,31 +235,38 @@ export function compileSlackPayload(input) {
             clippedReasons.set(leaf.path, "text_limit");
         }
     }
-    const blocks = payload.blocks;
-    /** Materialize the selected blocks without changing the source coordinates used by receipts. */
-    const materialize = () => {
-        if (blocks) {
-            payload.blocks = blocks.filter((_block, i) => !omitted.has(i));
-            if (!payload.blocks.length)
-                delete payload.blocks;
-        }
-    };
-    materialize();
-    let bytes = Buffer.byteLength(JSON.stringify(payload));
+    // Serialize each block once; dropping a block changes only its cost and one comma.
+    const { blocks: _blocks, ...fallback } = payload;
+    const baseBytes = Buffer.byteLength(JSON.stringify(fallback));
+    const blockBytes = blocks?.map((block) => Buffer.byteLength(JSON.stringify(block))) ?? [];
+    let selectedCount = 0, selectedBytes = 0;
+    blockBytes.forEach((size, i) => { if (!omitted.has(i)) {
+        selectedCount++;
+        selectedBytes += size;
+    } });
+    /** Exact JSON object/array punctuation overhead, without serializing the remaining collection again. */
+    const size = () => baseBytes + (selectedCount ? Buffer.byteLength(',"blocks":[]') + selectedBytes + selectedCount - 1 : 0);
+    let bytes = size();
     for (let i = (blocks?.length ?? 0) - 1; bytes > bounds.bytes && i >= 0; i--) {
         if (required.has(i) || omitted.has(i))
             continue;
         omitted.set(i, "byte_limit");
-        materialize();
-        bytes = Buffer.byteLength(JSON.stringify(payload));
+        selectedCount--;
+        selectedBytes -= blockBytes[i];
+        bytes = size();
+    }
+    if (blocks) {
+        payload.blocks = blocks.filter((_block, i) => !omitted.has(i));
+        if (!payload.blocks.length)
+            delete payload.blocks;
     }
     if (bytes > bounds.bytes && !preserve.has("/text")) {
         const source = leaves[0].text;
+        const fixedBytes = bytes - Buffer.byteLength(JSON.stringify(payload.text));
         let lo = 1, hi = Math.min(bounds.text, source.length), selected = clipped(source, 1);
         while (lo <= hi) {
             const mid = Math.floor((lo + hi) / 2), candidate = clipped(source, mid);
-            payload.text = candidate.text;
-            if (Buffer.byteLength(JSON.stringify(payload)) <= bounds.bytes) {
+            if (fixedBytes + Buffer.byteLength(JSON.stringify(candidate.text)) <= bounds.bytes) {
                 selected = candidate;
                 lo = mid + 1;
             }
@@ -263,8 +276,8 @@ export function compileSlackPayload(input) {
         payload.text = selected.text;
         clippedEnds.set("/text", selected.end);
         clippedReasons.set("/text", "byte_limit");
-        bytes = Buffer.byteLength(JSON.stringify(payload));
     }
+    bytes = Buffer.byteLength(JSON.stringify(payload));
     if (bytes > bounds.bytes)
         overflow();
     for (const leaf of leaves) {
@@ -275,7 +288,7 @@ export function compileSlackPayload(input) {
     }
     // Non-text blocks still receive a structural omission receipt.
     for (const [i, reason] of omitted)
-        if (!leaves.some((leaf) => leaf.block === i))
+        if (blockLeafCounts[i] === 0)
             losses.push({ path: `/blocks/${i}`, start: 0, end: 0, reason, item, link });
     validateSlackWirePayload(payload);
     return { ok: true, source_sha256, payload, bytes, bounds, losses };

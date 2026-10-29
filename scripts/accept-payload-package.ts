@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { decode } from "@toon-format/toon";
 
 const root = resolve(import.meta.dirname, "..");
@@ -18,8 +19,8 @@ childEnv.GIT_CONFIG_GLOBAL = "/dev/null"; childEnv.GIT_CONFIG_NOSYSTEM = "1"; ch
 childEnv.BUN_INSTALL_CACHE_DIR = join(directory, "bun-cache"); mkdirSync(childEnv.HOME, { recursive: true });
 
 /** Execute only explicit trusted package/host operations; never print child environment or raw error output. */
-function run(command: string, args: string[], cwd: string): string {
-  try { return execFileSync(command, args, { cwd, env: childEnv, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }); }
+function run(command: string, args: string[], cwd: string, timeout?: number): string {
+  try { return execFileSync(command, args, { cwd, env: childEnv, encoding: "utf8", timeout, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }); }
   catch { throw new Error(`Packed acceptance operation failed: ${command.split("/").at(-1)} ${args[0]}`); }
 }
 
@@ -27,7 +28,7 @@ try {
   const packed = JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", directory], root)) as { filename: string; files: { path: string }[] }[];
   const artifact = join(directory, packed[0]!.filename);
   const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex");
-  for (const path of ["dist/index.js", "dist/payload-compilation.js", "dist/payload-command.js", "dist/payload-compilation.d.ts", "docs/payload-compilation-example.md"]) assert.ok(packed[0]!.files.some((file) => file.path === path));
+  for (const path of ["dist/index.js", "dist/payload-compilation.js", "dist/payload-command.js", "dist/payload-compilation.d.ts", "dist/storage-paths.js", "docs/payload-compilation-example.md"]) assert.ok(packed[0]!.files.some((file) => file.path === path));
   const extracted = join(directory, "artifact"); mkdirSync(extracted); run("tar", ["xzf", artifact, "-C", extracted], directory);
   for (const shape of ["project-local", "npm-global", "bun-global", "npx", "bunx"] as const) {
     const workspace = join(directory, shape), prefix = join(workspace, "host"); mkdirSync(workspace);
@@ -43,7 +44,7 @@ try {
     } else if (shape === "npx") { command = "npm"; lead = ["exec", "--yes", `--package=${host}`, "--", "pm"]; }
     else { command = "bun"; lead = ["x", "--bun", host]; }
     /** All host acquisition goes through supported real package-manager entry points. */
-    const pm = (args: string[]) => run(command, [...lead, ...args, "--json"], workspace);
+    const pm = (args: string[], timeout?: number) => run(command, [...lead, ...args, "--json"], workspace, timeout);
     pm(["init", "packed-payload", "--defaults", "--agent-guidance", "skip"]);
     pm(["package", "install", join(extracted, "package"), "--project"]);
     const created = JSON.parse(pm(["create", "Task", "A".repeat(180), "--body", "  exact\r\n" + "x".repeat(3500), "--parent", "none", "--assignee", "none"])) as { id: string };
@@ -59,8 +60,23 @@ try {
     assert.equal(raw.ok, true); assert.equal(raw.total_losses, 55); assert.equal(raw.losses.length, 20);
     const last = JSON.parse(pm(["slack", "compile", "--input", file, "--after", "40"])) as { losses: unknown[]; next_cursor: number | null };
     assert.equal(last.losses.length, 15); assert.equal(last.next_cursor, null);
+    // Exercise the exact captured compiler under the native runtime selected by each real install shape.
+    const nativeBun = shape === "bun-global" || shape === "bunx";
+    const scaleCode = `import {assertPayloadScale} from ${JSON.stringify(pathToFileURL(join(root, "test/helpers/payload-scale-scenario.ts")).href)};
+import {assertStorageLinks} from ${JSON.stringify(pathToFileURL(join(root, "test/helpers/storage-link-scenario.ts")).href)};
+import {SlackOutbox} from ${JSON.stringify(pathToFileURL(join(extracted, "package/dist/outbox.js")).href)};
+import {compileSlackPayload,validateSlackWirePayload} from ${JSON.stringify(pathToFileURL(join(extracted, "package/dist/payload-compilation.js")).href)};
+if(assertStorageLinks(SlackOutbox)!==10) throw new Error("Missing storage path cases");
+console.log(JSON.stringify(assertPayloadScale(compileSlackPayload,validateSlackWirePayload)));`;
+    const measured = JSON.parse(run(nativeBun ? "bun" : process.execPath, nativeBun ? ["--eval", scaleCode] : ["--input-type=module", "--eval", scaleCode], workspace, 30000)) as unknown[];
+    assert.equal(measured.length, 5);
+    writeFileSync(file, JSON.stringify({ item: created.id, link: "https://example.com/item/packed", preserve: [], payload: { text: "fallback", blocks: Array.from({ length: 200 }, () => ({ type: "section", fields: Array.from({ length: 100 }, () => ({ type: "mrkdwn", text: "x" })) })) } }));
+    const denseArgs = ["slack", "compile", "--input", file];
+    const dense = JSON.parse(pm(denseArgs, 30000)) as { ok: boolean; total_losses: number };
+    assert.equal(dense.ok, true); assert.equal(dense.total_losses, 19500);
+    assert.deepEqual(decode(run(command, [...lead, ...denseArgs], workspace, 30000)), dense);
     assert.equal(createHash("sha256").update(readFileSync(artifact)).digest("hex"), digest);
-    console.log(`Packed payload acceptance: ${shape} passed (SDK item, JSON/TOON, wire payload, oversized source and paginated recovery; zero posts).`);
+    console.log(`Packed payload acceptance: ${shape} passed (SDK item, JSON/TOON, wire payload, oversized source, paginated recovery and five bounded-work adversarial shapes; zero posts).`);
   }
   console.log(`Captured artifact SHA-256: ${digest}`);
 } finally { rmSync(directory, { recursive: true, force: true }); }
