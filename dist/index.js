@@ -34,7 +34,9 @@ export { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 import http from "node:http";
 import { getActiveExtensionRegistrations, getItemPath, isTimestampLiteral, listAllComplete, listMutationEvents, locateItem, readHistorySnapshot, readLocatedItem, readSettings, normalizeStatusInputWithRegistry, replayHistoryToTarget, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, verifyHistoryEntries } from "@unbrained/pm-cli/sdk";
 import { existsSync, readdirSync } from "node:fs";
-import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence, currentOutboxSendContext } from "./outbox.js";
+import { SlackOutbox, OutboxError, slackDestination, validateOutboxIntent, readSlackRoutingEvidence, currentOutboxSendContext, migrateSlackDestinations } from "./outbox.js";
+import { destinationMigrationToon } from "./destination-migration.js";
+export { migrateSlackDestinations } from "./outbox.js";
 import { CoalescingError } from "./coalescing.js";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.js";
 export { SlackOutbox, OutboxError, slackDestination } from "./outbox.js";
@@ -469,7 +471,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"];
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain"];
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
@@ -1986,6 +1988,10 @@ export default defineExtension({
     activate(api) {
         api.registerRenderer("toon", (ctx) => {
             const report = ctx.result;
+            return report?.ok === true ? destinationMigrationToon(report) : null;
+        }, { commands: ["slack migrate"] });
+        api.registerRenderer("toon", (ctx) => {
+            const report = ctx.result;
             return report?.ok === true ? slackRoutingToon(report) : null;
         }, { commands: ["slack explain"] });
         api.registerRenderer("toon", (ctx) => {
@@ -2022,27 +2028,28 @@ export default defineExtension({
                     // context during early bootstrap; do not simplify it away.
                     if (ctx && ctx.ok === false)
                         return;
-                    if (ctx.command === "slack explain")
+                    if (readBoolOption(ctx.options ?? {}, "dry-run"))
                         return;
                     const statusRegistry = ctx.pm_root && existsSync(ctx.pm_root) ? resolveRuntimeStatusRegistry((await readSettings(ctx.pm_root)).schema) : undefined;
-                    if (ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
+                    const event = detectEvent(ctx, statusRegistry);
+                    if (!event)
+                        return;
+                    const item = extractItem(ctx);
+                    if (item && ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
                         const outbox = new SlackOutbox(ctx.pm_root);
                         try {
                             if (outbox.since()) {
-                                const item = extractItem(ctx);
-                                if (item && detectEvent(ctx, statusRegistry)) {
-                                    try {
-                                        await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
-                                    }
-                                    catch (error) {
-                                        if (outboxFailure(error).code !== "history_unavailable")
-                                            throw error;
-                                    }
-                                    if (process.env.PM_SLACK_COALESCE === "1")
-                                        await outbox.drainCoalesced(sendOutbox, { budget: 0 });
-                                    else
-                                        await outbox.drain(sendOutbox, 1);
+                                try {
+                                    await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
                                 }
+                                catch (error) {
+                                    if (outboxFailure(error).code !== "history_unavailable")
+                                        throw error;
+                                }
+                                if (process.env.PM_SLACK_COALESCE === "1")
+                                    await outbox.drainCoalesced(sendOutbox, { budget: 0 });
+                                else
+                                    await outbox.drain(sendOutbox, 1);
                                 return;
                             }
                         }
@@ -2053,14 +2060,10 @@ export default defineExtension({
                     const config = loadConfig();
                     if (!config)
                         return; // no webhook → silent no-op
-                    const event = detectEvent(ctx, statusRegistry);
-                    if (!event)
-                        return;
                     if (!config.events.has(event)) {
                         console.error(`[pm-slack] Event "${event}" filtered by PM_SLACK_EVENTS`);
                         return;
                     }
-                    const item = extractItem(ctx);
                     if (!item) {
                         console.error("[pm-slack] Could not extract item from result — skipping");
                         return;
@@ -2146,6 +2149,61 @@ export default defineExtension({
         // -----------------------------------------------------------------------
         if (typeof api.registerCommand === "function") {
             api.registerCommand({
+                name: "slack migrate",
+                description: "Preview and review pending events moving between explicit destination aliases",
+                intent: "Apply one reviewed route transition atomically without posting or erasing uncertain delivery",
+                examples: ["pm slack migrate --action bindings --json", "pm slack migrate --from old --to new --json", "pm slack migrate --action apply --from old --to new --binding-revision 2 --plan-revision <preview-hash>"],
+                flags: [
+                    { long: "--action", value_name: "action", description: "preview (default), bindings, bind, or apply; none post" },
+                    { long: "--alias", value_name: "name", description: "Explicit lowercase destination alias to bind" },
+                    { long: "--route", value_name: "selector", description: "Configured route selector, or default, to bind without exposing its webhook" },
+                    { long: "--from", value_name: "alias", description: "Source destination alias" },
+                    { long: "--to", value_name: "alias", description: "Target destination alias" },
+                    { long: "--binding-revision", value_name: "revision", description: "Reviewed revision from bindings or preview" },
+                    { long: "--plan-revision", value_name: "hash", description: "Exact plan revision returned by preview" },
+                    { long: "--limit", value_name: "count", description: "Receipt page size, 1..100 (default 20)" },
+                    { long: "--after", value_name: "cursor", description: "Receipt offset, 0..10000 (default 0)" },
+                ],
+                async run(ctx) {
+                    try {
+                        const action = readStrOption(ctx.options, "action") ?? "preview";
+                        /** Refuse empty or nondecimal guards instead of coercing them to zero. */
+                        const integer = (name, fallback) => {
+                            const value = readStrOption(ctx.options, name);
+                            const supplied = Object.hasOwn(ctx.options, name) || Object.hasOwn(ctx.options, camelCase(name));
+                            if (!supplied && fallback !== undefined)
+                                return fallback;
+                            if (value === undefined || !/^(0|[1-9][0-9]*)$/.test(value))
+                                throw new OutboxError("invalid_input", `Supply --${name} as a nonnegative decimal integer from the reviewed preview.`);
+                            return Number(value);
+                        };
+                        if (action === "bindings")
+                            return migrateSlackDestinations(ctx.pm_root, { action });
+                        if (action === "bind") {
+                            const routeName = readStrOption(ctx.options, "route");
+                            const config = loadConfig();
+                            const route = config?.routes.find((row) => row.match === routeName);
+                            if (!config || !routeName || (routeName !== "default" && !route))
+                                throw new OutboxError("invalid_input", "Supply --route default or an existing PM_SLACK_ROUTES selector; configure the route before binding.");
+                            const webhook = route?.webhook ?? config.webhookUrl;
+                            const channel = route?.channel ?? config.channel ?? null;
+                            if (!isHttpUrl(webhook))
+                                throw new OutboxError("invalid_input", "Configure an HTTP or HTTPS webhook for the selected route before binding.");
+                            return migrateSlackDestinations(ctx.pm_root, { action, alias: readStrOption(ctx.options, "alias"), destination: slackDestination(webhook, channel ?? undefined), channel, bindingRevision: integer("binding-revision") });
+                        }
+                        const common = { from: readStrOption(ctx.options, "from"), to: readStrOption(ctx.options, "to"), limit: integer("limit", 20), after: integer("after", 0) };
+                        if (action === "preview")
+                            return migrateSlackDestinations(ctx.pm_root, { action, ...common });
+                        if (action !== "apply")
+                            throw new OutboxError("invalid_input", "Choose bindings, bind, preview or apply; preview posts nothing.");
+                        return migrateSlackDestinations(ctx.pm_root, { action, ...common, bindingRevision: integer("binding-revision"), planRevision: readStrOption(ctx.options, "plan-revision") });
+                    }
+                    catch (error) {
+                        return outboxFailure(error);
+                    }
+                },
+            });
+            api.registerCommand({
                 name: "slack explain",
                 description: "Explain one committed notification's filters, routes, attention and delivery evidence offline",
                 intent: "Diagnose suppression and delivery uncertainty without exposing webhook URLs or message bodies",
@@ -2193,7 +2251,7 @@ export default defineExtension({
                         const after = Number(readStrOption(ctx.options, "after") ?? "0");
                         if (!["preview", "drain", "receipts"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0)
                             throw new OutboxError("invalid_input", "Choose preview, drain or receipts; use limit 1..100 and a nonnegative cursor.");
-                        const outbox = new SlackOutbox(ctx.pm_root);
+                        const outbox = new SlackOutbox(ctx.pm_root, { readOnly: action !== "drain" });
                         try {
                             // Validate every bound before recovering history or contacting Slack.
                             const preview = outbox.planCoalescing(options);
@@ -2238,7 +2296,7 @@ export default defineExtension({
                         if (!["status", "enable", "configure", "drain", "resolve"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0) {
                             throw new OutboxError("invalid_input", "Choose status, enable, configure, drain or resolve and a limit from 1 to 100.");
                         }
-                        const outbox = new SlackOutbox(ctx.pm_root);
+                        const outbox = new SlackOutbox(ctx.pm_root, { readOnly: action === "status" });
                         try {
                             if (action === "enable" || action === "configure") {
                                 outboxTargets();

@@ -1,0 +1,15 @@
+id: pm-slack-outbox-foreign-native-counters
+title: Keep outbox reports readable beside malformed native proof counters
+description: "A disposable non-git SDK tracker with one owned event and one foreign delivery_proof.legacy_unknown value of 9223372036854775807 makes existing SlackOutbox.status throw RangeError before its row filter runs. Destination migration now isolates that row and continues healthy events. General status, coalescing evidence and routing inspection hardening is separate from reviewed route transitions. Search for foreign records found no duplicate open item."
+type: Issue
+status: open
+priority: 2
+tags[3]: follow-up,foreign-records,outbox
+created_at: "2026-10-28T21:27:05.857Z"
+updated_at: "2026-10-28T21:27:07.161Z"
+author: codex-agent
+acceptance_criteria: "Existing outbox inspection paths isolate unsafe native counters per record, return bounded safe reasons, preserve healthy receipts and all persisted bytes, and never authorize delivery from malformed proof. Add real non-git SDK regressions and property tests for native integer extremes."
+files[2]{path,scope}:
+  delivery-evidence.ts,project
+  outbox.ts,project
+body: ""

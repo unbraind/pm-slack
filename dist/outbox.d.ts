@@ -1,7 +1,8 @@
 import type { CoalescingOptions, CoalescingPlan, CoalescingReceipt } from "./coalescing.ts";
 import type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
+import type { DestinationMigrationInput, DestinationMigrationReport } from "./destination-migration.ts";
 /** Stable refusal codes returned by both the SDK and CLI. */
-export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable";
+export type OutboxRefusalCode = "invalid_input" | "disabled" | "conflict" | "not_found" | "in_flight" | "not_ambiguous" | "destination_changed" | "storage_unavailable" | "history_unavailable" | "binding_changed" | "plan_changed" | "capacity_exceeded";
 /** Expected failure with a safe message, machine-readable code, and concrete remedy. */
 export declare class OutboxError extends Error {
     /** Host extension runtime's expected-error status. */
@@ -168,6 +169,8 @@ export type OutboxOutcome = "acknowledged" | "retry" | "ambiguous" | "rejected";
 export declare function slackDestination(webhook: string, channel?: string): string;
 /** Check the complete intent without writing, so recovery can refuse an entire bad item before publishing any of its transitions. */
 export declare function validateOutboxIntent(intent: OutboxIntent): void;
+/** Preview or commit a route transition in existing outbox storage; previews open SQLite read-only and never recover or send. */
+export declare function migrateSlackDestinations(pmRoot: string, input: DestinationMigrationInput): DestinationMigrationReport;
 /** A consistent read-only view; private payloads and destinations are never selected. */
 export interface SlackRoutingEvidence {
     /** Durable opt-in time, or null for a tracker without an outbox. */
@@ -189,8 +192,10 @@ export declare function readSlackRoutingEvidence(pmRoot: string, item: string, e
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export declare class SlackOutbox {
     private readonly db;
-    /** Open runtime storage in an initialized local tracker, without invoking git. */
-    constructor(pmRoot: string);
+    /** Open runtime storage without git; readOnly skips creation, permissions, schema upgrades and recovery of existing storage. */
+    constructor(pmRoot: string, options?: {
+        readOnly?: boolean;
+    });
     /** Release the database handle; committed receipts survive process exit. */
     close(): void;
     /** Atomically opt in with initial eligibility; legacy policy adoption starts with future history. */
@@ -233,7 +238,7 @@ export declare class SlackOutbox {
     drain(send: OutboxSend, limit?: number): Promise<OutboxReport>;
     /** Run receipt mutations under SQLite's cross-process writer fence, rolling back every partial transition. */
     private transaction;
-    /** Claim the complete membership and persist a fresh attempt token before any remote request. */
+    /** Authorize the current complete membership against the discovered destination and drain holds, then persist an attempt before any request. */
     private claim;
     /** Record dispatch intent durably before a transport can enter the network API. */
     private dispatch;

@@ -5,9 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { init, create, readHistorySnapshot } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import extension, { SlackOutbox, slackDestination, explainSlackRouting } from "../dist/index.js";
+import extension, { SlackOutbox, slackDestination, explainSlackRouting, migrateSlackDestinations } from "../dist/index.js";
 import type { OutboxReport, CoalescingReport } from "../dist/index.js";
 import http from "node:http";
+import { assertMigrationDestinationHold } from "./helpers/destination-hold-scenario.ts";
+import { seedObservationalOutbox, withObservationalOutbox } from "./helpers/observational-outbox-scenario.ts";
+import { decode } from "@toon-format/toon";
 
 const directory = mkdtempSync(join(tmpdir(), "slack-bun-acceptance-"));
 const pmRoot = join(directory, ".agents", "pm");
@@ -76,7 +79,42 @@ try {
     assert.equal(accepted, 1);
     assert.deepEqual(peer.status().outcomes, { delivered: 3, withheld: 0, uncertain: 2 });
   } finally { peer.close(); owner.close(); }
-  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment, no git.");
+  const migration = new SlackOutbox(pmRoot);
+  try {
+    const source = slackDestination("http://127.0.0.1:1/migration-old", "#old");
+    const target = slackDestination("http://127.0.0.1:1/migration-new");
+    const original = { item: "bun-migration", event: "close" as const, revision: "migration-r1", destination: source, payload: { text: "Native Bun migration", channel: "#old" }, priority: 1 };
+    const key = migration.enqueue(original);
+    migrateSlackDestinations(pmRoot, { action: "bind", alias: "old", destination: source, channel: "#old", bindingRevision: 0 });
+    migrateSlackDestinations(pmRoot, { action: "bind", alias: "new", destination: target, channel: null, bindingRevision: 1 });
+    const preview = migrateSlackDestinations(pmRoot, { action: "preview", from: "old", to: "new" });
+    const input = { action: "apply" as const, from: "old", to: "new", bindingRevision: preview.binding_revision, planRevision: preview.plan_revision! };
+    assert.equal(migrateSlackDestinations(pmRoot, input).counts.moved, 1);
+    assert.equal(migrateSlackDestinations(pmRoot, input).status, "already_applied");
+    assert.equal(migration.enqueue(original), key);
+    assert.equal(migration.planCoalescing().notifications[0]!.destination, target);
+    assert.equal(sends, 2, "native Bun preview and apply perform no HTTP requests");
+    migration.resolve(key, "skip");
+    for (const kind of ["plain", "coalesced-urgent", "coalesced-routine"] as const) {
+      await assertMigrationDestinationHold(migration, (input) => migrateSlackDestinations(pmRoot, input), {
+        namespace: `bun-${kind}`, source: slackDestination(`http://127.0.0.1:1/${kind}-source`), target: slackDestination(`http://127.0.0.1:1/${kind}-target`),
+        coalesced: kind !== "plain", routine: kind === "coalesced-routine",
+      });
+    }
+    assert.equal(sends, 2, "plain and both coalesced hold scenarios use only synthetic SDK transports");
+  } finally { migration.close(); }
+  await seedObservationalOutbox(pmRoot, new URL("../dist/outbox.js", import.meta.url).href, slackDestination("http://127.0.0.1:1/migration-old", "#old"));
+  await withObservationalOutbox(pmRoot, async (unchanged) => {
+    for (const [command, options] of [["slack migrate", { from: "old", to: "new" }], ["slack migrate", { action: "bindings" }], ["slack coalesce", {}], ["slack coalesce", { action: "receipts" }], ["slack outbox", { action: "status" }]] as const) {
+      const { result } = await harness!.runCommand({ command, pmRoot, options, global: { json: true } }); unchanged();
+      assert.deepEqual(decode((await harness!.runRendererOverride({ command, format: "toon", result })).rendered!), result); unchanged();
+      await harness!.runHook({ kind: "after_command", context: { command, args: [], options, pm_root: pmRoot, ok: true, result } }); unchanged();
+    }
+    const read = new SlackOutbox(pmRoot, { readOnly: true });
+    try { assert.equal(read.status().counts.sending, 1); assert.equal(read.status().counts.pending, 1); } finally { read.close(); }
+    unchanged(); assert.equal(sends, 2);
+  });
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment; three migration ambiguity holds and five read-only command/renderer/hook lifecycles preserve crashed-attempt bytes and permissions, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));

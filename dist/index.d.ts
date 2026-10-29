@@ -33,6 +33,8 @@ export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import { resolveRuntimeStatusRegistry } from "@unbrained/pm-cli/sdk";
 import { SlackOutbox } from "./outbox.ts";
+export { migrateSlackDestinations } from "./outbox.ts";
+export type { DestinationMigrationInput, DestinationMigrationReport, DestinationMigrationRow, DestinationBinding } from "./destination-migration.ts";
 import type { OutboxPayload, OutboxOutcome, OutboxEvent, OutboxRecoveryReport, OutboxSendContext } from "./outbox.ts";
 export { planSlackCoalescing, CoalescingError } from "./coalescing.ts";
 export type { CoalescingEvent, CoalescingOptions, CoalescingPlan, CoalescingReceipt, CoalescingDisposition, CoalescedNotification } from "./coalescing.ts";
@@ -224,7 +226,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce", "slack explain"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
