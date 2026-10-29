@@ -31,7 +31,7 @@
 import https from "node:https";
 import { validateSlackWirePayload, slackCompilationToon, SlackCompilationError } from "./payload-compilation.js";
 import { runSlackCompilationCommand } from "./payload-command.js";
-export { compileSlackPayload, compileSlackItem, compileSlackItemRead, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.js";
+export { compileSlackPayload, compileSlackItem, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.js";
 import { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.js";
 import http from "node:http";

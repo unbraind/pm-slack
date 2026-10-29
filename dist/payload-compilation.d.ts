@@ -95,7 +95,7 @@ export declare function compileSlackPayload(input: SlackCompilationInput): Slack
 export declare function compileSlackPayload(input: unknown): SlackCompilation;
 /** Read one item through the host-injected SDK; all identity, lifecycle and relationship fields remain protected. */
 export declare function compileSlackItem(client: Pick<PmClient, "get">, id: string, link: string, bounds?: SlackCompilationInput["bounds"]): Promise<SlackCompilation>;
-/** Compile a host-native read without treating a budget refusal as an empty or partial source item. */
+/** Internal full-read adapter; public consumers use compileSlackItem so this package controls the read projection. @internal */
 export declare function compileSlackItemRead(source: GetResult | PmReadOutputBudgetExceeded, link: string, bounds?: SlackCompilationInput["bounds"]): SlackCompilation;
 /** Compact ledger projection avoids echoing message bodies into agent output. Payload access is explicit in the CLI. */
 export declare function slackCompilationSummary(result: SlackCompilation, limit?: number, after?: number): {

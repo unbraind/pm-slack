@@ -287,7 +287,7 @@ export async function compileSlackItem(client, id, link, bounds) {
     const source = await client.get(id, { depth: "full", noTruncate: true, outputBudget: "unbounded", outputLimit: "unbounded" });
     return compileSlackItemRead(source, link, bounds);
 }
-/** Compile a host-native read without treating a budget refusal as an empty or partial source item. */
+/** Internal full-read adapter; public consumers use compileSlackItem so this package controls the read projection. @internal */
 export function compileSlackItemRead(source, link, bounds) {
     if (!("item" in source))
         throw new SlackCompilationError("invalid_input", "Read the full unbounded SDK item before compiling; a budget refusal is not source content.");

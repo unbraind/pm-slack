@@ -8,9 +8,9 @@ import test from "node:test";
 import type { CommandHandlerContext } from "@unbrained/pm-cli/sdk";
 import { init, create, update, focus, PmClient, schemaAddStatus } from "@unbrained/pm-cli/sdk";
 import { decode } from "@toon-format/toon";
-import extension, { __test__, compileSlackItem, compileSlackItemRead, compileSlackPayload, SlackCompilationError, validateSlackWirePayload } from "../index.ts";
+import extension, { __test__, compileSlackItem, compileSlackPayload, SlackCompilationError, validateSlackWirePayload } from "../index.ts";
 import type { SlackCompilationInput, SlackCompilation } from "../index.ts";
-import { slackCompilationSummary, slackCompilationToon } from "../payload-compilation.ts";
+import { slackCompilationSummary, slackCompilationToon, compileSlackItemRead } from "../payload-compilation.ts";
 import { runSlackCompilationCommand } from "../payload-command.ts";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 

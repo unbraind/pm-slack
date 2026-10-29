@@ -34,7 +34,7 @@ import https from "node:https";
 import { validateSlackWirePayload, slackCompilationToon, SlackCompilationError } from "./payload-compilation.ts";
 import type { slackCompilationSummary } from "./payload-compilation.ts";
 import { runSlackCompilationCommand } from "./payload-command.ts";
-export { compileSlackPayload, compileSlackItem, compileSlackItemRead, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.ts";
+export { compileSlackPayload, compileSlackItem, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.ts";
 export type { SlackCompilationInput, SlackCompilation, SlackLossReceipt, CompiledSlackPayload, CompiledSlackBlock } from "./payload-compilation.ts";
 import { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";

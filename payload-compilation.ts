@@ -312,7 +312,7 @@ export async function compileSlackItem(client: Pick<PmClient, "get">, id: string
   return compileSlackItemRead(source, link, bounds);
 }
 
-/** Compile a host-native read without treating a budget refusal as an empty or partial source item. */
+/** Internal full-read adapter; public consumers use compileSlackItem so this package controls the read projection. @internal */
 export function compileSlackItemRead(source: GetResult | PmReadOutputBudgetExceeded, link: string, bounds?: SlackCompilationInput["bounds"]): SlackCompilation {
   if (!("item" in source)) throw new SlackCompilationError("invalid_input", "Read the full unbounded SDK item before compiling; a budget refusal is not source content.");
   const { item } = source;

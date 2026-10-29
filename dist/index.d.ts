@@ -29,7 +29,7 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
-export { compileSlackPayload, compileSlackItem, compileSlackItemRead, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.ts";
+export { compileSlackPayload, compileSlackItem, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.ts";
 export type { SlackCompilationInput, SlackCompilation, SlackLossReceipt, CompiledSlackPayload, CompiledSlackBlock } from "./payload-compilation.ts";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
