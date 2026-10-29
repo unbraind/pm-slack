@@ -8,6 +8,7 @@ import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { SlackOutbox, slackDestination, explainSlackRouting, migrateSlackDestinations } from "../dist/index.js";
 import type { OutboxReport, CoalescingReport } from "../dist/index.js";
 import http from "node:http";
+import { assertMigrationDestinationHold } from "./helpers/destination-hold-scenario.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "slack-bun-acceptance-"));
 const pmRoot = join(directory, ".agents", "pm");
@@ -91,8 +92,16 @@ try {
     assert.equal(migration.enqueue(original), key);
     assert.equal(migration.planCoalescing().notifications[0]!.destination, target);
     assert.equal(sends, 2, "native Bun preview and apply perform no HTTP requests");
+    migration.resolve(key, "skip");
+    for (const kind of ["plain", "coalesced-urgent", "coalesced-routine"] as const) {
+      await assertMigrationDestinationHold(migration, (input) => migrateSlackDestinations(pmRoot, input), {
+        namespace: `bun-${kind}`, source: slackDestination(`http://127.0.0.1:1/${kind}-source`), target: slackDestination(`http://127.0.0.1:1/${kind}-target`),
+        coalesced: kind !== "plain", routine: kind === "coalesced-routine",
+      });
+    }
+    assert.equal(sends, 2, "plain and both coalesced hold scenarios use only synthetic SDK transports");
   } finally { migration.close(); }
-  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment, no git.");
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment; plain, urgent and routine migration ambiguity holds pass, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));

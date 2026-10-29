@@ -656,6 +656,12 @@ an applied plan reads the current targets and returns `already_applied` or
 `superseded`, moving zero events. Replaying original lifecycle inputs keeps the
 same queue key. Automatic recovery continues using the existing outbox.
 
+Plain and coalesced drains both re-read destinations and check ambiguity holds
+inside the shared claim transaction. A route changed after candidate discovery
+is deferred to the next drain; an in-flight ambiguous target cannot receive a
+second event through migration. Sending and hold accounting use the claimed
+destination, and a deferred receipt gets no attempt or state change.
+
 JSON and default compact TOON report exact totals, safe receipt keys, skipped
 foreign records, `omitted`, and `next_cursor`. Use `--limit 1..100` and `--after`
 to page the evidence; applying always considers the complete plan. Limits are

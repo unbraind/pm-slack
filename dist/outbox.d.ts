@@ -236,7 +236,7 @@ export declare class SlackOutbox {
     drain(send: OutboxSend, limit?: number): Promise<OutboxReport>;
     /** Run receipt mutations under SQLite's cross-process writer fence, rolling back every partial transition. */
     private transaction;
-    /** Claim the complete membership and persist a fresh attempt token before any remote request. */
+    /** Authorize the current complete membership against the discovered destination and drain holds, then persist an attempt before any request. */
     private claim;
     /** Record dispatch intent durably before a transport can enter the network API. */
     private dispatch;

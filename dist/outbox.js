@@ -325,19 +325,18 @@ export class SlackOutbox {
         }
         const uncertain = new Set();
         for (const notification of plan.notifications) {
-            if (uncertain.has(notification.destination))
-                continue;
-            const claim = this.claim(notification.keys, notification);
+            const claim = this.claim(notification.keys, notification.destination, uncertain, notification);
             if (!claim)
                 continue;
-            const { state, refusal } = await this.sendAttempt(claim.token, send, notification.destination, () => {
+            const destination = claim.members[0].destination;
+            const { state, refusal } = await this.sendAttempt(claim.token, send, destination, () => {
                 const original = JSON.parse(String(claim.members[0].payload));
                 return notification.urgent ? original : { text: notification.text, mrkdwn: false, ...(original.channel === undefined ? {} : { channel: original.channel }) };
             });
             if (refusal && (refusal.code !== "destination_changed" || state !== "refused"))
                 throw refusal;
             if (state === "ambiguous")
-                uncertain.add(notification.destination);
+                uncertain.add(destination);
             if (state === "pending")
                 break;
         }
@@ -384,9 +383,7 @@ export class SlackOutbox {
         const candidates = this.db.prepare("SELECT key,destination FROM delivery WHERE state='pending' ORDER BY (SELECT COUNT(*) FROM delivery_attempt_start s LEFT JOIN delivery_attempt_terminal t ON t.key=s.key AND t.token=s.token WHERE s.key=delivery.key AND COALESCE(t.result,'open')!='not_sent'), rowid LIMIT ?").all(limit);
         const uncertain = new Set();
         for (const candidate of candidates) {
-            if (uncertain.has(String(candidate.destination)))
-                continue;
-            const claim = this.claim([String(candidate.key)]);
+            const claim = this.claim([String(candidate.key)], String(candidate.destination), uncertain);
             if (!claim)
                 continue;
             const row = claim.members[0];
@@ -397,7 +394,7 @@ export class SlackOutbox {
                 throw refusal;
             }
             if (state === "ambiguous")
-                uncertain.add(String(candidate.destination));
+                uncertain.add(row.destination);
             if (state === "pending")
                 break;
         }
@@ -419,8 +416,8 @@ export class SlackOutbox {
             throw error;
         }
     }
-    /** Claim the complete membership and persist a fresh attempt token before any remote request. */
-    claim(keys, notification) {
+    /** Authorize the current complete membership against the discovered destination and drain holds, then persist an attempt before any request. */
+    claim(keys, expectedDestination, heldDestinations, notification) {
         const token = randomUUID();
         try {
             return this.transaction(() => {
@@ -428,7 +425,7 @@ export class SlackOutbox {
                 const members = this.db.prepare(`SELECT key,payload,destination FROM delivery WHERE state='pending' AND key IN (${placeholders})`).all(...keys);
                 if (members.length !== keys.length)
                     return undefined;
-                if (notification && members.some((member) => member.destination !== notification.destination))
+                if (members.some((member) => member.destination !== expectedDestination || heldDestinations.has(member.destination)))
                     return undefined;
                 // Planner notification keys are stable across retries. Attempt tokens must never be reused.
                 for (const key of keys) {
