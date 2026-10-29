@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { makeSnapshotReadOnly, removeScratchTree } from "./snapshot-filesystem.ts";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -83,9 +84,8 @@ try {
     const snapshot = join(scratch, `snapshot-${index}`);
     mkdirSync(snapshot);
     execFileSync("tar", ["-x", "-C", snapshot], { input: git(repositoryRoot, "archive", head, "--", ".agents/pm") });
-    for (const file of files) chmodSync(join(snapshot, file), 0o444);
     const directories = new Set(files.filter((file) => file.endsWith(".toon") || file.endsWith(".jsonl")).map(dirname));
-    for (const directory of directories) chmodSync(join(snapshot, directory), 0o555);
+    makeSnapshotReadOnly(snapshot, directories);
     const expectedHash = fingerprint(snapshot, files);
     const before = join(scratch, `before-${index}`);
     const after = join(scratch, `after-${index}`);
@@ -101,6 +101,5 @@ try {
   }
 } finally {
   // Restore scratch directory permissions before disposing of read-only copies.
-  execFileSync("chmod", ["-R", "u+rwX", scratch]);
-  rmSync(scratch, { recursive: true, force: true });
+  removeScratchTree(scratch);
 }

@@ -84,3 +84,7 @@ jobs:
 
       - name: Verify complete Bun release gate
         run: bun run release:check
+
+      - name: Verify captured payload compiler artifact in five host installations
+        if: matrix.node-version == 26
+        run: npm run acceptance:payload

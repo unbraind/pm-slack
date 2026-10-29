@@ -727,3 +727,20 @@ a process crash leaves recovery to the durable dispatch marker.
 The attempt journal contains keys, attempt tokens, result codes and operator
 decisions, never webhook URLs or message bodies. The explanation path still opens
 existing storage read-only and never creates or migrates it.
+
+## Loss-aware Slack payload compilation
+
+`pm slack compile --item task-1 --link https://example.com/items/task-1` compiles an SDK item offline and reports exact clipping/omission ranges with stable recovery links. Identity, status, priority and relationships remain protected; content that cannot fit refuses with a typed remedy. JSON and TOON return a compact paginated ledger by default; add `--payload` for the wire data. `--input` accepts an unclipped static Slack source envelope.
+
+The SDK exports `compileSlackPayload`, `compileSlackItem`, `validateSlackWirePayload` and `SlackCompilationError`. See the [schema, bounds and runnable example](docs/payload-compilation-example.md). All webhook paths validate before opening a request. Existing renderer truncation does not become a loss receipt retroactively.
+
+### Without git: payload compilation
+
+Item and file compilation work in a plain SDK tracker without git. Both are read-only and require no Slack credentials. No new operation needs a git repository.
+
+Compilation work is bounded as well as wire size: source-field passes are linear,
+and byte budgeting encodes each block once. Archive probes refuse linked entries
+before changing permissions and never chmod link targets during cleanup. Outbox
+write paths refuse linked storage/sidecars with `storage_unavailable`; existing
+read-only observations remain compatible. See the [class-wide regression and
+revert evidence](docs/payload-compilation-validation.md#re-review-r1-bounded-work-and-owned-permission-changes).

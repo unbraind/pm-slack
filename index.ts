@@ -31,6 +31,11 @@
 
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import https from "node:https";
+import { validateSlackWirePayload, slackCompilationToon, SlackCompilationError } from "./payload-compilation.ts";
+import type { slackCompilationSummary } from "./payload-compilation.ts";
+import { runSlackCompilationCommand } from "./payload-command.ts";
+export { compileSlackPayload, compileSlackItem, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.ts";
+export type { SlackCompilationInput, SlackCompilation, SlackLossReceipt, CompiledSlackPayload, CompiledSlackBlock } from "./payload-compilation.ts";
 import { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
@@ -574,7 +579,7 @@ export const SLACK_POSTING_COMMANDS = ["slack notify", "slack digest"] as const;
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate"] as const;
+export const SLACK_OFFLINE_COMMANDS = ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate", "slack compile"] as const;
 
 /**
  * Whether `command` is one this package gates a webhook on.
@@ -1353,6 +1358,7 @@ function isRetryableSlackError(err: unknown): boolean {
  */
 function postToSlackOnce(webhookUrl: string, payload: SlackPayload, dispatched?: () => void, confirmed?: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
+    validateSlackWirePayload(payload);
     const body = JSON.stringify(payload);
     const parsed = new URL(webhookUrl);
 
@@ -1908,6 +1914,7 @@ class SlackRecoveryError extends OutboxError {
  * @returns The durable outcome to store for that attempt.
  */
 function classifyOutboxSendError(error: unknown): OutboxOutcome {
+  if (error instanceof SlackCompilationError) return "rejected";
   if (error instanceof SlackHttpError) {
     if (error.status === 429) return "retry";
     return error.status >= 400 && error.status < 500 ? "rejected" : "ambiguous";
@@ -2175,6 +2182,10 @@ export default defineExtension({
 
   activate(api: ExtensionApi) {
     api.registerRenderer("toon", (ctx) => {
+      const report = ctx.result as ReturnType<typeof slackCompilationSummary> | null;
+      return report?.ok === true && !("payload" in report) ? slackCompilationToon(report) : null;
+    }, { commands: ["slack compile"] });
+    api.registerRenderer("toon", (ctx) => {
       const report = ctx.result as DestinationMigrationReport | null;
       return report?.ok === true ? destinationMigrationToon(report) : null;
     }, { commands: ["slack migrate"] });
@@ -2337,6 +2348,24 @@ export default defineExtension({
     // command — `pm slack notify` : manual rich Block Kit post.
     // -----------------------------------------------------------------------
     if (typeof api.registerCommand === "function") {
+      api.registerCommand({
+        name: "slack compile",
+        description: "Compile a bounded Slack payload offline with exact loss receipts and recovery links",
+        intent: "Inspect wire-format loss before sending; preserve identity, status and recovery links",
+        examples: ["pm slack compile --item task-1 --link https://example.com/items/task-1 --json", "pm slack compile --input slack-source.json --payload --json"],
+        flags: [
+          { long: "--input", value_name: "file", description: "Strict JSON compilation envelope, at most 2 MiB" },
+          { long: "--item", value_name: "id", description: "One item read through the host SDK" },
+          { long: "--link", value_name: "URL", description: "Stable full-item recovery URL for --item" },
+          { long: "--max-bytes", value_name: "count", description: "Wire JSON byte budget, 512..65536" },
+          { long: "--max-blocks", value_name: "count", description: "Block budget, 1..50" },
+          { long: "--max-text", value_name: "count", description: "Fallback UTF-16 budget, 1..4000" },
+          { long: "--payload", description: "Include the compiled wire payload; default output is a compact loss ledger" },
+          { long: "--limit", value_name: "count", description: "Receipt page size, 1..100 (default 20)" },
+          { long: "--after", value_name: "cursor", description: "Receipt offset, 0..100000 (default 0); bind pages to source_sha256" },
+        ],
+        run: runSlackCompilationCommand,
+      });
       api.registerCommand({
         name: "slack migrate",
         description: "Preview and review pending events moving between explicit destination aliases",
@@ -2644,6 +2673,7 @@ export default defineExtension({
             await postToSlack(webhookUrl, payload);
           } catch (err) {
             // Never throw on network failure: warn and exit 0.
+            if (err instanceof SlackCompilationError) return { posted: false, ok: false, exit_code: err.exitCode, code: err.code, remediation: err.remedy };
             const message = toErrorMessage(err);
             console.error(`[pm-slack] Slack post failed (continuing): ${message}`);
             return { posted: false, error: message };
@@ -2844,6 +2874,7 @@ export default defineExtension({
           try {
             await postToSlack(webhookUrl, payload);
           } catch (err) {
+            if (err instanceof SlackCompilationError) return { posted: false, ok: false, exit_code: err.exitCode, code: err.code, remediation: err.remedy };
             const message = toErrorMessage(err);
             throw new CommandError(`Failed to post digest to Slack: ${message}`, EXIT_CODE.GENERIC_FAILURE);
           }

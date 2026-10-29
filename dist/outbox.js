@@ -1,7 +1,8 @@
 /** Durable, local Slack delivery receipts. Payloads and webhook credentials never appear in inspection output. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "node:module";
-import { chmodSync, mkdirSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { ownedOutboxFile, chmodOwnedEntry } from "./storage-paths.js";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { planSlackCoalescing } from "./coalescing.js";
@@ -73,7 +74,8 @@ export function migrateSlackDestinations(pmRoot, input) {
         throw new OutboxError("disabled", "Enable the outbox before binding or migrating destinations.");
     let db;
     try {
-        db = openDatabase(file, parsed.action === "preview" || parsed.action === "bindings");
+        const readOnly = parsed.action === "preview" || parsed.action === "bindings";
+        db = openDatabase(readOnly ? file : ownedOutboxFile(pmRoot, false), readOnly);
     }
     catch {
         throw new OutboxError("storage_unavailable", "Restore readable owned outbox storage and retry the reviewed operation; no notification was posted.");
@@ -160,23 +162,18 @@ export class SlackOutbox {
     constructor(pmRoot, options = {}) {
         let database;
         try {
-            const directory = join(pmRoot, "runtime", "slack-outbox");
-            const file = join(directory, "delivery.sqlite");
+            const file = options.readOnly ? join(pmRoot, "runtime", "slack-outbox", "delivery.sqlite") : ownedOutboxFile(pmRoot, true);
             if (options.readOnly && existsSync(file)) {
                 this.db = openDatabase(file, true);
                 database = this.db;
                 this.db.prepare("SELECT key FROM delivery LIMIT 0").all();
                 return;
             }
-            if (!options.readOnly) {
-                mkdirSync(directory, { recursive: true, mode: 0o700 });
-                chmodSync(directory, 0o700);
-            }
             // An absent store has the same empty report as before, using only an ephemeral schema.
             this.db = openDatabase(options.readOnly ? ":memory:" : file);
             database = this.db;
             if (!options.readOnly)
-                chmodSync(file, 0o600);
+                chmodOwnedEntry(file, 0o600);
             this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), since TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS delivery (

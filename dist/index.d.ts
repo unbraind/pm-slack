@@ -29,6 +29,8 @@
  *                                    First matching rule wins; unset fields fall back to the defaults.
  */
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+export { compileSlackPayload, compileSlackItem, validateSlackWirePayload, SlackCompilationError, SLACK_PAYLOAD_BOUNDS } from "./payload-compilation.ts";
+export type { SlackCompilationInput, SlackCompilation, SlackLossReceipt, CompiledSlackPayload, CompiledSlackBlock } from "./payload-compilation.ts";
 export { deriveSlackDeliveryOutcome } from "./delivery-evidence.ts";
 export type { SlackDeliveryEvidence, SlackDeliveryOutcome } from "./delivery-evidence.ts";
 import { resolveRuntimeStatusRegistry } from "@unbrained/pm-cli/sdk";
@@ -226,7 +228,7 @@ export declare const SLACK_POSTING_COMMANDS: readonly ["slack notify", "slack di
  * a configured webhook would refuse the one command that exists to work without
  * one.
  */
-export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate"];
+export declare const SLACK_OFFLINE_COMMANDS: readonly ["slack test", "slack outbox", "slack coalesce", "slack explain", "slack migrate", "slack compile"];
 /**
  * Whether `command` is one this package gates a webhook on.
  *
