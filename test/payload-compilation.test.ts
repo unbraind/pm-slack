@@ -126,7 +126,11 @@ test("strict schema refuses malformed/extreme inputs and preserves previously va
   broken.push({ ...input(), payload: { text: "x", [Symbol("foreign")]: "x" } });
   broken.push(input({ text: "x".repeat(2097153) }));
   broken.push(input({ text: "x".repeat(2097100) }));
+  broken.push(input({ text: "x".repeat(2097112), blocks: [{ type: "divider" }] }));
   broken.push(input({ text: "x".repeat(1100000), blocks: [{ type: "section", text: { type: "plain_text", text: "y".repeat(1100000) } }] }));
+  // A tiny reference graph can describe gigabytes of expanded JSON: refuse while parsing, before serialization.
+  const repeated = { type: "section", fields: Array(100).fill({ type: "plain_text", text: "x".repeat(50000) }) };
+  broken.push(input({ text: "fallback", blocks: Array(500).fill(repeated) }));
   broken.forEach((v) => assert.throws(() => compileSlackPayload(v), refuses()));
   const valid = [
     { text: "  prior\r\nversion  ", channel: "#legacy", mrkdwn: true, thread_ts: "123.001" },

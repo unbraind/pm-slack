@@ -26,6 +26,8 @@ refusal before sockets, and 500 seeded compilation/replay sequences. Its SDK
 reference state is read back from a real non-git tracker, including custom
 status registries, native identity/priority/assignment fields, relationships,
 CRLF and whitespace variants. This feature adds no import/sync/apply path.
+Repeated-reference inputs that would expand to gigabytes refuse during parsing,
+before aggregate JSON serialization can allocate that expansion.
 
 `node scripts/prove-payload-revert.ts` changes only the compiler function or
 pre-send guard in a disposable copy: restoring unbounded pass-through behavior

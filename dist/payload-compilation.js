@@ -71,7 +71,16 @@ function integer(value, fallback, min, max) {
 /** One strict schema serves both the input compiler and outbound wire validator. */
 function parsePayload(input, wire) {
     const root = object(input, ["text", "blocks", "mrkdwn", "channel", "thread_ts"]);
-    const payload = { text: string(root.text) };
+    let sourceBytes = 0;
+    /** Stop repeated-reference expansion before serialization can allocate an unbounded aggregate string. */
+    const boundedString = (value, max = SLACK_PAYLOAD_BOUNDS.inputBytes) => {
+        const result = string(value, max);
+        sourceBytes += Buffer.byteLength(JSON.stringify(result));
+        if (sourceBytes > SLACK_PAYLOAD_BOUNDS.inputBytes)
+            invalid();
+        return result;
+    };
+    const payload = { text: boundedString(root.text) };
     const leaves = [{ path: "/text", text: payload.text, cap: SLACK_PAYLOAD_BOUNDS.text, set: (v) => { payload.text = v; }, block: null, element: null }];
     if (root.mrkdwn !== undefined) {
         if (typeof root.mrkdwn !== "boolean")
@@ -79,9 +88,9 @@ function parsePayload(input, wire) {
         payload.mrkdwn = root.mrkdwn;
     }
     if (root.channel !== undefined)
-        payload.channel = string(root.channel, 255);
+        payload.channel = boundedString(root.channel, 255);
     if (root.thread_ts !== undefined) {
-        payload.thread_ts = string(root.thread_ts, 32);
+        payload.thread_ts = boundedString(root.thread_ts, 32);
         if (!/^[0-9]{1,20}\.[0-9]{1,10}$/.test(payload.thread_ts))
             invalid();
     }
@@ -91,7 +100,7 @@ function parsePayload(input, wire) {
         const row = object(value, ["type", "text", "emoji", "verbatim"]);
         if (row.type !== "plain_text" && (plain || row.type !== "mrkdwn"))
             invalid();
-        const result = { type: row.type, text: string(row.text) };
+        const result = { type: row.type, text: boundedString(row.text) };
         for (const key of ["emoji", "verbatim"])
             if (row[key] !== undefined) {
                 if (typeof row[key] !== "boolean" || (key === "emoji" ? row.type !== "plain_text" : row.type !== "mrkdwn"))
@@ -104,14 +113,14 @@ function parsePayload(input, wire) {
     if (root.blocks !== undefined)
         payload.blocks = array(root.blocks, wire ? 50 : 500).map((value, i) => {
             const row = object(value, ["type", "block_id", "text", "fields", "elements"]);
-            const type = string(row.type, 20);
+            const type = boundedString(row.type, 20);
             const allowed = new Map([["header", ["text"]], ["section", ["text", "fields"]], ["context", ["elements"]], ["actions", ["elements"]], ["divider", []]]);
             const specific = allowed.get(type);
             if (!specific || Object.keys(row).some((key) => !["type", "block_id", ...specific].includes(key)))
                 invalid();
             const result = { type };
             if (row.block_id !== undefined) {
-                const id = string(row.block_id, 255);
+                const id = boundedString(row.block_id, 255);
                 if (ids.has(id))
                     invalid();
                 ids.add(id);
@@ -135,11 +144,11 @@ function parsePayload(input, wire) {
                     const button = object(v, ["type", "text", "url", "action_id"]);
                     if (button.type !== "button")
                         invalid();
-                    const id = string(button.action_id, 255);
+                    const id = boundedString(button.action_id, 255);
                     if (actions.has(id))
                         invalid();
                     actions.add(id);
-                    return { type: "button", text: text(button.text, `/blocks/${i}/elements/${j}/text`, 75, i, j, true), url: url(button.url), action_id: id };
+                    return { type: "button", text: text(button.text, `/blocks/${i}/elements/${j}/text`, 75, i, j, true), url: url(boundedString(button.url, 3000)), action_id: id };
                 });
             }
             return result;
