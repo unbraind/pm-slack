@@ -53,6 +53,24 @@ const result = migrateSlackDestinations(pmRoot, {
 });
 ```
 
+To inspect delivery evidence without recovering unfinished attempts, open a
+read-only SDK handle and close it after reading:
+
+```ts
+import { SlackOutbox } from "pm-slack";
+
+const evidence = new SlackOutbox(pmRoot, { readOnly: true });
+try {
+  console.log(evidence.status(20));
+} finally {
+  evidence.close();
+}
+```
+
+CLI previews and inventories use the same read-only policy through their
+after-command hooks. An interrupted sender's evidence and database permissions
+stay unchanged; use an explicit writable operation when recovery is intended.
+
 `OutboxError` carries `code`, `exitCode: 2` and `remedy`. `invalid_input` names
 the input domains; `disabled` requires enabling the outbox; `not_found` requires
 binding both aliases; `binding_changed` and `plan_changed` require review again;

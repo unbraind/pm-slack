@@ -2028,27 +2028,28 @@ export default defineExtension({
                     // context during early bootstrap; do not simplify it away.
                     if (ctx && ctx.ok === false)
                         return;
-                    if (ctx.command === "slack explain")
+                    if (readBoolOption(ctx.options ?? {}, "dry-run"))
                         return;
                     const statusRegistry = ctx.pm_root && existsSync(ctx.pm_root) ? resolveRuntimeStatusRegistry((await readSettings(ctx.pm_root)).schema) : undefined;
-                    if (ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
+                    const event = detectEvent(ctx, statusRegistry);
+                    if (!event)
+                        return;
+                    const item = extractItem(ctx);
+                    if (item && ctx.pm_root && existsSync(path.join(ctx.pm_root, "runtime", "slack-outbox", "delivery.sqlite"))) {
                         const outbox = new SlackOutbox(ctx.pm_root);
                         try {
                             if (outbox.since()) {
-                                const item = extractItem(ctx);
-                                if (item && detectEvent(ctx, statusRegistry)) {
-                                    try {
-                                        await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
-                                    }
-                                    catch (error) {
-                                        if (outboxFailure(error).code !== "history_unavailable")
-                                            throw error;
-                                    }
-                                    if (process.env.PM_SLACK_COALESCE === "1")
-                                        await outbox.drainCoalesced(sendOutbox, { budget: 0 });
-                                    else
-                                        await outbox.drain(sendOutbox, 1);
+                                try {
+                                    await captureSlackOutbox(ctx.pm_root, outbox, [item.id]);
                                 }
+                                catch (error) {
+                                    if (outboxFailure(error).code !== "history_unavailable")
+                                        throw error;
+                                }
+                                if (process.env.PM_SLACK_COALESCE === "1")
+                                    await outbox.drainCoalesced(sendOutbox, { budget: 0 });
+                                else
+                                    await outbox.drain(sendOutbox, 1);
                                 return;
                             }
                         }
@@ -2059,14 +2060,10 @@ export default defineExtension({
                     const config = loadConfig();
                     if (!config)
                         return; // no webhook → silent no-op
-                    const event = detectEvent(ctx, statusRegistry);
-                    if (!event)
-                        return;
                     if (!config.events.has(event)) {
                         console.error(`[pm-slack] Event "${event}" filtered by PM_SLACK_EVENTS`);
                         return;
                     }
-                    const item = extractItem(ctx);
                     if (!item) {
                         console.error("[pm-slack] Could not extract item from result — skipping");
                         return;
@@ -2254,7 +2251,7 @@ export default defineExtension({
                         const after = Number(readStrOption(ctx.options, "after") ?? "0");
                         if (!["preview", "drain", "receipts"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0)
                             throw new OutboxError("invalid_input", "Choose preview, drain or receipts; use limit 1..100 and a nonnegative cursor.");
-                        const outbox = new SlackOutbox(ctx.pm_root);
+                        const outbox = new SlackOutbox(ctx.pm_root, { readOnly: action !== "drain" });
                         try {
                             // Validate every bound before recovering history or contacting Slack.
                             const preview = outbox.planCoalescing(options);
@@ -2299,7 +2296,7 @@ export default defineExtension({
                         if (!["status", "enable", "configure", "drain", "resolve"].includes(action) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(after) || after < 0) {
                             throw new OutboxError("invalid_input", "Choose status, enable, configure, drain or resolve and a limit from 1 to 100.");
                         }
-                        const outbox = new SlackOutbox(ctx.pm_root);
+                        const outbox = new SlackOutbox(ctx.pm_root, { readOnly: action === "status" });
                         try {
                             if (action === "enable" || action === "configure") {
                                 outboxTargets();

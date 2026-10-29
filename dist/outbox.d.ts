@@ -192,8 +192,10 @@ export declare function readSlackRoutingEvidence(pmRoot: string, item: string, e
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export declare class SlackOutbox {
     private readonly db;
-    /** Open runtime storage in an initialized local tracker, without invoking git. */
-    constructor(pmRoot: string);
+    /** Open runtime storage without git; readOnly skips creation, permissions, schema upgrades and recovery of existing storage. */
+    constructor(pmRoot: string, options?: {
+        readOnly?: boolean;
+    });
     /** Release the database handle; committed receipts survive process exit. */
     close(): void;
     /** Atomically opt in with initial eligibility; legacy policy adoption starts with future history. */

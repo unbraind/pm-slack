@@ -156,17 +156,27 @@ export function readSlackRoutingEvidence(pmRoot, item, event, revision, at) {
 /** Local SQLite outbox using full synchronous commits and atomic cross-process claims. */
 export class SlackOutbox {
     db;
-    /** Open runtime storage in an initialized local tracker, without invoking git. */
-    constructor(pmRoot) {
+    /** Open runtime storage without git; readOnly skips creation, permissions, schema upgrades and recovery of existing storage. */
+    constructor(pmRoot, options = {}) {
         let database;
         try {
             const directory = join(pmRoot, "runtime", "slack-outbox");
-            mkdirSync(directory, { recursive: true, mode: 0o700 });
-            chmodSync(directory, 0o700);
             const file = join(directory, "delivery.sqlite");
-            this.db = openDatabase(file);
+            if (options.readOnly && existsSync(file)) {
+                this.db = openDatabase(file, true);
+                database = this.db;
+                this.db.prepare("SELECT key FROM delivery LIMIT 0").all();
+                return;
+            }
+            if (!options.readOnly) {
+                mkdirSync(directory, { recursive: true, mode: 0o700 });
+                chmodSync(directory, 0o700);
+            }
+            // An absent store has the same empty report as before, using only an ephemeral schema.
+            this.db = openDatabase(options.readOnly ? ":memory:" : file);
             database = this.db;
-            chmodSync(file, 0o600);
+            if (!options.readOnly)
+                chmodSync(file, 0o600);
             this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), since TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS delivery (
@@ -194,11 +204,16 @@ export class SlackOutbox {
           INSERT OR IGNORE INTO delivery_request_dispatched SELECT key,token FROM delivery_attempt WHERE result!='not_sent';
           INSERT OR IGNORE INTO delivery_attempt_terminal SELECT key,token,CASE result WHEN 'acknowledged' THEN 'confirmed' WHEN 'not_sent' THEN 'not_sent' WHEN 'rejected' THEN 'rejected' WHEN 'retry' THEN 'rejected' ELSE 'unknown_after_send' END FROM delivery_attempt WHERE result!='started';`);
             });
-            this.recoverAttempts();
+            if (options.readOnly)
+                this.db.exec("PRAGMA query_only=ON");
+            else
+                this.recoverAttempts();
         }
         catch {
             database?.close();
-            throw new OutboxError("storage_unavailable", "Restore writable local runtime storage; committed items are unchanged. Then drain again.");
+            throw new OutboxError("storage_unavailable", options.readOnly
+                ? "Restore readable local outbox storage and inspect again; no recovery or notification was attempted."
+                : "Restore writable local runtime storage; committed items are unchanged. Then drain again.");
         }
     }
     /** Release the database handle; committed receipts survive process exit. */
@@ -283,8 +298,9 @@ export class SlackOutbox {
     planCoalescing(options = {}) {
         if (!this.since())
             throw new OutboxError("disabled", "Run pm slack outbox --action enable before coalescing.");
-        const rows = this.db.prepare(`SELECT d.key,d.item,d.event,d.revision,d.destination,COALESCE(c.at,0) AS at,COALESCE(c.priority,4) AS priority
-      FROM delivery d LEFT JOIN delivery_context c ON c.key=d.key WHERE d.state='pending' LIMIT 10001`).all();
+        const context = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='delivery_context'").get();
+        const rows = this.db.prepare(`SELECT d.key,d.item,d.event,d.revision,d.destination,${context ? "COALESCE(c.at,0) AS at,COALESCE(c.priority,4) AS priority" : "0 AS at,4 AS priority"}
+      FROM delivery d${context ? " LEFT JOIN delivery_context c ON c.key=d.key" : ""} WHERE d.state='pending' LIMIT 10001`).all();
         return planSlackCoalescing(rows, options);
     }
     /** Page a preview or durable evidence manifest without exposing frozen payloads or destinations. */

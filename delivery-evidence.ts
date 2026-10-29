@@ -58,7 +58,9 @@ export interface DeliveryEvidenceRow {
 }
 
 /** Read legacy or journaled receipts without creating tables, changing state or exposing private payloads. */
-export function readDeliveryEvidenceRows(db: DatabaseSync, key?: string, journaled = true): DeliveryEvidenceRow[] {
+export function readDeliveryEvidenceRows(db: DatabaseSync, key?: string, journaled?: boolean): DeliveryEvidenceRow[] {
+  journaled ??= Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('delivery_proof','delivery_attempt','delivery_resolution')").get()!.n) === 3;
+  const coalescing = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='coalescing_receipt'").get();
   const where = key === undefined ? "" : " WHERE d.key=?";
   const journalWhere = key === undefined ? "" : " WHERE key=?";
   const paired = journaled && !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='delivery_attempt_start'").get();
@@ -78,8 +80,8 @@ export function readDeliveryEvidenceRows(db: DatabaseSync, key?: string, journal
   const joins = journaled ? ` LEFT JOIN delivery_proof p ON p.key=d.key
     LEFT JOIN (${aggregate}) a ON a.key=d.key
     LEFT JOIN (SELECT key,COUNT(*) AS resolutions FROM delivery_resolution${journalWhere} GROUP BY key) r ON r.key=d.key` : "";
-  const query = db.prepare(`SELECT CAST(d.rowid AS TEXT) AS sequence,d.key,d.item,d.event,d.revision,d.state,CAST(d.attempts AS TEXT) AS attempts,c.disposition,c.notification${journal}
-    FROM delivery d LEFT JOIN coalescing_receipt c ON c.key=d.key${joins}${where} ORDER BY d.rowid`);
+  const query = db.prepare(`SELECT CAST(d.rowid AS TEXT) AS sequence,d.key,d.item,d.event,d.revision,d.state,CAST(d.attempts AS TEXT) AS attempts,${coalescing ? "c.disposition,c.notification" : "NULL AS disposition,NULL AS notification"}${journal}
+    FROM delivery d${coalescing ? " LEFT JOIN coalescing_receipt c ON c.key=d.key" : ""}${joins}${where} ORDER BY d.rowid`);
   const parameters: string[] = [];
   if (key !== undefined) { if (journaled) parameters.push(key, key); parameters.push(key); }
   const rows = query.all(...parameters);

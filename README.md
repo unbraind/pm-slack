@@ -656,6 +656,14 @@ an applied plan reads the current targets and returns `already_applied` or
 `superseded`, moving zero events. Replaying original lifecycle inputs keeps the
 same queue key. Automatic recovery continues using the existing outbox.
 
+Read-only behavior includes the complete CLI command, renderer and hook lifecycle.
+Migration previews and binding inventories, coalescing previews and receipts, and
+outbox status never recover dead owners, upgrade schemas, create runtime files or
+change permissions. Dry-run and non-lifecycle hooks do not open writable storage.
+SDK inspection uses `new SlackOutbox(pmRoot, { readOnly: true })`; an absent store
+returns an empty status without creating a database. Explicit writable operations
+retain durable recovery. Legacy receipt schemas remain readable without upgrades.
+
 Plain and coalesced drains both re-read destinations and check ambiguity holds
 inside the shared claim transaction. A route changed after candidate discovery
 is deferred to the next drain; an in-flight ambiguous target cannot receive a

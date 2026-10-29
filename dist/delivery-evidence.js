@@ -15,7 +15,9 @@ export function deriveSlackDeliveryOutcome(evidence, policyExcluded = false) {
     return evidence.legacy_unknown || evidence.uncertain > 0 ? "uncertain" : "withheld";
 }
 /** Read legacy or journaled receipts without creating tables, changing state or exposing private payloads. */
-export function readDeliveryEvidenceRows(db, key, journaled = true) {
+export function readDeliveryEvidenceRows(db, key, journaled) {
+    journaled ??= Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('delivery_proof','delivery_attempt','delivery_resolution')").get().n) === 3;
+    const coalescing = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='coalescing_receipt'").get();
     const where = key === undefined ? "" : " WHERE d.key=?";
     const journalWhere = key === undefined ? "" : " WHERE key=?";
     const paired = journaled && !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='delivery_attempt_start'").get();
@@ -35,8 +37,8 @@ export function readDeliveryEvidenceRows(db, key, journaled = true) {
     const joins = journaled ? ` LEFT JOIN delivery_proof p ON p.key=d.key
     LEFT JOIN (${aggregate}) a ON a.key=d.key
     LEFT JOIN (SELECT key,COUNT(*) AS resolutions FROM delivery_resolution${journalWhere} GROUP BY key) r ON r.key=d.key` : "";
-    const query = db.prepare(`SELECT CAST(d.rowid AS TEXT) AS sequence,d.key,d.item,d.event,d.revision,d.state,CAST(d.attempts AS TEXT) AS attempts,c.disposition,c.notification${journal}
-    FROM delivery d LEFT JOIN coalescing_receipt c ON c.key=d.key${joins}${where} ORDER BY d.rowid`);
+    const query = db.prepare(`SELECT CAST(d.rowid AS TEXT) AS sequence,d.key,d.item,d.event,d.revision,d.state,CAST(d.attempts AS TEXT) AS attempts,${coalescing ? "c.disposition,c.notification" : "NULL AS disposition,NULL AS notification"}${journal}
+    FROM delivery d${coalescing ? " LEFT JOIN coalescing_receipt c ON c.key=d.key" : ""}${joins}${where} ORDER BY d.rowid`);
     const parameters = [];
     if (key !== undefined) {
         if (journaled)

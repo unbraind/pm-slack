@@ -6,6 +6,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { decode } from "@toon-format/toon";
+import { withObservationalOutbox } from "../test/helpers/observational-outbox-scenario.ts";
 import { SlackOutbox, slackDestination } from "../outbox.ts";
 import type { DestinationMigrationReport } from "../destination-migration.ts";
 
@@ -80,13 +82,22 @@ try {
     // Execute the captured artifact's native outbox, rather than the checkout's implementation.
     const code = `import {SlackOutbox,migrateSlackDestinations,slackDestination} from ${JSON.stringify(pathToFileURL(join(extracted, "package", "dist", "outbox.js")).href)};
 import {assertMigrationDestinationHold} from ${JSON.stringify(pathToFileURL(join(root, "test", "helpers", "destination-hold-scenario.ts")).href)};
+import {seedObservationalOutbox} from ${JSON.stringify(pathToFileURL(join(root, "test", "helpers", "observational-outbox-scenario.ts")).href)};
 const pmRoot=${JSON.stringify(join(workspace, ".agents", "pm"))};const box=new SlackOutbox(pmRoot);
-try{for(const kind of ["plain","coalesced-urgent","coalesced-routine"]){await assertMigrationDestinationHold(box,(input)=>migrateSlackDestinations(pmRoot,input),{namespace:"packed-"+kind,source:slackDestination("http://127.0.0.1:1/"+kind+"-source"),target:slackDestination("http://127.0.0.1:1/"+kind+"-target"),coalesced:kind!=="plain",routine:kind==="coalesced-routine"});}}finally{box.close();}`;
+try{for(const kind of ["plain","coalesced-urgent","coalesced-routine"]){await assertMigrationDestinationHold(box,(input)=>migrateSlackDestinations(pmRoot,input),{namespace:"packed-"+kind,source:slackDestination("http://127.0.0.1:1/"+kind+"-source"),target:slackDestination("http://127.0.0.1:1/"+kind+"-target"),coalesced:kind!=="plain",routine:kind==="coalesced-routine"});}}finally{box.close();}
+await seedObservationalOutbox(pmRoot,${JSON.stringify(pathToFileURL(join(extracted, "package", "dist", "outbox.js")).href)},slackDestination("http://127.0.0.1:1/old"));`;
     const nativeBun = shape === "bun-global" || shape === "bunx";
     run(nativeBun ? "bun" : process.execPath, nativeBun ? ["--eval", code] : ["--input-type=module", "--eval", code], workspace);
+    await withObservationalOutbox(join(workspace, ".agents", "pm"), async (unchanged) => {
+      for (const args of [["slack", "migrate", "--from", "old", "--to", "new"], ["slack", "migrate", "--action", "bindings"], ["slack", "coalesce"], ["slack", "coalesce", "--action", "receipts"], ["slack", "outbox", "--action", "status"]]) {
+        const json = JSON.parse(pm(args)) as unknown; unchanged();
+        const toon = decode(run(command, [...lead, ...args], workspace)); unchanged();
+        assert.deepEqual(toon, json, "real installed CLI rendering and after-command hooks preserve the same read-only result");
+      }
+    });
     delete childEnv.PM_SLACK_WEBHOOK; delete childEnv.PM_SLACK_ROUTES;
-    console.log(`Packed acceptance: ${shape} passed (migration/replay plus plain, urgent and routine ambiguity holds; zero duplicate receipts or remote posts).`);
+    console.log(`Packed acceptance: ${shape} passed (migration/replay, three ambiguity holds and ten real CLI read-only lifecycles; zero duplicate receipts or remote posts).`);
   }
   assert.equal(createHash("sha256").update(readFileSync(artifact)).digest("hex"), sha256);
-  console.log(JSON.stringify({ shapes: 5, passed: 5, captured_artifact_hold_scenarios: 15, package_sha256: sha256, host, remote_posts: 0 }));
+  console.log(JSON.stringify({ shapes: 5, passed: 5, captured_artifact_hold_scenarios: 15, read_only_cli_lifecycles: 50, package_sha256: sha256, host, remote_posts: 0 }));
 } finally { rmSync(directory, { recursive: true, force: true }); }

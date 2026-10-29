@@ -9,6 +9,8 @@ import extension, { SlackOutbox, slackDestination, explainSlackRouting, migrateS
 import type { OutboxReport, CoalescingReport } from "../dist/index.js";
 import http from "node:http";
 import { assertMigrationDestinationHold } from "./helpers/destination-hold-scenario.ts";
+import { seedObservationalOutbox, withObservationalOutbox } from "./helpers/observational-outbox-scenario.ts";
+import { decode } from "@toon-format/toon";
 
 const directory = mkdtempSync(join(tmpdir(), "slack-bun-acceptance-"));
 const pmRoot = join(directory, ".agents", "pm");
@@ -101,7 +103,18 @@ try {
     }
     assert.equal(sends, 2, "plain and both coalesced hold scenarios use only synthetic SDK transports");
   } finally { migration.close(); }
-  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment; plain, urgent and routine migration ambiguity holds pass, no git.");
+  await seedObservationalOutbox(pmRoot, new URL("../dist/outbox.js", import.meta.url).href, slackDestination("http://127.0.0.1:1/migration-old", "#old"));
+  await withObservationalOutbox(pmRoot, async (unchanged) => {
+    for (const [command, options] of [["slack migrate", { from: "old", to: "new" }], ["slack migrate", { action: "bindings" }], ["slack coalesce", {}], ["slack coalesce", { action: "receipts" }], ["slack outbox", { action: "status" }]] as const) {
+      const { result } = await harness!.runCommand({ command, pmRoot, options, global: { json: true } }); unchanged();
+      assert.deepEqual(decode((await harness!.runRendererOverride({ command, format: "toon", result })).rendered!), result); unchanged();
+      await harness!.runHook({ kind: "after_command", context: { command, args: [], options, pm_root: pmRoot, ok: true, result } }); unchanged();
+    }
+    const read = new SlackOutbox(pmRoot, { readOnly: true });
+    try { assert.equal(read.status().counts.sending, 1); assert.equal(read.status().counts.pending, 1); } finally { read.close(); }
+    unchanged(); assert.equal(sends, 2);
+  });
+  console.log("Native Bun acceptance: 1 recovered lifecycle + 2 coalesced events, 2 acknowledged HTTP sends; retry cleanup and stale completion preserve 1 peer group, 0 duplicates; SDK/CLI explanation agrees with 0 extra HTTP sends; 2 uncertain proofs survive operator acknowledgment; three migration ambiguity holds and five read-only command/renderer/hook lifecycles preserve crashed-attempt bytes and permissions, no git.");
 } finally {
   await harness?.deactivate();
   await new Promise<void>((done) => server.close(() => done()));
