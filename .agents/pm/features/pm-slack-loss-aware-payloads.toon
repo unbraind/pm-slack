@@ -2,13 +2,19 @@ id: pm-slack-loss-aware-payloads
 title: Compile bounded Slack payloads with exact loss receipts
 description: "Compile Slack wire payloads with per-field clipping and omission receipts plus stable recovery links. Scope excludes generic redaction, output budgeting and renderer registries."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags[3]: loss-receipts,payload,slack
 created_at: "2026-10-29T05:49:43.965Z"
-updated_at: "2026-10-29T09:51:48.055Z"
+updated_at: "2026-10-30T20:35:46.689Z"
+closed_at: "2026-10-30T20:35:44.907Z"
+completed_at: "2026-10-29T10:15:38.000Z"
 author: codex-agent
 acceptance_criteria: Oversized block and text fixtures respect documented payload bounds; Every clipped source span is accounted for with a recovery link; Urgent status and identity fields are never silently removed; Malformed payloads refuse before sending
+release: 2026.10.30
+resolution: "Delivered by PR #171 (2b681db): Compile bounded Slack messages with exact loss receipts"
+expected_result: Oversized block and text fixtures respect documented payload bounds; Every clipped source span is accounted for with a recovery link; Urgent status and identity fields are never silently removed; Malformed payloads refuse before sending
+actual_result: "PR #171 merged at 2026-10-29T10:15:38Z as 2b681db; required CI passed on the merged head."
 comments[15]{created_at,author,text}:
   "2026-10-29T05:50:04.404Z",codex-agent,"Overlap recheck: core output budgets govern JSON/TOON projection, existing attention coalescing governs event counts, and pm-slack-standup owns standup generation. Existing Slack renderers truncate fields without receipts. No equivalent compiler or duplicate open item/PR found. Design: a pure bounded compiler and strict shared wire schema; explicit protected paths and stable recovery URLs; SDK-backed read-only item projection; no new durable state, leases, import, sync, or remote writes. Existing delivery state machines remain separate. No transaction isolation claim: commitWorkspaceTransaction does not exclude ordinary writers (pm-cli#1620). Read-only compilation observes a snapshot and never applies a saved plan."
   "2026-10-29T06:00:56.256Z",codex-agent,"Implementation: shared strict static Block Kit schema validates compiler inputs and every outbound webhook payload; pure compiler records nonoverlapping original UTF-16 ranges, typed protected_overflow refusals and recovery links. SDK item projection protects identity, status, priority, assignee, parent and full dependency fields without lifecycle name comparisons. Canonical full SDK reads explicitly disable output budgets; command uses only the host-injected client. Compact paginated TOON/JSON output carries a source digest. Focused oversized/schema/zero-socket tests pass; seeded 500-sequence no-git readback and packed acceptance are underway."
@@ -56,4 +62,5 @@ docs[3]{path,scope}:
   docs/payload-compilation-example.md,project
   docs/payload-compilation-validation.md,project
   README.md,project
+close_reason: "Delivered by PR #171 (2b681db): Compile bounded Slack messages with exact loss receipts"
 body: ""
