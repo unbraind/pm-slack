@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.10.30 - 2026-10-30
+
+### Added
+
+- Compile bounded Slack payloads with exact loss receipts ([pm-slack-loss-aware-payloads](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-loss-aware-payloads.toon))
+- Preview and review destination changes for pending Slack events ([pm-slack-destination-migration-plans](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-destination-migration-plans.toon))
+
 ## 2026.10.28 - 2026-10-28
 
 ### Added
@@ -11,6 +18,12 @@
 ### Other
 
 - Use the pm SDK mutation feed for Slack outbox recovery ([pm-slack-3so4](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-3so4.toon))
+
+## 2026.10.26 - 2026-10-26
+
+### Other
+
+- Point the npm homepage at the package catalog and link the author ([pm-slack-77v5](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-77v5.toon))
 
 ## 2026.10.25 - 2026-10-25
 
