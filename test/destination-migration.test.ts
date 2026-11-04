@@ -247,7 +247,7 @@ test("500 seeded operation sequences preserve the SDK-read model across old repl
   const nativeIds: string[] = [];
   for (let i = 0; i < 8; i++) {
     const item = await create({ title: `  Native ${i}\r\nline  `, description: ` whitespace ${i} \n`, body: `  body\r\n${i}\n`, priority: i % 5,
-      tags: `native-${i},shared`, parent: i ? nativeIds[0] : "none", goal: "none", objective: "none", sprint: "none", release: "none",
+      tags: `native-${i},shared`, ...(i ? { parent: nativeIds[0] } : {}), unset: [...(i ? [] : ["parent"]), "goal", "objective", "sprint", "release"],
       assignee: "fixture-agent", estimatedMinutes: String(i * 11), comment: [`text=Native comment ${i}`], note: [`text=Native note ${i}`],
       file: [`path=src/native-${i}.ts`], doc: [`path=docs/native-${i}.md`], test: [`command=node native-${i}.ts`] }, f.client);
     nativeIds.push(item.item.id);

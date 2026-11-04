@@ -744,3 +744,7 @@ before changing permissions and never chmod link targets during cleanup. Outbox
 write paths refuse linked storage/sidecars with `storage_unavailable`; existing
 read-only observations remain compatible. See the [class-wide regression and
 revert evidence](docs/payload-compilation-validation.md#re-review-r1-bounded-work-and-owned-permission-changes).
+
+Full-history changelog generation retains empty release windows as `No changes.`
+sections, including pending windows for prepared releases. Fresh release-note
+generation still requires qualifying changes.
