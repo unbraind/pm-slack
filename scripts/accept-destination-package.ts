@@ -13,7 +13,8 @@ import type { DestinationMigrationReport } from "../destination-migration.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const directory = mkdtempSync(join(tmpdir(), "slack-packed-migration-"));
-const host = "@unbrained/pm-cli@2026.10.28";
+const toolchain = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { devDependencies: Record<string, string> };
+const host = `@unbrained/pm-cli@${toolchain.devDependencies["@unbrained/pm-cli"]}`;
 const childEnv = { ...process.env };
 for (const key of Object.keys(childEnv)) if (/token|secret|password|credential|api[_-]?key|auth|NPM_MEDIA_SERVER/i.test(key) || /^PM_/.test(key) || key.toLowerCase() === "npm_config_allow_scripts") delete childEnv[key];
 childEnv.NPM_CONFIG_USERCONFIG = "/dev/null";

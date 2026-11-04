@@ -8,6 +8,7 @@ const repoRoot = resolve(import.meta.dirname, "..");
 interface PackageManifest {
   readonly devDependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
+  readonly scripts?: Record<string, string>;
 }
 
 interface ExtensionManifest {
@@ -132,4 +133,15 @@ test("the version comparison orders YYYY.M.D numerically, not lexicographically"
   assert.ok(!atOrAbove("2026.7.31", "2026.8.1"), "an earlier month never satisfies a later one");
   assert.ok(atOrAbove("2027.1.1", "2026.12.31"), "a later year outranks any date of an earlier one");
   assert.ok(!atOrAbove("2025.12.31", "2026.1.1"), "an earlier year never satisfies a later one");
+});
+
+/** Keep empty historical release tags visible without accepting empty fresh notes. */
+test("historical changelogs explicitly retain empty releases while fresh notes stay strict", () => {
+  for (const name of ["changelog:full", "changelog:check"]) {
+    assert.match(packageJson.scripts?.[name] ?? "", /--all-release-tags --include-empty/u);
+    assert.doesNotMatch(packageJson.scripts?.[name] ?? "", /--no-pending-release/u);
+  }
+  for (const name of ["changelog", "release:notes"]) {
+    assert.doesNotMatch(packageJson.scripts?.[name] ?? "", /--include-empty/u);
+  }
 });

@@ -182,8 +182,8 @@ test("500 seeded operation sequences export/replay SDK snapshots without changin
   const options = { cwd: directory, pmRoot: join(directory, ".agents", "pm"), noExtensions: true, author: "compiler-test" };
   await init("compile", { defaults: true, agentGuidance: "skip" }, options);
   const client = new PmClient(options);
-  await create({ id: "anchor", title: "Ambient parent", type: "Task", status: "open", parent: "none", sprint: "none", release: "none", assignee: "none", dep: [] }, options);
-  await create({ id: "subject", title: "Initial", type: "Task", status: "open", priority: 1, parent: "none", sprint: "none", release: "none", assignee: "none", body: "source", dep: ["id=anchor,kind=related_to"] }, options);
+  await create({ id: "anchor", title: "Ambient parent", type: "Task", status: "open", unset: ["parent", "sprint", "release", "assignee"], dep: [] }, options);
+  await create({ id: "subject", title: "Initial", type: "Task", status: "open", priority: 1, unset: ["parent", "sprint", "release", "assignee"], body: "source", dep: ["id=anchor,kind=related_to"] }, options);
   let seed = 0x51ac2026;
   /** Fixed PRNG makes every failed sequence replayable. */
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
@@ -197,8 +197,11 @@ test("500 seeded operation sequences export/replay SDK snapshots without changin
       rolesSeen.add(roles.join(","));
       await schemaAddStatus(custom, { role: roles }, options);
       await focus(random() % 2 ? "anchor" : "subject", {}, options);
-      await update("subject", { title: `  Title ${random()} 😀  `, body: `  body ${random()}\r\n${"é".repeat(random() % 4500)}\n  `, status: custom, priority: (random() % 5) as 0 | 1 | 2 | 3 | 4, assignee: random() % 2 ? "agent" : "none", parent: random() % 2 ? "anchor" : "none", sprint: "none", release: "none", dep: random() % 2 ? ["id=anchor,kind=related_to"] : [], replaceDeps: true, closeReason: "model outcome", blockedReason: "model blocker", force: true }, options);
+      const transition = { title: `  Title ${random()} 😀  `, body: `  body ${random()}\r\n${"é".repeat(random() % 4500)}\n  `, status: custom, priority: (random() % 5) as 0 | 1 | 2 | 3 | 4, assignee: random() % 2 ? "agent" : undefined, parent: random() % 2 ? "anchor" : undefined, dep: random() % 2 ? ["id=anchor,kind=related_to"] : [], replaceDeps: true, closeReason: "model outcome", blockedReason: "model blocker", force: true };
+      await update("subject", { ...transition, unset: ["sprint", "release", ...(!transition.assignee ? ["assignee"] : []), ...(!transition.parent ? ["parent"] : [])] }, options);
       model = (await client.get("subject", { depth: "full", noTruncate: true })).item;
+      if (!transition.assignee) assert.equal(model.assignee, undefined);
+      if (!transition.parent) assert.equal(model.parent, undefined);
     }
     const result = await compileSlackItem(client, "subject", sourceLink());
     assert.ok(JSON.stringify(result.payload).includes(model.status!));
@@ -247,7 +250,7 @@ test("SDK read producers handle empty bodies and real budget refusals and every 
   const directory = mkdtempSync(join(tmpdir(), "slack-compile-sdk-")); t.after(() => rmSync(directory, { recursive: true, force: true }));
   const options = { cwd: directory, pmRoot: join(directory, ".agents", "pm"), noExtensions: true };
   await init("producer", { defaults: true, agentGuidance: "skip" }, options);
-  await create({ id: "empty", title: "Empty body", type: "Task", status: "open", parent: "none", assignee: "none", sprint: "none", release: "none", dep: [], body: "" }, options);
+  await create({ id: "empty", title: "Empty body", type: "Task", status: "open", unset: ["parent", "assignee", "sprint", "release"], dep: [], body: "" }, options);
   const client = new PmClient(options);
   const empty = await compileSlackItem(client, "empty", sourceLink()); assert.deepEqual(empty.losses, []);
   const refused = await client.get("empty", { depth: "full", outputBudget: 1 });

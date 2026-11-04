@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+No changes.
+
+## 2026.11.3 - 2026-11-03
+
+No changes.
+
+## 2026.11.1 - 2026-11-01
+
+No changes.
+
+## 2026.10.31 - 2026-10-31
+
+No changes.
+
 ## 2026.10.30 - 2026-10-30
 
 ### Added
@@ -36,6 +52,10 @@
 
 - Keep outbox opt-in and recovery policy atomic across crashes ([pm-slack-s53m](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-s53m.toon))
 
+## 2026.10.24 - 2026-10-24
+
+No changes.
+
 ## 2026.10.23 - 2026-10-23
 
 ### Changed
@@ -58,11 +78,43 @@
 - Closed: Fix release publish ordering before protected main push ([pm-slack-1aeu](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-1aeu.toon))
 - Closed: Shell scalar assignments are read from raw text, so a comment can flag an unattested publish ([pm-slack-cxyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-cxyv.toon))
 
+## 2026.10.20 - 2026-10-20
+
+No changes.
+
+## 2026.10.18 - 2026-10-18
+
+No changes.
+
+## 2026.10.17 - 2026-10-17
+
+No changes.
+
+## 2026.10.16 - 2026-10-16
+
+No changes.
+
+## 2026.10.14 - 2026-10-14
+
+No changes.
+
+## 2026.10.10 - 2026-10-10
+
+No changes.
+
+## 2026.10.9 - 2026-10-09
+
+No changes.
+
 ## 2026.10.5 - 2026-10-05
 
 ### Other
 
 - Auto-merge green Dependabot updates and group the pm toolchain into one daily PR ([pm-slack-nra8](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-nra8.toon))
+
+## 2026.10.3 - 2026-10-03
+
+No changes.
 
 ## 2026.9.26 - 2026-09-26
 
@@ -99,6 +151,10 @@
 
 - Certify pm CLI 2026.9.10 and pick up the canonical auditor fixes the lockfile was holding back ([pm-slack-v3u2](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-v3u2.toon))
 
+## 2026.9.9 - 2026-09-09
+
+No changes.
+
 ## 2026.9.8 - 2026-09-08
 
 ### Security
@@ -108,6 +164,10 @@
 ### Other
 
 - Harden the attestation consumer suite to match the rest of the converged fleet ([pm-slack-z1pl](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-z1pl.toon))
+
+## 2026.9.6 - 2026-09-06
+
+No changes.
 
 ## 2026.9.4 - 2026-09-04
 
@@ -193,11 +253,19 @@
 
 - Resolve pm-changelog to the release that derives release dates in UTC ([pm-slack-vrdp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-vrdp.toon))
 
+## 2026.8.3 - 2026-08-03
+
+No changes.
+
 ## 2026.8.1 - 2026-08-01
 
 ### Fixed
 
 - Release commits discard the rebuilt dist, so the git-install path serves the previous version ([pm-slack-il1n](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-il1n.toon))
+
+## 2026.7.31 - 2026-07-31
+
+No changes.
 
 ## 2026.7.29 - 2026-07-29
 
@@ -252,6 +320,14 @@
 
 - Closed: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-slack-nyfb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-nyfb.toon))
 
+## 2026.7.22 - 2026-07-22
+
+No changes.
+
+## 2026.7.20 - 2026-07-20
+
+No changes.
+
 ## 2026.7.19 - 2026-07-19
 
 ### Added
@@ -262,6 +338,14 @@
 ### Other
 
 - Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-slack-bfsb](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-bfsb.toon))
+
+## 2026.7.13 - 2026-07-13
+
+No changes.
+
+## 2026.7.11 - 2026-07-11
+
+No changes.
 
 ## 2026.7.10 - 2026-07-10
 
@@ -286,11 +370,27 @@
 - Align Node engine with pm CLI runtime ([pm-slack-wyhk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-wyhk.toon))
 - Regenerate CHANGELOG after pm close item ([pm-slack-xhc9](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-xhc9.toon))
 
+## 2026.6.14 - 2026-06-14
+
+No changes.
+
 ## 2026.6.13 - 2026-06-13
 
 ### Other
 
 - Daily Release publish step runs prepublishOnly post-tag: align npm publish with --ignore-scripts ([pm-slack-bff1](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-bff1.toon))
+
+## 2026.6.10 - 2026-06-10
+
+No changes.
+
+## 2026.6.9 - 2026-06-09
+
+No changes.
+
+## 2026.6.8 - 2026-06-08
+
+No changes.
 
 ## 2026.6.7 - 2026-06-07
 
@@ -306,6 +406,10 @@
 
 - Harden release readiness checks ([pm-slack-8rob](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-8rob.toon))
 - Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-slack-yj5o](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-yj5o.toon))
+
+## 2026.6.5 - 2026-06-05
+
+No changes.
 
 ## 2026.6.4-1 - 2026-06-04
 
@@ -342,6 +446,14 @@
 ### Added
 
 - Add afterCommand notification hook + slack notify command with Block Kit ([pm-slack-b3y5](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-b3y5.toon))
+
+## 2026.5.31 - 2026-05-31
+
+No changes.
+
+## 2026.5.30 - 2026-05-30
+
+No changes.
 
 ## 2026.5.29 - 2026-05-29
 
