@@ -37,9 +37,9 @@ No changes.
 
 ## 2026.10.26 - 2026-10-26
 
-### Other
+### Fixed
 
-- Point the npm homepage at the package catalog and link the author ([pm-slack-77v5](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-77v5.toon))
+- Point the npm homepage at the package's website and link the author ([pm-slack-77v5](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-77v5.toon))
 
 ## 2026.10.25 - 2026-10-25
 
