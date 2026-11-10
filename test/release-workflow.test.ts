@@ -483,3 +483,21 @@ test("a successful provenance publish enters attestation reconciliation before s
     "an expired attestation poll must refuse rather than report success",
   );
 });
+
+/** The flag set of one pm-changelog invocation, without the flags that only select check mode or step-summary output. */
+function changelogFlags(command: string): string[] {
+  const words = command.trim().split(/\s+/);
+  const start = words.indexOf("pm-changelog");
+  assert.ok(start >= 0, `not a pm-changelog invocation: ${command}`);
+  return words.slice(start + 1).filter(word => word !== "--check" && word !== "--github-step-summary").sort();
+}
+
+test("the release generates CHANGELOG.md with exactly the flags release:check verifies", () => {
+  // A drift between the two (2026-11-10: --include-empty in changelog:check only) made every daily release fail
+  // its own release:check after the generator dropped the empty tag sections the check expects.
+  const scripts = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf-8")).scripts as Record<string, string>;
+  const check = changelogFlags(scripts["changelog:check"]!);
+  const generators = workflow.split("\n").filter(line => /pm-changelog .*--mode replace --output CHANGELOG\.md/.test(line));
+  assert.ok(generators.length > 0, "the release must regenerate CHANGELOG.md");
+  for (const line of generators) assert.deepEqual(changelogFlags(line.replace(/^\s*npx\s+/, "")), check);
+});
