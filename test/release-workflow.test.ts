@@ -498,6 +498,7 @@ test("the release generates CHANGELOG.md with exactly the flags release:check ve
   const scripts = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf-8")).scripts as Record<string, string>;
   const check = changelogFlags(scripts["changelog:check"]!);
   const generators = workflow.split("\n").filter(line => /pm-changelog .*--mode replace --output CHANGELOG\.md/.test(line));
-  assert.ok(generators.length > 0, "the release must regenerate CHANGELOG.md");
+  // A paired --check alone would also match the filter, so require at least one real writer.
+  assert.ok(generators.some(line => !line.trim().split(/\s+/).includes("--check")), "the release must regenerate CHANGELOG.md, not only check it");
   for (const line of generators) assert.deepEqual(changelogFlags(line.replace(/^\s*npx\s+/, "")), check);
 });
