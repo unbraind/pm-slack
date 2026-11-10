@@ -497,7 +497,11 @@ test("the release generates CHANGELOG.md with exactly the flags release:check ve
   // its own release:check after the generator dropped the empty tag sections the check expects.
   const scripts = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf-8")).scripts as Record<string, string>;
   const check = changelogFlags(scripts["changelog:check"]!);
-  const generators = workflow.split("\n").filter(line => /pm-changelog .*--mode replace --output CHANGELOG\.md/.test(line));
+  // Every CHANGELOG writer and every inline check in the generate step, selected independently of mode and output, so a
+  // check pointed at another file is still compared; the --stdout release-notes call is the only one excluded.
+  const generators = executable(stepSource("Generate changelog and release notes")).split("\n")
+    .filter(line => /^\s*npx\s+pm-changelog(?:\s|$)/.test(line))
+    .filter(line => { const words = line.trim().split(/\s+/); return words.includes("--check") || !words.includes("--stdout"); });
   // A paired --check alone would also match the filter, so require at least one real writer.
   assert.ok(generators.some(line => !line.trim().split(/\s+/).includes("--check")), "the release must regenerate CHANGELOG.md, not only check it");
   for (const line of generators) assert.deepEqual(changelogFlags(line.replace(/^\s*npx\s+/, "")), check);

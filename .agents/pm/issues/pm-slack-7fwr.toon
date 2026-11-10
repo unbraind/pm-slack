@@ -6,13 +6,14 @@ status: in_progress
 priority: 1
 tags[3]: changelog,ci,release
 created_at: "2026-11-10T15:56:19.583Z"
-updated_at: "2026-11-10T17:20:03.602Z"
+updated_at: "2026-11-10T21:32:57.703Z"
 author: claude-orchestrator
 acceptance_criteria: "The release generates CHANGELOG.md with exactly the section-selection flags changelog:check verifies; A contract test fails when the two drift apart again, and fails on revert"
 actual_result: "Run release checks: Changelog is out of date; the generated file lacks 'No changes.' sections for older tags."
-comments[2]{created_at,author,text}:
+comments[3]{created_at,author,text}:
   "2026-11-10T15:56:42.117Z",claude-orchestrator,"Fix: --include-empty added to the release's CHANGELOG.md generation, matching changelog:check. A new contract test in test/release-workflow.test.ts compares the flags. Revert proof: with the workflow change reverted the test fails, and with it the test passes. pm-slack: typecheck clean, full npm test 1021 pass / 0 fail; new contract test 1/0 with the fix, 0/1 without it."
   "2026-11-10T17:20:03.601Z",claude-orchestrator,"CodeRabbit PRRT_kwDOSYpJkM61zBVh: the contract test now also requires at least one real writer (a pm-changelog CHANGELOG.md invocation without --check). A paired --check alone would have satisfied the filter. Revert proof: making every writer line a --check fails the test (0/1); unchanged 1/0."
+  "2026-11-10T21:32:57.700Z",claude-orchestrator,"Review round: the contract test now selects every pm-changelog writer and inline check in the generate step independently of mode and output, excluding only the --stdout notes call (CodeRabbit PRRT_kwDOSYpJkM6101sM). A check pointed at another file without --include-empty fails it. The post-tag empty Unreleased section (PRRT_kwDOSYpJkM6101sH) is pre-existing pm-changelog behaviour and is filed as unbraind/pm-changelog issue 337."
 files[2]{path,scope}:
   .github/workflows/release.yml,project
   test/release-workflow.test.ts,project
