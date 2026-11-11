@@ -484,12 +484,12 @@ test("a successful provenance publish enters attestation reconciliation before s
   );
 });
 
-/** The flag set of one pm-changelog invocation, without the flags that only select check mode or step-summary output. */
+/** The ordered flags of one pm-changelog invocation, without the flags that only select check mode or step-summary output. */
 function changelogFlags(command: string): string[] {
   const words = command.trim().split(/\s+/);
-  const start = words.indexOf("pm-changelog");
+  const start = words.findIndex(word => word === "pm-changelog" || word === "scripts/pm-changelog.ts");
   assert.ok(start >= 0, `not a pm-changelog invocation: ${command}`);
-  return words.slice(start + 1).filter(word => word !== "--check" && word !== "--github-step-summary").sort();
+  return words.slice(start + 1).filter(word => word !== "--check" && word !== "--github-step-summary");
 }
 
 test("the release generates CHANGELOG.md with exactly the flags release:check verifies", () => {
@@ -500,9 +500,17 @@ test("the release generates CHANGELOG.md with exactly the flags release:check ve
   // Every CHANGELOG writer and every inline check in the generate step, selected independently of mode and output, so a
   // check pointed at another file is still compared; the --stdout release-notes call is the only one excluded.
   const generators = executable(stepSource("Generate changelog and release notes")).split("\n")
-    .filter(line => /^\s*npx\s+pm-changelog(?:\s|$)/.test(line))
+    .filter(line => /^\s*(?:npx\s+pm-changelog|node\s+scripts\/pm-changelog\.ts)(?:\s|$)/.test(line))
     .filter(line => { const words = line.trim().split(/\s+/); return words.includes("--check") || !words.includes("--stdout"); });
   // A paired --check alone would also match the filter, so require at least one real writer.
   assert.ok(generators.some(line => !line.trim().split(/\s+/).includes("--check")), "the release must regenerate CHANGELOG.md, not only check it");
   for (const line of generators) assert.deepEqual(changelogFlags(line.replace(/^\s*npx\s+/, "")), check);
+});
+
+
+test("changelog flags preserve the ordered PM option and value pairs", () => {
+  const prefix = "pm-changelog --include-empty ";
+  const ordered = changelogFlags(prefix + "--pm-arg=--output-budget --pm-arg=unbounded");
+  const swapped = changelogFlags(prefix + "--pm-arg=unbounded --pm-arg=--output-budget");
+  assert.notDeepEqual(ordered, swapped);
 });
