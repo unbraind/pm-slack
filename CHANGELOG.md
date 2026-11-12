@@ -45,8 +45,8 @@ No changes.
 
 ### Added
 
-- Keep enabled Slack lifecycle notifications durable across restarts ([pm-slack-3e7d](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-3e7d.toon))
 - Bound lifecycle notification bursts with complete coalescing receipts ([pm-slack-npwn](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-npwn.toon))
+- Keep enabled Slack lifecycle notifications durable across restarts ([pm-slack-3e7d](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-3e7d.toon))
 
 ### Fixed
 
@@ -193,11 +193,11 @@ No changes.
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
-- Stabilise the changelog gate release date by deriving it from the calendar version instead of the clock ([pm-slack-tfrk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-tfrk.toon))
 - Rebase suffix-stable changelog release verification ([pm-slack-n47a](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-n47a.toon))
 - Harden publish scanner and preserve audit history ([pm-slack-lzun](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-lzun.toon))
 - Preserve append-only provenance history during review repair ([pm-slack-muxy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-muxy.toon))
+- A failed provenance publish silently falls back to an unattested one ([pm-slack-i9sz](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-i9sz.toon))
+- Stabilise the changelog gate release date by deriving it from the calendar version instead of the clock ([pm-slack-tfrk](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-tfrk.toon))
 
 ## 2026.8.28 - 2026-08-28
 
@@ -427,8 +427,8 @@ No changes.
 
 ### Added
 
-- Deep feature enhancement 2026-06-03 ([pm-slack-l3ux](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-l3ux.toon))
 - Digest reads pm store toon/json files directly (no new SDK service) ([pm-slack-06ti](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/decisions/pm-slack-06ti.toon))
+- Deep feature enhancement 2026-06-03 ([pm-slack-l3ux](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-l3ux.toon))
 
 ### Other
 
