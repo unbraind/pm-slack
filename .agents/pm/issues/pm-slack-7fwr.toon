@@ -2,14 +2,18 @@ id: pm-slack-7fwr
 title: "Daily release fails its own release:check: the release regenerates CHANGELOG.md without --include-empty"
 description: "The release step Generate changelog and release notes rendered CHANGELOG.md without --include-empty, but changelog:check (run by release:check) renders with it. The release therefore dropped the empty tag sections the check expects, and every daily release since the pm-changelog 2026.11.6 bump failed at Run release checks with 'Changelog is out of date' (reproduced on 2026-11-10 run logs)."
 type: Issue
-status: in_progress
+status: closed
 priority: 1
 tags[4]: changelog,ci,"gh:unbraind/pm-slack#188",release
 created_at: "2026-11-10T15:56:19.583Z"
-updated_at: "2026-11-11T17:47:07.825Z"
+updated_at: "2026-11-12T13:07:22.278Z"
+closed_at: "2026-11-12T13:07:22.273Z"
+completed_at: "2026-11-12T00:45:33.000Z"
 author: claude-orchestrator
 acceptance_criteria: "The release generates CHANGELOG.md with exactly the section-selection flags changelog:check verifies; A contract test fails when the two drift apart again, and fails on revert"
-actual_result: "Run release checks: Changelog is out of date; the generated file lacks 'No changes.' sections for older tags."
+resolution: "Delivered by https://github.com/unbraind/pm-slack/pull/188 (merge 77b9ac4abca4, head e3f12730b4e5)"
+expected_result: "The release generates CHANGELOG.md with exactly the section-selection flags changelog:check verifies; A contract test fails when the two drift apart again, and fails on revert"
+actual_result: "Merged at 2026-11-12T00:45:33Z; required checks satisfied; successful head checks: CodeQL, Greptile Review, Hound, codeql, cubic · AI code reviewer, test (22), test (26)"
 comments[6]{created_at,author,text}:
   "2026-11-10T15:56:42.117Z",claude-orchestrator,"Fix: --include-empty added to the release's CHANGELOG.md generation, matching changelog:check. A new contract test in test/release-workflow.test.ts compares the flags. Revert proof: with the workflow change reverted the test fails, and with it the test passes. pm-slack: typecheck clean, full npm test 1021 pass / 0 fail; new contract test 1/0 with the fix, 0/1 without it."
   "2026-11-10T17:20:03.601Z",claude-orchestrator,"CodeRabbit PRRT_kwDOSYpJkM61zBVh: the contract test now also requires at least one real writer (a pm-changelog CHANGELOG.md invocation without --check). A paired --check alone would have satisfied the filter. Revert proof: making every writer line a --check fails the test (0/1); unchanged 1/0."
@@ -26,4 +30,5 @@ files[5]{path,scope}:
 tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   node --test test/release-workflow.test.ts,project,claude-orchestrator,"2026-11-10T15:56:37.185Z",local_mutation,fix/release-changelog-include-empty
   node --test --test-concurrency=2 test/release-workflow.test.ts test/release-changelog-contract.test.ts,project,codex-smallfix3-1111,"2026-11-11T17:38:35.354Z",local_mutation,fix/release-changelog-include-empty
+close_reason: "{\"pr\":188,\"url\":\"https://github.com/unbraind/pm-slack/pull/188\",\"merge_commit_sha\":\"77b9ac4abca4d149e152d4d6a36a0691235576fc\",\"head_sha\":\"e3f12730b4e52980015b5523ddf1325f54c03225\",\"merged_at\":\"2026-11-12T00:45:33Z\",\"checks\":[\"CodeQL\",\"Greptile Review\",\"Hound\",\"codeql\",\"cubic · AI code reviewer\",\"test (22)\",\"test (26)\"]}"
 body: ""

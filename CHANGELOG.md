@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No changes.
+### Fixed
+
+- Daily release fails its own release:check: the release regenerates CHANGELOG.md without --include-empty ([pm-slack-7fwr](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-7fwr.toon))
 
 ## 2026.11.3 - 2026-11-03
 
