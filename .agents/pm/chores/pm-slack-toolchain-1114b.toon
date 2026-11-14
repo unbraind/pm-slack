@@ -1,0 +1,27 @@
+id: pm-slack-toolchain-1114b
+title: Adopt current pm-cli and pm-changelog contracts
+description: ""
+type: Chore
+status: in_progress
+priority: 2
+tags[1]: "gh:unbraind/pm-slack#195"
+created_at: "2026-11-14T05:07:59.712Z"
+updated_at: "2026-11-14T07:47:44.797Z"
+author: codex-toolchain-1114b
+comments[4]{created_at,author,text}:
+  "2026-11-14T05:08:07.747Z",codex-toolchain-1114b,"Failure -> cause -> fix: committed release changelog differs after tag -> pm-changelog issue 337 intentionally omits empty Unreleased sections -> stop reinserting the legacy section in scripts/pm-changelog.ts and retain exact upstream generation/check equality plus explicit empty-section assertion. Baseline focused regression fails 0/1 on current pins before this change. Both dependencies pinned to 2026.11.13; bun.lock regenerated."
+  "2026-11-14T05:12:03.474Z",codex-toolchain-1114b,"Focused contract passes 1/1 via linked test; isolated function revert fails 0/1 on the empty-Unreleased assertion and restoration passes 1/1. Typecheck passes. This repository declares no lint script or lint configuration, so its existing release gate is the authoritative static/coverage validation. No thresholds or refusal cases were removed."
+  "2026-11-14T06:48:24.453Z",codex-toolchain-1114b,"The standard coverage gate measures nine runtime sources and excludes the touched release helper. A dedicated measurement initially found helper lines 87.50 percent and branches 69.23 percent. Added real no-write refusal cases for missing/divergent controls, a non-git tracker, failed spawn, self-signaled generator, missing output, CLI entry and import-only use. Focused file now passes 3/3 with helper lines/branches/functions each 100 percent at explicit unchanged 100 thresholds. No SDK mocks, coverage ignores or source-scope reduction. Both original full suites passed 1023/1023; rerunning after the new tests before publication."
+  "2026-11-14T07:47:44.797Z",codex-toolchain-1114b,"| Failure | Cause (changelog) | Fix |\n| --- | --- | --- |\n| committed release changelog differs after tagging | pm-changelog 2026.11.11 issue 337 omits empty Unreleased sections | preserve upstream output bytes and assert exact pre/post-tag equality and missing empty section |\n\nFinal npm run release:check and bun run release:check both pass 1025/1025 tests with zero failures, skips or cancellations after the new helper cases. Nine configured runtime sources retain 100 percent lines, branches and functions. The touched release helper separately passes explicit 100 percent line/branch/function thresholds, 3/3 focused tests, and both linked pm test commands. Real no-git tracker, control, spawn, signal, missing-output, CLI and import cases preserve bytes on refusal. The repo has no lint script; its declared typecheck, build, docstrings, coverage, audit, pack, attestation, changelog and date gates pass. Isolated revert of only releaseChangelog fails the empty-Unreleased regression; restoring it passes 3/3. No source scope or threshold was reduced."
+files[5]{path,scope}:
+  bun.lock,project
+  package-lock.json,project
+  package.json,project
+  scripts/pm-changelog.ts,project
+  test/release-changelog-contract.test.ts,project
+tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/release-changelog-contract.test.ts,project,codex-toolchain-1114b,"2026-11-14T05:08:13.449Z",local_mutation,chore/adopt-pm-cli-option-contract
+  node --test --test-concurrency=2 --experimental-test-coverage --test-coverage-include=scripts/pm-changelog.ts --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 test/release-changelog-contract.test.ts,project,codex-toolchain-1114b,"2026-11-14T06:48:28.689Z",local_mutation,chore/adopt-pm-cli-option-contract
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""
