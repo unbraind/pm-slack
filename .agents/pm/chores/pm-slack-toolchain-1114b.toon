@@ -2,12 +2,17 @@ id: pm-slack-toolchain-1114b
 title: Adopt current pm-cli and pm-changelog contracts
 description: ""
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[1]: "gh:unbraind/pm-slack#195"
 created_at: "2026-11-14T05:07:59.712Z"
-updated_at: "2026-11-14T07:47:44.797Z"
+updated_at: "2026-11-14T08:55:10.139Z"
+closed_at: "2026-11-14T08:55:10.106Z"
+completed_at: "2026-11-14T08:55:10.106Z"
 author: codex-toolchain-1114b
+resolution: Implemented and merged in #196 (bf2e826).
+expected_result: The change described by this item is on main.
+actual_result: "Merged in #196 as bf2e826; checks successful at head 6651334: CodeQL, codeql, test (22), test (26)."
 comments[4]{created_at,author,text}:
   "2026-11-14T05:08:07.747Z",codex-toolchain-1114b,"Failure -> cause -> fix: committed release changelog differs after tag -> pm-changelog issue 337 intentionally omits empty Unreleased sections -> stop reinserting the legacy section in scripts/pm-changelog.ts and retain exact upstream generation/check equality plus explicit empty-section assertion. Baseline focused regression fails 0/1 on current pins before this change. Both dependencies pinned to 2026.11.13; bun.lock regenerated."
   "2026-11-14T05:12:03.474Z",codex-toolchain-1114b,"Focused contract passes 1/1 via linked test; isolated function revert fails 0/1 on the empty-Unreleased assertion and restoration passes 1/1. Typecheck passes. This repository declares no lint script or lint configuration, so its existing release gate is the authoritative static/coverage validation. No thresholds or refusal cases were removed."
@@ -24,4 +29,5 @@ tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   node --test --test-concurrency=2 --experimental-test-coverage --test-coverage-include=scripts/pm-changelog.ts --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 test/release-changelog-contract.test.ts,project,codex-toolchain-1114b,"2026-11-14T06:48:28.689Z",local_mutation,chore/adopt-pm-cli-option-contract
 docs[1]{path,scope}:
   CHANGELOG.md,project
+close_reason: "Delivered by #196 \"Adopt pm-cli 2026.11.13 extension option contract and land the pm-toolchain bump\" (merged as bf2e826). Checks successful at the PR head 6651334: CodeQL, codeql, test (22), test (26)."
 body: ""

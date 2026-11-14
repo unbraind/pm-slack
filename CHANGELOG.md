@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Adopt current pm-cli and pm-changelog contracts ([pm-slack-toolchain-1114b](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-toolchain-1114b.toon))
+
 ## 2026.11.13 - 2026-11-13
 
 ### Fixed
