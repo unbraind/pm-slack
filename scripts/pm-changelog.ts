@@ -1,4 +1,4 @@
-/** Preserve the empty Unreleased section before tagging, matching the pinned generator's post-tag output. */
+/** Generate and check the upstream changelog identically before and after tagging. */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,11 +17,7 @@ export function releaseChangelog(args: readonly string[], cwd = process.cwd()): 
   });
   if (result.error) throw result.error;
   if (result.status !== 0) { process.stderr.write(result.stderr); return result.status ?? 1; }
-  // The pinned generator includes this empty section only after the version is
-  // tagged. Preserve it before tagging too; leave every generated release intact.
-  const generated = /^## Unreleased\s*$/m.test(result.stdout)
-    ? result.stdout
-    : result.stdout.replace(/^## /m, "## Unreleased\n\nNo changes.\n\n## ");
+  const generated = result.stdout;
   const target = resolve(cwd, output);
   if (args.includes("--check")) {
     if (!existsSync(target) || readFileSync(target, "utf8") !== generated) {

@@ -7,9 +7,9 @@
       "devDependencies": {
         "@toon-format/toon": "4.4.0",
         "@types/node": "26.6.6",
-        "@unbrained/pm-cli": "2026.11.4",
-        "pm-changelog": "2026.10.31",
-        "pm-ops": "2026.11.4",
+        "@unbrained/pm-cli": "2026.11.13",
+        "pm-changelog": "2026.11.13",
+        "pm-ops": "2026.11.6",
         "typescript": "7.0.2",
       },
       "peerDependencies": {
@@ -92,7 +92,7 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
-    "@unbrained/pm-cli": ["@unbrained/pm-cli@2026.11.4", "", { "dependencies": { "@opentelemetry/api": "1.9.1", "@opentelemetry/core": "2.12.0", "@opentelemetry/sdk-trace-base": "2.12.0", "@sentry/node": "10.76.2", "@toon-format/toon": "^4.4.0", "commander": "^15.0.0", "fast-json-patch": "^3.1.1", "npm-package-arg": "^13.0.2", "semver": "7.8.5", "tar": "7.5.22", "tinyglobby": "^0.2.17", "yaml": "^2.9.1" }, "peerDependencies": { "@types/node": "^22 || ^24 || ^26" }, "optionalPeers": ["@types/node"], "bin": { "pm": "dist/cli.js", "pm-cli": "dist/cli.js", "pm-mcp": "dist/mcp/server.js", "pm-mcp-http": "dist/mcp/http-server.js" } }, "sha512-BmFN9222uhC1LbyP1OX316bXDIvTlDDwaJrCNm/ToFsi78fh7Il9pWgVePNzu2F3pbrtBBq//RhAsXeZVPp6hg=="],
+    "@unbrained/pm-cli": ["@unbrained/pm-cli@2026.11.13", "", { "dependencies": { "@opentelemetry/api": "1.9.1", "@opentelemetry/core": "2.12.0", "@opentelemetry/sdk-trace-base": "2.12.0", "@sentry/node": "10.76.2", "@toon-format/toon": "^4.4.0", "commander": "^15.0.0", "fast-json-patch": "^3.1.1", "npm-package-arg": "^13.0.2", "semver": "7.8.5", "tar": "7.5.22", "tinyglobby": "^0.2.17", "yaml": "^2.9.1" }, "peerDependencies": { "@types/node": "^22 || ^24 || ^26" }, "optionalPeers": ["@types/node"], "bin": { "pm": "dist/cli.js", "pm-cli": "dist/cli.js", "pm-mcp": "dist/mcp/server.js", "pm-mcp-http": "dist/mcp/http-server.js" } }, "sha512-lTh00+JfZih4OozYTwsAeFTj7rlUsCK96a0PWzpdMjRGE0iPHj/Kc0CBGnYAn5nOYQ79hwrhauwT4ZF+pcyodA=="],
 
     "chownr": ["chownr@3.0.0", "", {}, "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g=="],
 
@@ -126,9 +126,9 @@
 
     "picomatch": ["picomatch@4.0.7", "", {}, "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA=="],
 
-    "pm-changelog": ["pm-changelog@2026.10.31", "", { "dependencies": { "@toon-format/toon": "4.4.0" }, "peerDependencies": { "@unbrained/pm-cli": ">=2026.10.23" }, "bin": { "pm-changelog": "dist/cli.js" } }, "sha512-MzqI+cMKYOCfqRUgeSxdH6jwHHPrG4V9r3Dp3dCbyMkJRtbF7hjNuJUM/23goBhRk9KOwRGbGXZIPDM1N0tz2w=="],
+    "pm-changelog": ["pm-changelog@2026.11.13", "", { "dependencies": { "@toon-format/toon": "4.4.0" }, "peerDependencies": { "@unbrained/pm-cli": ">=2026.10.23" }, "bin": { "pm-changelog": "dist/cli.js" } }, "sha512-Cv7IBh6SvYrm5E46lOQn7E9I1TR1mVvtPt/mWX/gHXjn7WAei//lSdW/LgpxYdgUIa+8lgdYP9CJuyx0+USXHw=="],
 
-    "pm-ops": ["pm-ops@2026.11.4", "", { "dependencies": { "@toon-format/toon": "^4.1.0", "semver": "7.8.5", "typescript": "7.0.2", "yaml": "2.9.1" }, "peerDependencies": { "@babel/eslint-parser": "^8.0.5", "@babel/plugin-syntax-typescript": "^8.0.3", "@unbrained/pm-cli": ">=2026.10.20", "eslint": "^10.10.0", "jscpd": ">=5.0.0 <6.0.0" }, "optionalPeers": ["@babel/eslint-parser", "@babel/plugin-syntax-typescript", "eslint", "jscpd"] }, "sha512-G9XVGQQGpxoiXB1FGJ56aRSnDzcBJXc2k+M34Y60DL2/F8Ud/wmqUSaZSvJjCjopuwpEkXLx9rQylv2bPX04Rg=="],
+    "pm-ops": ["pm-ops@2026.11.6", "", { "dependencies": { "@toon-format/toon": "^4.1.0", "semver": "7.8.6", "typescript": "7.0.2", "yaml": "2.9.1" }, "peerDependencies": { "@babel/eslint-parser": "^8.0.5", "@babel/plugin-syntax-typescript": "^8.0.3", "@unbrained/pm-cli": ">=2026.10.20", "eslint": "^10.10.0", "jscpd": ">=5.0.0 <6.0.0" }, "optionalPeers": ["@babel/eslint-parser", "@babel/plugin-syntax-typescript", "eslint", "jscpd"] }, "sha512-7Km8iHs0vh42IRt9X1tOztt+Iw546pUkgaPuVwVhTiIHG/S7FWaT7U78hVtLHk1gIEh3O8DeTW7nFpfO/hNuTQ=="],
 
     "proc-log": ["proc-log@6.1.0", "", {}, "sha512-iG+GYldRf2BQ0UDUAd6JQ/RwzaQy6mXmsk/IzlYyal4A4SNFw54MeH4/tLkF4I5WoWG9SQwuqWzS99jaFQHBuQ=="],
 
@@ -149,5 +149,7 @@
     "yallist": ["yallist@5.0.0", "", {}, "sha512-YgvUTfwqyc7UXVMrB+SImsVYSmTS8X/tSrtdNZMImM+n7+QTriRXyXim0mBrTXNeqzVF0KWGgHPeiyViFFrNDw=="],
 
     "yaml": ["yaml@2.9.1", "", { "bin": "bin.mjs" }, "sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw=="],
+
+    "pm-ops/semver": ["semver@7.8.6", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw=="],
   }
 }
