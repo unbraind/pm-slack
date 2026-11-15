@@ -1,3 +1,4 @@
+import { testTime } from './support/depth.ts';
 /** No-follow, inode-bound permissions protect every archive and SQLite path in real non-git fixtures. */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -85,7 +86,7 @@ test("the actual public archive probe refuses linked trackers without touching e
   execFileSync("git", ["-C", repository, "add", ".agents/pm/link"]);
   execFileSync("git", ["-C", repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "Synthetic linked archive"]);
   try {
-    const result = spawnSync(process.execPath, [resolve(import.meta.dirname, "../scripts/validate-payload-public.ts"), repository, "HEAD"], { encoding: "utf8", timeout: 15000 });
+    const result = spawnSync(process.execPath, [resolve(import.meta.dirname, "../scripts/validate-payload-public.ts"), repository, "HEAD"], { encoding: "utf8", timeout: testTime(15000) });
     assert.notEqual(result.status, 0);
     assert.deepEqual(identity(target), before, "setup and finally must both preserve external permissions");
     assert.match(result.stderr, /linked/);
