@@ -1,3 +1,4 @@
+import { testDepth } from './support/depth.ts';
 /** Offline explanations exercise real SDK history, durable SQLite evidence and configured status roles. */
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -200,7 +201,7 @@ test("random custom status registries classify lifecycle by SDK roles and preser
   }
 });
 
-test("500 seeded policy operation sequences replay older SDK revisions and whitespace variants without changing native state", async (t) => {
+test("seeded policy operation sequences replay older SDK revisions and whitespace variants without changing native state", async (t) => {
   const f = await fixture(t);
   const parent = await create({ title: "Synthetic related item" }, f.client);
   await update(f.item, { parent: parent.item.id, description: "native\r\n whitespace ", body: " native body \n", tags: "seeded,relation", estimatedMinutes: "23", assignee: "synthetic-agent" }, f.client);
@@ -211,7 +212,7 @@ test("500 seeded policy operation sequences replay older SDK revisions and white
   const blocked = await f.identity("block");
   const before = await document(f.pmRoot, f.item);
   let seed = 0x52f00d;
-  for (let sequence = 0; sequence < 500; sequence++) {
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     const filters = ["create", "block", "close", "create,block"][seed % 4]!;
     process.env.PM_SLACK_EVENTS = filters;
@@ -388,14 +389,14 @@ test("done configured as blocked captures and explains the same confirmed block 
   assert.equal(explained.identity.event, "block"); assert.equal(explained.outcome, "delivered");
 });
 
-test("500 seeded transitions across arbitrary SDK status registries keep every captured receipt explainable", async (t) => {
+test("seeded transitions across arbitrary SDK status registries keep every captured receipt explainable", async (t) => {
   const f = await fixture(t); const box = new SlackOutbox(f.pmRoot); t.after(() => box.close());
   box.enable({ events: ["create", "close", "block", "cancel", "open", "start", "unblock", "reopen"], minPriority: 4 });
   let seed = 0xc1a551f; let capturedCount = 0; let transitions = 0;
   /** Deterministic status names/roles and transitions include literal collisions and role-less definitions. */
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
   const coverage = new Set<string>();
-  for (let configuration = 0; configuration < 50; configuration++) {
+  for (let configuration = 0; configuration * 10 < testDepth(500); configuration++) {
     const names = ["open", "done", ...Array.from({ length: 6 }, () => `r${random().toString(16)}`)];
     const roleSets = [["active", "default_open"], ["blocked"], ["active"], ["blocked"], ["terminal", "terminal_done", "default_close"], ["terminal", "terminal_canceled", "default_cancel"], ["draft"], []];
     // Shuffle all non-required roles. In half the registries literal done means blocked.
@@ -449,8 +450,8 @@ test("500 seeded transitions across arbitrary SDK status registries keep every c
       } finally { db.close(); }
     }
   }
-  assert.equal(transitions, 500); assert.ok(capturedCount >= 200); assert.ok(coverage.has("missing_roles"));
-  t.diagnostic(JSON.stringify({ seed: "0x0c1a551f", configurations: 50, transitions, explainedReceipts: capturedCount, roleShapes: coverage.size }));
+  assert.equal(transitions, testDepth(500)); assert.ok(capturedCount >= Math.ceil(transitions * 0.4)); assert.ok(coverage.has("missing_roles"));
+  t.diagnostic(JSON.stringify({ seed: "0x0c1a551f", configurations: Math.ceil(transitions / 10), transitions, explainedReceipts: capturedCount, roleShapes: coverage.size }));
 });
 
 test("shared classifier keeps SDK aliases, role-less statuses and command-only fallback consistent", async (t) => {

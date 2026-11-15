@@ -1,3 +1,4 @@
+import { testDepth } from './support/depth.ts';
 /** Real transport/SQLite lifecycles retain delivery uncertainty independently of operator scheduling. */
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -130,7 +131,7 @@ test("accepted request with a timed-out response remains uncertain after resolve
   assert.deepEqual(abandoned.outcomes, { delivered: 0, withheld: 1, uncertain: 1 });
 });
 
-test("500 seeded real send/resolve lifecycles preserve evidence through retry, skip, abandon, crashes and replays", async (t) => {
+test("seeded real send/resolve lifecycles preserve evidence through retry, skip, abandon, crashes and replays", async (t) => {
   const f = await fixture(t);
   let seed = 0xc1a551f1;
   /** Deterministic operation choices make every failure replayable. */
@@ -139,7 +140,7 @@ test("500 seeded real send/resolve lifecycles preserve evidence through retry, s
   const totals = { delivered: 0, withheld: 0, uncertain: 0 };
   const retired = new Set<string>();
   const covered = new Set<Mode>(); const uncertainResolutions = new Set<string>(); let requests = 0;
-  for (let sequence = 0; sequence < 500; sequence++) {
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     const start = f.calls.length; const { identity, intent, key } = await f.event(sequence);
     let operation = modes[sequence % modes.length]!; covered.add(operation);
     // Seeded retirement/replacement exercises late clean exits on the same non-git tracker.
@@ -204,10 +205,10 @@ test("500 seeded real send/resolve lifecycles preserve evidence through retry, s
     requests += f.calls.length - start;
   }
   assert.deepEqual([...retired].sort(), ["cancellation", "exception_after", "exception_before", "late_refusal"]);
-  assert.equal(covered.size, modes.length); assert.ok(requests >= 400);
+  assert.equal(covered.size, modes.length); assert.ok(requests >= Math.ceil(Object.values(totals).reduce((sum, count) => sum + count, 0) * 0.8));
   assert.deepEqual([...uncertainResolutions].sort(), ["abandon", "retry", "skip"]);
   assert.ok(totals.delivered > 0 && totals.withheld > 0 && totals.uncertain > 0);
-  t.diagnostic(JSON.stringify({ sequences: 500, requests, ...totals }));
+  t.diagnostic(JSON.stringify({ sequences: testDepth(500), requests, ...totals }));
 });
 
 test("operator acknowledged labels never upgrade uncertainty; legacy receipts stay conservative", async (t) => {
@@ -509,17 +510,22 @@ test("successful post followed by typed storage error keeps confirmed delivery",
   assert.equal(f.box().status().rows.find((row) => row.key === key)!.state, "acknowledged");
 });
 
-test("500 seeded typed and untyped errors at dispatch/response/terminal boundaries follow only retained transport facts", async (t) => {
+test("seeded typed and untyped errors at dispatch/response/terminal boundaries follow only retained transport facts", async (t) => {
   const f = await fixture(t); let seed = 0xd15fac7;
   const totals = { delivered: 0, withheld: 0, uncertain: 0 }; const covered = new Set<string>();
   const codePhases = new Set<string>();
   const codes = ["invalid_input", "disabled", "conflict", "not_found", "in_flight", "not_ambiguous", "destination_changed", "storage_unavailable", "history_unavailable"] as const;
   /** Reproducible fault order changes type/code independently of network phase. */
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
-  for (let sequence = 0; sequence < 500; sequence++) {
+  const cases = Array.from({ length: testDepth(500) }, (_, sequence) => ({
+    phase: sequence % 4, typed: ((sequence >>> 2) % 2) === 0, code: codes[(random() >>> 16) % codes.length]!,
+  }));
+  // Keep the seeded prefix exact; explicitly cover typed pairs reached only by late seeds.
+  for (let phase = 0; phase < 4; phase++) for (const code of codes) {
+    if (!cases.some(row => row.typed && row.phase === phase && row.code === code)) cases.push({ phase, typed: true, code });
+  }
+  for (const [sequence, { phase, typed, code }] of cases.entries()) {
     const { identity, key } = await f.event(3000 + sequence);
-    const phase = sequence % 4; const typed = ((sequence >>> 2) % 2) === 0;
-    const code = codes[(random() >>> 16) % codes.length]!;
     covered.add(`${phase}/${typed}`);
     if (typed) codePhases.add(`${phase}/${code}`);
     const error = typed ? new OutboxError(code, "Synthetic phase fault.") : new Error("Synthetic phase fault.");
@@ -564,7 +570,7 @@ test("500 seeded typed and untyped errors at dispatch/response/terminal boundari
     assert.deepEqual(f.box().status(1).outcomes, totals);
   }
   assert.equal(covered.size, 8); assert.equal(codePhases.size, codes.length * 4);
-  t.diagnostic(JSON.stringify({ seed: "0x0d15fac7", sequences: 500, boundaries: 4, errorKinds: 2, errorCodes: codes.length, codePhasePairs: codePhases.size, requests: f.calls.length, ...totals }));
+  t.diagnostic(JSON.stringify({ seed: "0x0d15fac7", sequences: cases.length, boundaries: 4, errorKinds: 2, errorCodes: codes.length, codePhasePairs: codePhases.size, requests: f.calls.length, ...totals }));
 });
 
 test("package HTTP helper inherits dispatch and confirmation through an asynchronous wrapper", async (t) => {

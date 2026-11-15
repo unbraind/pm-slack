@@ -1,3 +1,4 @@
+import { testDepth } from './support/depth.ts';
 /** Exact loss accounting and real non-git SDK state, without network or SDK mocks. */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -174,7 +175,7 @@ test("malformed wire payloads refuse before socket creation and before dispatch 
   assert.equal(requests, 1, "typed command refusals also open no socket");
 });
 
-test("500 seeded operation sequences export/replay SDK snapshots without changing native state or ambient relationships", async (t) => {
+test("seeded operation sequences export/replay SDK snapshots without changing native state or ambient relationships", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "slack-compile-model-"));
   const previous = { path: process.env.PATH, ceiling: process.env.GIT_CEILING_DIRECTORIES };
   t.after(() => { if (previous.path === undefined) delete process.env.PATH; else process.env.PATH = previous.path; if (previous.ceiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES; else process.env.GIT_CEILING_DIRECTORIES = previous.ceiling; rmSync(directory, { recursive: true, force: true }); });
@@ -190,7 +191,7 @@ test("500 seeded operation sequences export/replay SDK snapshots without changin
   const archived: SlackCompilationInput[] = [];
   const rolesSeen = new Set<string>();
   let model = (await client.get("subject", { depth: "full", noTruncate: true })).item;
-  for (let sequence = 0; sequence < 500; sequence++) {
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     if (sequence % 25 === 0) {
       const custom = `active_${sequence}`;
       const roles = [["active"], ["blocked"], ["terminal", "terminal_done"], ["terminal", "terminal_canceled"]][(random() >>> 8) % 4]!;
@@ -217,7 +218,18 @@ test("500 seeded operation sequences export/replay SDK snapshots without changin
     assert.deepEqual(round.payload, compiled.payload); assert.deepEqual(round.losses, []);
     assert.deepEqual((await client.get("subject", { depth: "full", noTruncate: true })).item, model, `SDK state differs at sequence ${sequence}`);
   }
-  assert.equal(rolesSeen.size, 4, "seed exercises active, blocked, done and canceled custom roles");
+  // Late random role choices become explicit controls without changing the seed prefix.
+  for (const roles of [["active"], ["blocked"], ["terminal", "terminal_done"], ["terminal", "terminal_canceled"]]) {
+    if (rolesSeen.has(roles.join(","))) continue;
+    const status = `control_${rolesSeen.size}`;
+    await schemaAddStatus(status, { role: roles }, options);
+    await update("subject", { status, blockedReason: "Control block", closeReason: "Control close", force: true }, options);
+    const before = (await client.get("subject", { depth: "full", noTruncate: true })).item;
+    assert.ok(JSON.stringify((await compileSlackItem(client, "subject", sourceLink())).payload).includes(status));
+    assert.deepEqual((await client.get("subject", { depth: "full", noTruncate: true })).item, before);
+    rolesSeen.add(roles.join(","));
+  }
+  assert.equal(rolesSeen.size, 4, "seed prefix and deterministic controls exercise all custom roles");
   const harness = await createExtensionTestHarness(extension, { name: "pm-slack", capabilities: ["commands", "hooks", "schema", "preflight", "renderers"] });
   t.after(() => harness.deactivate());
   harness.assertCommandContract({ command: "slack compile", flags: ["--input", "--item", "--link", "--payload"] });

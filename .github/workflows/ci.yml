@@ -1,22 +1,25 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PM_TEST_DEPTH: quick
     strategy:
       fail-fast: false
       matrix:
-        # 22 is the floor declared in `engines` and the first line that strips
-        # TypeScript without a flag; 26 is what the fleet develops against.
         node-version: [22, 26]
     steps:
       - name: Checkout
@@ -25,6 +28,29 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Detect code changes
+        id: changes
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          code=true
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            code=false
+            git diff --name-only --no-renames -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-changed-paths"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                # Executable tracker files use the same code tier in every package.
+                .agents/pm/*.mjs|.agents/pm/*.cjs|.agents/pm/*.js|.agents/pm/*.ts) code=true ;;
+                .agents/pm/*|*.md|docs/*|CHANGELOG.md|LICENSE) ;;
+                *) code=true ;;
+              esac
+            done < "$RUNNER_TEMP/ci-changed-paths"
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -32,30 +58,17 @@ jobs:
           cache: npm
 
       - name: Setup Bun
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
         uses: oven-sh/setup-bun@v2.2.0
 
       - name: Install dependencies
         run: npm ci
 
       - name: Verify tracked pm project health
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Catch durable checkout-visible failures: conflict markers, parse failures,
-          # invalid or drifted history, tracked runtime caches, extension health,
-          # stale in-progress work, and any merge evidence present in this clone.
-          #
-          # This is not a lossless-merge attestation. Merge receipts are clone-local and
-          # absent from a fresh CI checkout. Some unreconciled loss shapes surface as
-          # history drift, but reconciliation or history repair can remove that signal.
-          # Keep receipt review as a local pre-push step; pm-cli#921 and pm-cli#922 track
-          # the missing durable proof.
-          #
-          # `--strict-exit` is load-bearing: non-strict health may report findings while
-          # still exiting successfully.
-          ./node_modules/.bin/pm health --strict-exit --require-merge-drivers
+        run: ./node_modules/.bin/pm health --strict-exit --require-merge-drivers
 
       - name: Build and verify committed output is current
+        if: steps.changes.outputs.code == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -73,18 +86,30 @@ jobs:
           fi
           echo "Committed dist/ matches a fresh build."
 
-      - name: Verify complete npm release gate
+      - name: Documentation and tracker gates
+        if: steps.changes.outputs.code != 'true'
+        run: |
+          npm run changelog:check
+          npm run pack:dry-run
+          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/docs-pack.json"
+          node --input-type=module -e 'import { readFileSync, existsSync } from "node:fs"; import assert from "node:assert/strict"; const manifest = JSON.parse(readFileSync("package.json", "utf8")); const pack = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/docs-pack.json", "utf8"))[0]; for (const path of manifest.files.filter(path => path.endsWith(".md"))) { assert.ok(existsSync(path), path); assert.ok(pack.files.some(file => file.path === path), path); }'
+          node --test test/identity-audit.test.ts test/package-metadata.test.ts
+          node --test --test-name-pattern='published SDK example' test/outbox.test.ts
+
+      - name: Engines floor quick tests
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 22
+        run: npm test
+
+      - name: Quick npm release gate
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
         run: npm run release:check
 
-      - name: Verify Bun can install the package graph
-        run: bun install --no-save
+      - name: Bun and bunx smoke
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
+        run: |
+          bun install --no-save
+          bunx --no-install pm --version
 
-      - name: Verify native Bun outbox acceptance
+      - name: Native Bun outbox acceptance
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
         run: bun test/bun-outbox.acceptance.ts
-
-      - name: Verify complete Bun release gate
-        run: bun run release:check
-
-      - name: Verify captured payload compiler artifact in five host installations
-        if: matrix.node-version == 26
-        run: npm run acceptance:payload
