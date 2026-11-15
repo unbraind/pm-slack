@@ -91,6 +91,8 @@ jobs:
         run: |
           npm run changelog:check
           npm run pack:dry-run
+          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/docs-pack.json"
+          node --input-type=module -e 'import { readFileSync, existsSync } from "node:fs"; import assert from "node:assert/strict"; const manifest = JSON.parse(readFileSync("package.json", "utf8")); const pack = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/docs-pack.json", "utf8"))[0]; for (const path of manifest.files.filter(path => path.endsWith(".md"))) { assert.ok(existsSync(path), path); assert.ok(pack.files.some(file => file.path === path), path); }'
           node --test test/identity-audit.test.ts test/package-metadata.test.ts
           node --test --test-name-pattern='published SDK example' test/outbox.test.ts
 

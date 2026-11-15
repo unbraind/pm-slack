@@ -55,3 +55,10 @@ Baseline main run 43600606377: Node 22 wall 23m42s including queue, execution
 37.85–66.70s, destination migration 44.29–62.70s, and journal crash tests
 52.00–64.83s. These are historical hosted timings. No full-depth local run is
 performed; the task and PR record quick validation and available PR CI timings.
+
+Local quick coverage passed 1,027/1,027 tests in 247.67s suite time with unchanged
+100% lines/branches/functions across nine production files. Send/resolve took
+5.46s, migration 5.67s and payload 3.54s on this host. The typed-error corpus
+runs 50 seeded cases plus 15 explicit controls to retain all 36 code/phase pairs.
+No same-host full-depth benchmark is claimed. Local health has a host-global
+extension/SDK skew; strict CI health is retained for independent clean-checkout proof.

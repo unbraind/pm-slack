@@ -1,30 +1,32 @@
 id: pm-slack-k8yl
 title: Gate CI on strict tracked pm project health
 description: Run pm health --strict-exit in CI to reject durable tracker-health failures without claiming lossless merge attestation. pm-cli#921 covers history-repair erasing a durable drift signal; pm-cli#922 covers a lossy merge shape whose fresh clone is already green because receipts are local and tracked history resembles sequential edits.
-type: Task
+type: Chore
 status: in_progress
 priority: 2
 tags[2]: ci,performance
 created_at: "2026-08-06T20:46:46.358Z"
-updated_at: "2026-11-15T15:11:51.721Z"
-assignee: codex-sol
-claim_principal: codex-sol
+updated_at: "2026-11-15T15:16:06.818Z"
 author: pi-agent
 acceptance_criteria: "CI runs pm health --strict-exit immediately after dependency installation; clean durable repository state exits 0; tracked history, attribution, cache, extension, or available merge-evidence failures block CI; documentation does not claim fresh CI can inspect clone-local receipts"
-comments[2]{created_at,author,text}:
+comments[4]{created_at,author,text}:
   "2026-11-15T15:09:24.604Z",codex-sol,"Reusing the CI health item for Fleet CI v2; companion pm-cli-website-dyhg. Preserve required test (22)/test (26), committed dist verification and native Bun outbox acceptance. Node 26 runs one quick npm gate; five-host packed payload acceptance moves intact to deep along with full npm/Bun gates. Docs retain identity/home-path audit, executable outbox docs, package file lists and changelog. CodeQL is optional and gets the requested path filters. Release workflows and verifier scripts stay unchanged."
   "2026-11-15T15:11:51.721Z",codex-sol,"Baseline main run 43600606377: test (22) wall 23m42s/execution 7m44s; test (26) wall 52m35s/execution 6m52s. Full send/resolve corpora 37.85-66.70s, migration 44.29-62.70s; journal crash controls 52.00-64.83s stay exhaustive. Typecheck and test typecheck passed. No lint script or ESLint installation exists. Strict YAML parse passed (actionlint unavailable). Quick coverage is running directly to avoid pm schema context contamination. Generated prefix controls retain all error phases and status roles."
+  "2026-11-15T15:14:04.577Z",codex-sol,"Preserving the existing CI item's Chore type and folder under the reuse exception: converting its type would break the published historical changelog URL. Its ci/performance tags and CI-v2 evidence remain. Cheap docs CI now explicitly checks every declared Markdown asset exists in the captured package file list, preserving the packed acceptance's document-presence checks without running all five host installations."
+  "2026-11-15T15:16:01.070Z",codex-sol,"Direct PM_TEST_DEPTH=quick PM_TEST_TIME_SCALE=3 npm run coverage passed 1027/1027, no skipped/cancelled tests, in 247.67s suite time; all nine authored production files retain 100% lines/branches/functions. Quick send/resolve 5.46s, typed-error corpus 3.53s (50 seeds plus 15 missing-pair controls), migration 5.67s, payload 3.54s, policy 1.36s, status registries 13.52s. All 36 code/phase pairs and four custom role shapes remain asserted. No full-depth local run. Local strict health fails only for a host-global extension/SDK skew; stale work and inherited provenance are advisory, with existing health follow-up items unchanged. PR 204 CI remains queued and is not awaited."
 notes[3]{created_at,author,text}:
   "2026-08-06T21:21:16.331Z",codex,"Greptile P1 was valid as a scope correction: a fresh checkout cannot inspect .git-local receipts. The gate remains useful for durable health and catches unrepaired lossy merges through history drift,but it is not a complete no-loss guarantee."
   "2026-08-06T21:27:22.792Z","harness:claude-code","CORRECTION 2026-08-06, verified directly rather than reasoned about. This item's original close reason overstated what the gate does, and the CI comment has been rewritten to match reality.\n\nWHAT WAS WRONG. The gate was described as blocking a silently discarded peer edit. It does not, and cannot as currently built. Merge-decision receipts are written to .agents/pm/runtime/, which pm init itself gitignores, so they are never pushed. Measured on the same commit: the clone that performed the merge reports 1 receipt and the strict health check exits 1, while a fresh clone of that exact commit reports 0 receipts and the strict health check exits 0. CI checks out the fresh state, so the discarded edit passes.\n\nTHE PUSHED HISTORY DOES NOT DISAMBIGUATE IT EITHER. The merged history stream contains both writes in timestamp order and the item matches the latest one, so history verification reports current_matches_latest true with matching hashes. From pushed state alone, two concurrent branch edits where one was discarded look exactly like two sequential edits where the second superseded the first.\n\nRECONCILE PUBLISHES THE EVIDENCE BUT DOES NOT MAKE IT GATEABLE. Running merge reconcile appends a merge_reconcile event into tracked history carrying conflict_fields, retained_hash and discarded_hash, so durable evidence can exist. But the strict health check then exits 0 in both clones, and reconcile is optional anyway. There is no configuration in which CI observes the loss.\n\nCREDIT. Greptile flagged this as P1 on every gate PR in the rollout before it merged. Verified independently and filed upstream as pm-cli 922.\n\nWHAT THE GATE ACTUALLY DOES, all observable in a fresh checkout and all worth gating on: conflict markers left in item or history files, item parse failures, invalid history JSON, history hash drift, unknown-author history events, stale in-progress work, and tracked runtime cache files. The strict-exit flag remains load-bearing because a bare health check exits 0 even when not ok.\n\nThe step is kept for that real value. Only the claim was wrong, and a gate whose documentation overstates its guarantee is worse than no gate because it stops people looking for the real hazard."
   "2026-08-06T22:00:38.381Z",codex,"Refreshed the package's development/runtime lock projection to @unbrained/pm-cli 2026.8.6 and pm-changelog 2026.8.6 where applicable, so the health and changelog gates execute against the current published contracts. Existing peer minima remain compatibility claims, not the tested tool version."
-files[7]{path,scope}:
+files[9]{path,scope}:
   .gitattributes,project
   .github/workflows/ci-deep.yml,project
   .github/workflows/ci.yml,project
   CHANGELOG.md,project
   package-lock.json,project
   package.json,project
+  test/delivery-evidence.test.ts,project
+  test/payload-compilation.test.ts,project
   test/support/depth.ts,project
 tests[4]:
   - command: "npm run release:check"
