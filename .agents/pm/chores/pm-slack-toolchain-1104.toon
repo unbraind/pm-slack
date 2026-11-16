@@ -2,13 +2,18 @@ id: pm-slack-toolchain-1104
 title: Migrate PR180 to the November 4 pm toolchain
 description: "Update the exact toolchain and migrate genuine SDK fixtures for https://github.com/unbraind/pm-slack/pull/180. Preserve payload and destination native-state models and report distinct upstream regressions."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[4]: dependencies,"gh:unbraind/pm-slack#180",migration,sdk
 created_at: "2026-11-04T19:14:40.876Z"
-updated_at: "2026-11-04T21:17:44.748Z"
+updated_at: "2026-11-16T20:38:25.435Z"
+closed_at: "2026-11-16T20:38:25.416Z"
+completed_at: "2026-11-16T20:38:25.416Z"
 author: codex-toolchain-1104
 acceptance_criteria: "Reproduce each failed file on SDK 2026.11.4; preserve literal model values and explicit empty relationships; full 100 percent coverage, typecheck and documented quality gates pass."
+resolution: Implemented and merged in #180 (83f41f0).
+expected_result: The change described by this item is on main.
+actual_result: "Merged in #180 as 83f41f0; checks successful at head 7399d81: CodeQL, codeql, enable-auto-merge, test (22), test (26)."
 comments[6]{created_at,author,text}:
   "2026-11-04T19:20:04.171Z",codex-toolchain-1104,"Test: pm-cli 2026.10.30 GH-1614 keeps typed sentinel inputs literal. The payload file reproduces 5/7 passing on 2026.11.4; its model and empty-body producer fail on parent:none. The destination model fails at its first such create too. Migrate intended clears to unset, including conditional parent/assignee clears while preserving the seeded random-call order, exact operation counts, native-state models and payload assertions. No production Slack defect is established."
   "2026-11-04T19:24:08.614Z",codex-toolchain-1104,"Production release tooling: pm-changelog 2026.10.31 change Fail closed when requested release notes have no matching section (#302) refuses already-tagged 2026.11.3 because no qualifying tracker notes exist. Full-history generation/check now opt into no-pending-release plus include-empty; existing empty tags get honest No changes sections. Fresh release notes and prepend remain strict. The script regression fails before this fix and passes 5/5 after it."
@@ -30,4 +35,5 @@ tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   "nice -n 10 node --test --test-name-pattern=\"SDK read producers\" test/payload-compilation.test.ts",project,codex-toolchain-1104,"2026-11-04T19:20:14.970Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-2f28da0ff0
 docs[1]{path,scope}:
   README.md,project
+close_reason: "Delivered by #180 \"build(deps-dev): bump the pm-toolchain group across 1 directory with 3 updates\" (merged as 83f41f0). Checks successful at the PR head 7399d81: CodeQL, codeql, enable-auto-merge, test (22), test (26)."
 body: ""
