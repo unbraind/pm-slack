@@ -135,13 +135,13 @@ test("the version comparison orders YYYY.M.D numerically, not lexicographically"
   assert.ok(!atOrAbove("2025.12.31", "2026.1.1"), "an earlier year never satisfies a later one");
 });
 
-/** Keep empty historical release tags visible without accepting empty fresh notes. */
-test("historical changelogs explicitly retain empty releases while fresh notes stay strict", () => {
+/** Retain item-less release windows in every configured hook; historical rebuilds stay explicit about old tags. */
+test("every configured changelog hook explicitly retains item-less release windows", () => {
+  for (const name of ["changelog", "changelog:full", "changelog:check", "release:notes"]) {
+    assert.ok(packageJson.scripts?.[name]?.split(/\s+/u).includes("--include-empty"), `${name} must retain item-less release windows`);
+  }
   for (const name of ["changelog:full", "changelog:check"]) {
     assert.match(packageJson.scripts?.[name] ?? "", /--all-release-tags --include-empty/u);
     assert.doesNotMatch(packageJson.scripts?.[name] ?? "", /--no-pending-release/u);
-  }
-  for (const name of ["changelog", "release:notes"]) {
-    assert.doesNotMatch(packageJson.scripts?.[name] ?? "", /--include-empty/u);
   }
 });
