@@ -1,4 +1,5 @@
 /** Contracts owned by callers while the released workflow owns release execution. */
+import { workflowGlobalNpmInstalls } from './global-npm-guard.ts';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -68,8 +69,7 @@ test('no workflow replaces the shared global npm installation (unbraind/pm-ops#2
   // shared npm while sibling jobs use it (ENOTEMPTY exit 217, `npm: command not found` exit 127), so any pinned npm
   // must go into a job-local prefix instead.
   const directory = resolve('.github/workflows');
-  const replacers = /npm\s+(?=[^\n]*\b(?:install|i|add)\b)(?=[^\n]*(?:\s-g\b|--global\b))[^\n]*\bnpm@/u;
   for (const name of readdirSync(directory).filter(file => /\.ya?ml$/u.test(file)).sort()) {
-    assert.doesNotMatch(readFileSync(join(directory, name), 'utf8'), replacers, `${name} must install a pinned npm into a job-local prefix`);
+    assert.deepEqual(workflowGlobalNpmInstalls(readFileSync(join(directory, name), 'utf8')), [], `${name} must install a pinned npm into a job-local prefix`);
   }
 });

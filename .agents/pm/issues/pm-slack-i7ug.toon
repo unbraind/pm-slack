@@ -6,10 +6,10 @@ status: in_progress
 priority: 2
 tags[1]: "gh:unbraind/pm-ops#284"
 created_at: "2026-11-16T14:42:01.458Z"
-updated_at: "2026-11-16T19:00:07.012Z"
+updated_at: "2026-11-16T19:28:41.190Z"
 author: pi-glm
 acceptance_criteria: The release workflow installs the pinned npm with --prefix into a job-local directory and prepends that prefix bin to the job path; The workflow keeps the exact-version assertion on the effective npm; A workflow-contract test fails if any workflow replaces the global npm
-comments[9]{created_at,author,text}:
+comments[11]{created_at,author,text}:
   "2026-11-16T14:45:44.306Z",pi-glm,"Root cause (fleet-wide, reported as unbraind/pm-ops#284): after setup-node, every deep and release job ran a global npm install of the pinned npm. On the shared local runners, all containers on one host share the toolcache Node installation mounted at the runner tool directory, so parallel jobs replaced the same npm and siblings failed with ENOTEMPTY (exit 217) or npm: command not found (exit 127). Fix: the release workflow installs the pinned npm into a job-local prefix and prepends that prefix bin to the job path, keeping the exact-version assertion on the effective npm. Contract updates: the pinned-bootstrap step assertions require the prefix form, only the install step itself may prepend to the job path, and a new workflow-wide audit fails if any workflow replaces the global npm. Gates: typecheck, the full quick tier (1028 tests) and changelog:check all pass on this branch."
   "2026-11-16T15:17:47.518Z",codex-sol,"Continuation: verified the existing worktree and remote branch state, preserved the earlier changes, and reused this item. Rerunning required gates to completion under the continuation author before committing results."
   "2026-11-16T15:30:07.206Z",codex-sol,"Continuation review adds a separate next-step exact-version assertion and explicit ignore-scripts/no-audit/no-fund flags. The workflow-wide regression now also rejects global npm replacement with flags between --global and npm@. This extends the existing pushed implementation without creating a duplicate pull request. The repository defines no lint script; its existing docstring gate is included alongside typecheck, quick tests, workflow contracts and changelog verification."
@@ -19,14 +19,18 @@ comments[9]{created_at,author,text}:
   "2026-11-16T16:17:59.029Z",codex-sol,"Complete local gate rerun passed: npm run typecheck && npm run docstring && npm test && node --test test/release-workflow.test.ts && npm run changelog:check && git diff --check, with PM_TEST_DEPTH=quick and the existing deadline scale. The complete quick suite passed, and all 12 workflow-contract tests passed. The earlier timeout is superseded by this completed run. This package has no lint script; the existing docstring static gate passed. Exact-head remote CI remains pending the shared dispatch hold."
   "2026-11-16T16:38:12.957Z",codex-sol,Linked the generated changelog refresh retained from the intervening canonical release. The complete local gate chain and wrapped changelog check passed; remote CI for the published branch is queued.
   "2026-11-16T19:00:07.012Z",codex,"2026-11-16 19:2xZ (orchestrator): main gained #199 (pinned reusable Daily Release), which removed the vendored release job and with it the only global npm install in this repo. Merged origin/main into fix/job-local-npm: release.yml and test/release-workflow.test.ts now equal main's, plus one guard test that fails if any workflow replaces the global npm (proved: a probe workflow with 'npm install --global npm@11.21.0' fails it). The job-local install for the shared release flow lands through pm-ops#289. Gates: node --test test/release-workflow.test.ts 7/7, typecheck, docstring, changelog:check exit 0."
-files[6]{path,scope}:
+  "2026-11-16T19:23:59.881Z",codex-sol,"Review round P: replace the workflow-wide regex with a dependency-free shell command parser and regression fixtures. Parse run scripts with existing yaml where available; preserve allowed prefix-local installs. Verify typecheck, lint or docstring, focused guard/workflow contracts and changelog checks before pushing. No review-thread actions."
+  "2026-11-16T19:28:39.817Z",codex-sol,"Review round P addresses PRRT_kwDOSYpJkM63-6kV and PRRT_kwDOSYpJkM64FokT: shared-npm replacement guard now tokenizes shell commands and uses existing yaml for run scripts. Added 38 fixtures covering npm aliases, flag placement/location, package specs, continuations, quotes/paths, separators and allowed installs. npm run typecheck, npm run build:test, npm run docstring and npm run changelog:check PASS. The new linked guard and workflow contracts passed through pm test --run --only-last --progress: 45 pass, 0 fail/cancel/skip/todo. Full-suite certification is left to CI; review threads remain untouched."
+files[8]{path,scope}:
   .github/workflows/release.yml,project
   CHANGELOG.md,project
+  test/global-npm-guard.test.ts,project
+  test/global-npm-guard.ts,project
   test/release-changelog-contract.test.ts,project
   test/release-workflow.test.ts,project
   test/verify-release-changelog-date.test.ts,project
   test/verify-release-publish-attestation.test.ts,project
-tests[4]:
+tests[5]:
   - command: node --test --test-concurrency=2 test/release-workflow.test.ts
     scope: project
     provenance:
@@ -56,6 +60,14 @@ tests[4]:
     provenance:
       author: codex-sol
       created_at: "2026-11-16T15:53:22.695Z"
+      source_kind: local_mutation
+      source_ref: fix/job-local-npm
+  - command: node --test test/global-npm-guard.test.ts test/release-workflow.test.ts
+    scope: project
+    timeout_seconds: 1200
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-16T19:26:40.282Z"
       source_kind: local_mutation
       source_ref: fix/job-local-npm
 body: ""
