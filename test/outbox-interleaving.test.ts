@@ -1,3 +1,4 @@
+import { testTime } from './support/depth.ts';
 /** Exhaustive SQL-boundary races against real SQLite handles on one non-git SDK tracker. */
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -51,6 +52,7 @@ function boundaries(db: DatabaseSync, checkpoint: (sql: string) => void): () => 
 async function child(pmRoot: string, directory: string, source: string): Promise<number | null> {
   return new Promise((done, reject) => {
     const processChild = spawn(process.execPath, ["--input-type=module", "-e", source, pmRoot], {
+      timeout: testTime(120000), killSignal: "SIGKILL",
       cwd: directory, env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() }, stdio: ["ignore", "pipe", "pipe"],
     });
     let stderr = "";

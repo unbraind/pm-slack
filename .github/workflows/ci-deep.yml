@@ -1,0 +1,86 @@
+name: CI Deep
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-deep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deep:
+    runs-on: ${{ vars.PM_LOCAL_DEEP != 'off' && fromJSON('["self-hosted","pm-local"]') || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    env:
+      PM_TEST_DEPTH: full
+      PM_TEST_TIME_SCALE: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 26]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
+
+      - name: Setup Bun
+        if: runner.environment == 'github-hosted'
+        uses: oven-sh/setup-bun@v2.2.0
+
+      - name: Report Bun version
+        run: bun --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tracked pm project health
+        run: ./node_modules/.bin/pm health --strict-exit --require-merge-drivers
+
+      - name: Build and verify committed output is current
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git ls-files --error-unmatch 'dist/' > /dev/null 2>&1; then
+            echo "::error::dist/ is not tracked. This package is installed by copying the repository, so the build output has to be in git."
+            exit 1
+          fi
+          rm -rf dist
+          npm run build
+          drift=$(git status --porcelain=v1 --untracked-files=all --ignored=matching -- 'dist/')
+          if [ -n "$drift" ]; then
+            echo "::error::Committed dist/ does not match a fresh build. Run 'npm run build' and commit the result."
+            printf '%s\n' "$drift"
+            exit 1
+          fi
+          echo "Committed dist/ matches a fresh build."
+
+      - name: Full npm release gate
+        run: npm run release:check
+
+      - name: Bun package graph smoke
+        run: bun install --no-save
+
+      - name: Native Bun outbox acceptance
+        run: bun test/bun-outbox.acceptance.ts
+
+      - name: Full Bun release gate
+        run: bun run release:check
+
+      - name: Five-host packed payload acceptance
+        if: matrix.node-version == 26
+        run: npm run acceptance:payload

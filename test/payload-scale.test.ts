@@ -1,3 +1,4 @@
+import { testTime } from './support/depth.ts';
 /** Valid maximum-domain payloads must complete within a bounded child lifetime, through SDK and CLI outputs. */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -16,7 +17,7 @@ test("all valid dense payload shapes compile in bounded work through SDK, JSON a
 import {compileSlackPayload,validateSlackWirePayload} from ${JSON.stringify(pathToFileURL(join(root, "payload-compilation.ts")).href)};
 console.log(JSON.stringify(assertPayloadScale(compileSlackPayload,validateSlackWirePayload)));`;
   const started = performance.now();
-  const rows = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "--eval", code], { timeout: 20000, encoding: "utf8", maxBuffer: 1024 * 1024 })) as { leaves: number }[];
+  const rows = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "--eval", code], { timeout: testTime(20000), encoding: "utf8", maxBuffer: 1024 * 1024 })) as { leaves: number }[];
   assert.equal(rows.length, 5); assert.equal(rows[1]!.leaves, 50000);
   t.diagnostic(`Five adversarial SDK shapes including 50,000 fields completed in ${Math.round(performance.now() - started)} ms.`);
   const directory = mkdtempSync(join(tmpdir(), "slack-dense-cli-")); t.after(() => rmSync(directory, { recursive: true, force: true }));

@@ -1,3 +1,4 @@
+import { testTime } from './support/depth.ts';
 /** Real non-git trackers and real child-process crashes exercise durable Slack delivery. */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
@@ -562,13 +563,14 @@ function runPublishedExample(directory: string, env: NodeJS.ProcessEnv): Promise
   assert.ok(fenced?.[1], "docs/outbox-example.md must contain a TypeScript example");
   const source = fenced[1].replaceAll('from "pm-slack"', `from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)}`);
   writeFileSync(join(directory, "example.mts"), source);
+  const deadline = testTime(15_000);
   const child = spawn(process.execPath, [join(directory, "example.mts")], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += String(chunk); });
   child.stderr.on("data", (chunk) => { stderr += String(chunk); });
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`example hung: ${stderr}`)); }, 15_000);
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`example hung: ${stderr}`)); }, deadline);
     child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("exit", (status) => { clearTimeout(timer); resolve({ code: status ?? 1, stdout, stderr }); });
   });

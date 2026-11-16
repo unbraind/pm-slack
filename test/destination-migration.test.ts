@@ -1,3 +1,4 @@
+import { testDepth } from './support/depth.ts';
 /** Real non-git outbox tests: reviewed bindings, model-based replay, read-only previews and SQL-boundary races. */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -239,7 +240,7 @@ test("CLI and TOON expose the same guarded path offline, with typed refusals and
   assert.equal((await command({ action: "bind", alias: "invalid", route: "default", bindingRevision: "4" })).code, "invalid_input");
 });
 
-test("500 seeded operation sequences preserve the SDK-read model across old replays, CRLF, relationships, focus and route revisions", async (t) => {
+test("seeded operation sequences preserve the SDK-read model across old replays, CRLF, relationships, focus and route revisions", async (t) => {
   const f = await fixture(t);
   let seed = 0x516acc28;
   /** Fixed-seed random generator keeps failures reproducible. */
@@ -255,7 +256,7 @@ test("500 seeded operation sequences preserve the SDK-read model across old repl
   const native = (await listAllComplete({}, f.client)).items;
   f.bind("old", oldRoute, "#old"); f.bind("new", newRoute);
   const actions = new Set<number>();
-  for (let sequence = 0; sequence < 500; sequence++) {
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     // Only disposable fixture setup uses SQL; every generated operation and every state comparison uses the package/host SDK.
     f.db.exec("DELETE FROM delivery; DELETE FROM delivery_context; DELETE FROM delivery_proof; DELETE FROM delivery_attempt_start; DELETE FROM delivery_request_dispatched; DELETE FROM delivery_attempt_terminal; DELETE FROM delivery_group; DELETE FROM delivery_resolution; DELETE FROM destination_commit; DELETE FROM destination_original; DELETE FROM coalescing_receipt");
     f.bind("old", oldRoute, "#old"); f.bind("new", newRoute);
