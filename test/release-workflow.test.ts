@@ -36,7 +36,7 @@ test("no workflow replaces the shared global npm installation", () => {
   // `npm: command not found`). Every pinned npm install must target a
   // job-local prefix instead.
   const directory = resolve(import.meta.dirname, "../.github/workflows");
-  const replacers = /npm\s+(?:install|i)\s+(?:-g|--global)\s+npm@|npm\s+(?:-g|--global)\s+(?:install|i)\s+npm@/u;
+  const replacers = /npm\s+(?=[^\n]*\b(?:install|i)\b)(?=[^\n]*(?:\s-g\b|--global\b))[^\n]*\bnpm@/u;
   for (const name of readdirSync(directory).sort()) {
     if (!/\.ya?ml$/u.test(name)) continue;
     const source = readFileSync(join(directory, name), "utf-8");
