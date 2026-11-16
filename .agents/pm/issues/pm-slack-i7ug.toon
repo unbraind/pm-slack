@@ -1,0 +1,21 @@
+id: pm-slack-i7ug
+title: Install the pinned release npm into a job-local prefix
+description: "The release workflow replaces the runner's global npm with the pinned npm. Parallel jobs on one runner host share the toolcache Node installation, so one job's global install mutates a sibling job's npm mid-install (ENOTEMPTY, or npm: command not found), as reported by unbraind/pm-ops#284 for the fleet."
+type: Issue
+status: in_progress
+priority: 2
+tags[1]: "gh:unbraind/pm-ops#284"
+created_at: "2026-11-16T14:42:01.458Z"
+updated_at: "2026-11-16T14:46:06.112Z"
+assignee: pi-glm
+claim_principal: pi-glm
+author: pi-glm
+acceptance_criteria: The release workflow installs the pinned npm with --prefix into a job-local directory and prepends that prefix bin to the job path; The workflow keeps the exact-version assertion on the effective npm; A workflow-contract test fails if any workflow replaces the global npm
+comments[1]{created_at,author,text}:
+  "2026-11-16T14:45:44.306Z",pi-glm,"Root cause (fleet-wide, reported as unbraind/pm-ops#284): after setup-node, every deep and release job ran a global npm install of the pinned npm. On the shared local runners, all containers on one host share the toolcache Node installation mounted at the runner tool directory, so parallel jobs replaced the same npm and siblings failed with ENOTEMPTY (exit 217) or npm: command not found (exit 127). Fix: the release workflow installs the pinned npm into a job-local prefix and prepends that prefix bin to the job path, keeping the exact-version assertion on the effective npm. Contract updates: the pinned-bootstrap step assertions require the prefix form, only the install step itself may prepend to the job path, and a new workflow-wide audit fails if any workflow replaces the global npm. Gates: typecheck, the full quick tier (1028 tests) and changelog:check all pass on this branch."
+files[2]{path,scope}:
+  .github/workflows/release.yml,project
+  test/release-workflow.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/release-workflow.test.ts,project,pi-glm,"2026-11-16T14:46:05.967Z",local_mutation,fix/job-local-npm
+body: ""

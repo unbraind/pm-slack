@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import test from "node:test";
 
 /** The release workflow source, read once and asserted against as text. */
@@ -28,6 +28,21 @@ function stepIndex(name: string): number {
   assert.ok(match, `release workflow should contain the exact ${name} step`);
   return match.index;
 }
+
+test("no workflow replaces the shared global npm installation", () => {
+  // A global npm install replaces the npm inside the runner's shared Node
+  // installation. Parallel jobs on one host share that installation, so one
+  // job's global install corrupts a sibling's npm mid-install (ENOTEMPTY, or
+  // `npm: command not found`). Every pinned npm install must target a
+  // job-local prefix instead.
+  const directory = resolve(import.meta.dirname, "../.github/workflows");
+  const replacers = /npm\s+(?:install|i)\s+(?:-g|--global)\s+npm@|npm\s+(?:-g|--global)\s+(?:install|i)\s+npm@/u;
+  for (const name of readdirSync(directory).sort()) {
+    if (!/\.ya?ml$/u.test(name)) continue;
+    const source = readFileSync(join(directory, name), "utf-8");
+    assert.doesNotMatch(source, replacers, `${basename(name)} must install the pinned npm into a job-local prefix`);
+  }
+});
 
 test("npm publication authenticates by OIDC, with no stored token anywhere in the workflow", () => {
   // A stored npm token is what silently broke the whole fleet: it was rejected
@@ -144,8 +159,15 @@ test("the npm upgrade cannot be skipped and fails closed on the version it actua
   // Pinned exactly, not a caret range: a privileged publish job that resolves a
   // different npm on every run is not reproducible, and an unreviewed 11.x could
   // change publishing behaviour between two identical release commits.
-  assert.match(step, /npm install -g npm@11\.19\.0(?!\S)/);
-  assert.doesNotMatch(step, /npm install -g npm@[\^~]/);
+  // Prefix-local, never global: parallel jobs on one runner host share the
+  // Node installation, and a global install replaces the shared npm under a
+  // sibling job's feet. The pinned binary is published to the job's PATH only
+  // from the prefix it was just installed into.
+  assert.match(step, /npm install --prefix "\$RUNNER_TEMP\/npm-11\.19\.0" npm@11\.19\.0(?!\S)/);
+  assert.doesNotMatch(step, /npm\s+(?:install|i|add)\s+(?:-g|--global)\s+npm@/);
+  assert.doesNotMatch(step, /npm install --prefix "\$RUNNER_TEMP\/npm-11\.19\.0" npm@[\^~]/);
+  assert.match(step, /echo "\$RUNNER_TEMP\/npm-11\.19\.0\/node_modules\/.bin" >> "\$GITHUB_PATH"/);
+  assert.match(step, /export PATH="\$RUNNER_TEMP\/npm-11\.19\.0\/node_modules\/.bin:\$PATH"/);
   assert.doesNotMatch(step, /^ *if:/m);
   assert.match(step, /npm --version/);
   assert.match(step, /sort -V/);
@@ -167,22 +189,29 @@ test("nothing between the upgrade and the publish step can put an older npm back
   // still publishing with a downgraded npm.
   const publishEnd = publish + stepSource("Publish npm package").length;
   const between = executable(workflow.slice(upgrade, publishEnd));
-  const installs = [
+  const globalInstalls = [
     ...between.matchAll(/npm\s+(?:install|i|add)\s+(?:-g|--global)\s+npm@\S+/g),
     ...between.matchAll(/npm\s+(?:-g|--global)\s+(?:install|i|add)\s+npm@\S+/g),
   ];
   assert.equal(
-    installs.length,
+    globalInstalls.length,
+    0,
+    "no global npm install may appear before publication completes: it replaces the shared npm of a sibling job"
+  );
+  const prefixInstalls = [...between.matchAll(/npm\s+(?:install|i|add)\s+--prefix\s+"\$RUNNER_TEMP\/npm-11\.19\.0"\s+npm@\S+/g)];
+  assert.equal(
+    prefixInstalls.length,
     1,
-    `exactly one global npm install may appear before publication completes, found ${installs.length}`
+    `exactly one prefix-local pinned npm install may appear before publication completes, found ${prefixInstalls.length}`
   );
   assert.doesNotMatch(between, /corepack\s+(?:prepare|use)\s+npm@/);
   assert.doesNotMatch(between, /uses:\s*actions\/setup-node/);
   // Prepending a directory to GITHUB_PATH changes which npm later steps resolve
   // without installing anything, so it defeats an install-time check entirely.
-  // The publish step re-verifies at runtime, but rejecting the write statically
-  // means the run fails at review time rather than at publication time.
-  assert.doesNotMatch(between, /GITHUB_PATH/);
+  // Only the pinned-install step itself may prepend, and only the directory of
+  // the npm it just installed; anything else still fails at review time.
+  const afterUpgrade = executable(workflow.slice(upgrade + stepSource("Use an npm that supports trusted publishing").length, publishEnd));
+  assert.doesNotMatch(afterUpgrade, /GITHUB_PATH/);
 });
 
 test("no run script in the release job interpolates workflow context", () => {
