@@ -4,12 +4,12 @@ description: "The release workflow replaces the runner's global npm with the pin
 type: Issue
 status: in_progress
 priority: 2
-tags[1]: "gh:unbraind/pm-ops#284"
+tags[2]: "gh:unbraind/pm-ops#284","gh:unbraind/pm-slack#206"
 created_at: "2026-11-16T14:42:01.458Z"
-updated_at: "2026-11-17T07:54:42.396Z"
+updated_at: "2026-11-17T08:29:10.989Z"
 author: pi-glm
 acceptance_criteria: The release workflow installs the pinned npm with --prefix into a job-local directory and prepends that prefix bin to the job path; The workflow keeps the exact-version assertion on the effective npm; A workflow-contract test fails if any workflow replaces the global npm
-comments[18]{created_at,author,text}:
+comments[20]{created_at,author,text}:
   "2026-11-16T14:45:44.306Z",pi-glm,"Root cause (fleet-wide, reported as unbraind/pm-ops#284): after setup-node, every deep and release job ran a global npm install of the pinned npm. On the shared local runners, all containers on one host share the toolcache Node installation mounted at the runner tool directory, so parallel jobs replaced the same npm and siblings failed with ENOTEMPTY (exit 217) or npm: command not found (exit 127). Fix: the release workflow installs the pinned npm into a job-local prefix and prepends that prefix bin to the job path, keeping the exact-version assertion on the effective npm. Contract updates: the pinned-bootstrap step assertions require the prefix form, only the install step itself may prepend to the job path, and a new workflow-wide audit fails if any workflow replaces the global npm. Gates: typecheck, the full quick tier (1028 tests) and changelog:check all pass on this branch."
   "2026-11-16T15:17:47.518Z",codex-sol,"Continuation: verified the existing worktree and remote branch state, preserved the earlier changes, and reused this item. Rerunning required gates to completion under the continuation author before committing results."
   "2026-11-16T15:30:07.206Z",codex-sol,"Continuation review adds a separate next-step exact-version assertion and explicit ignore-scripts/no-audit/no-fund flags. The workflow-wide regression now also rejects global npm replacement with flags between --global and npm@. This extends the existing pushed implementation without creating a duplicate pull request. The repository defines no lint script; its existing docstring gate is included alongside typecheck, quick tests, workflow contracts and changelog verification."
@@ -28,6 +28,8 @@ comments[18]{created_at,author,text}:
   "2026-11-17T05:22:27.993Z",codex-sol,"Round AH: implement conservative run-wide global configuration and markers, install-family aliases, redirect-safe prefix segmentation, and comment-free effective prefix exemptions. Preserve all existing rejected fixtures and approved bootstrap workflows; verify required package gates before releasing the claim. No review-thread mutations."
   "2026-11-17T05:29:49.816Z",codex-sol,"Round AH verification: 109 tests passed with zero failures, cancellations or skips (102 guard fixtures plus release-workflow contracts). npm run build, npm run build:test, npm run typecheck, npm run docstring, npm run changelog:check and git diff --check all passed. No lint or duplication scripts exist. Threads PRRT_kwDOSYpJkM64QHNG, PRRT_kwDOSYpJkM64QHNQ, PRRT_kwDOSYpJkM64QnL6 and PRRT_kwDOSYpJkM64QnMA are addressed by this change. All earlier rejected fixtures are retained; approved bootstraps and repository workflows pass. Global signals are run-wide, and only effective command arguments can establish a prefix exemption. Shared guard logic matches all four copies. Protected item dates are unchanged. Exact-head CI remains pending; no thread actions, publishing or merges."
   "2026-11-17T07:46:29.140Z",pi-guard-1117aj,"Round AJ: replaced the guard's per-segment shell parser with a line-based fail-closed rule, identical to the other fleet repositories: logical lines only (continuations joined, newline-only splits), comment and here-document text scanned like any other text, install family extended with update/up/upgrade/udpate, markers covering single-dash g clusters, global-containing tokens, -L with any value and two-plus-letter prefixes of global/location, npm config set/set as a run-wide global signal (narrowed to a set token: a read-only 'npm config get globalconfig' line tripped the broader form), operands naming npm by substring or computed form (tarball URLs, x@npm:npm), exemptions restricted to exact approved bootstrap lines, and step-level rejection of GITHUB_ENV npm_config_* writes and global/location npmrc writes. The hand-rolled workflow extractor now consumes inert job-level sequence values such as needs lists, so the guard stays dependency-free across the fleet."
+  "2026-11-17T08:23:21.752Z",codex-sol,"Round AM verified against unchanged guard: punctuation and comment-continuation bypasses, operandless global installs, persistent npm config setters, and spaced YAML env keys reproduce. Quoted command words already reject; add explicit regression coverage. Keep line-based checks and exact raw-line bootstrap matching. Unresolved review threads: PRRT_kwDOSYpJkM64Us6C. Delegated npx finding is already rejected by Round AJ; preserve its rejected fixture. Run targeted gates directly; never execute linked PM tests. Preserve the existing test-session isolation import in the pm-vcs fixture."
+  "2026-11-17T08:29:10.048Z",codex-sol,"Round AM targeted verification: 160 tests passed with zero failures, cancellations or skips. node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts => PASS; npm run typecheck => PASS; npm run changelog:check => PASS. Scripts absent: lint, duplicates. All real workflows pass the guard; no bootstrap trailing comment was found. Guard source md5 d7ec9edd85b0c9fbe3d5a9f0e4d8d9e2 is identical across five packages. Fixture bodies match, retaining the required pm-vcs session-isolation import. Protected root item dates are unchanged; rejected fixtures are preserved. Same-class config persistence and spaced YAML env-key fixes from PRRT_kwDOVHTnEc64VRGg, PRRT_kwDOToJT7M64U3xi and PRRT_kwDOVHTnEc64VRGj were applied to every copy. Full-suite certification remains with CI. Releasing this claim without closing the item."
 files[8]{path,scope}:
   .github/workflows/release.yml,project
   CHANGELOG.md,project
@@ -37,7 +39,7 @@ files[8]{path,scope}:
   test/release-workflow.test.ts,project
   test/verify-release-changelog-date.test.ts,project
   test/verify-release-publish-attestation.test.ts,project
-tests[10]:
+tests[13]:
   - command: node --test --test-concurrency=2 test/release-workflow.test.ts
     scope: project
     provenance:
@@ -113,6 +115,27 @@ tests[10]:
     provenance:
       author: pi-guard-1117aj
       created_at: "2026-11-17T07:46:31.243Z"
+      source_kind: local_mutation
+      source_ref: fix/job-local-npm
+  - command: node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-17T08:25:45.550Z"
+      source_kind: local_mutation
+      source_ref: fix/job-local-npm
+  - command: npm run typecheck
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-17T08:25:53.549Z"
+      source_kind: local_mutation
+      source_ref: fix/job-local-npm
+  - command: "npm run changelog:check"
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-17T08:26:01.486Z"
       source_kind: local_mutation
       source_ref: fix/job-local-npm
 docs[2]{path,scope}:
