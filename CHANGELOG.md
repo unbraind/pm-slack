@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Gate CI on strict tracked pm project health ([pm-slack-k8yl](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-k8yl.toon))
+- Migrate PR180 to the November 4 pm toolchain ([pm-slack-toolchain-1104](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-toolchain-1104.toon))
+
 ## 2026.11.16 - 2026-11-16
 
 ### Dependencies
