@@ -2,13 +2,17 @@ id: pm-slack-global-update-operands
 title: Global npm update guard mistakes option values and redirect targets for packages
 description: "Follow-up to PR #206 thread PRRT_kwDOSYpJkM64Vsdx: npm update -g --loglevel warn and npm update -g >output currently return no findings. Round AN only changes continuation splitting. A separate line-based operand policy must handle option values and redirections while preserving approved fixtures."
 type: Issue
-status: open
+status: in_progress
 priority: 2
 tags[2]: follow-up,"gh:unbraind/pm-slack#206"
 created_at: "2026-11-17T08:44:27.402Z"
-updated_at: "2026-11-17T08:44:27.402Z"
+updated_at: "2026-11-17T09:03:29.154Z"
 author: codex-sol
+comments[1]{created_at,author,text}:
+  "2026-11-17T09:03:14.949Z",codex-sol,"Round AP fixing commit 1172f9023dfe7410ebfd7d8ee02dd592189beae0: every global update/up/upgrade/udpate is rejected without operand classification. New rejected fixtures: npm update -g --cache /tmp/x; npm update -g > update.log; npm update -g # nightly; npm up -g some-package; NPM_CONFIG_GLOBAL=true npm update. Added alias matrix across global markers and effective global/location environment scopes. Required package gates passed; all prior fixtures and real workflows pass. Left for orchestrator verification."
 files[2]{path,scope}:
-  test/global-npm-guard.ts,project
   test/global-npm-guard.test.ts,project
+  test/global-npm-guard.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/global-npm-guard.test.ts,project,codex-sol,"2026-11-17T09:03:25.800Z",local_mutation,fix/job-local-npm
 body: ""
