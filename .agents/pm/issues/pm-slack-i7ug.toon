@@ -6,10 +6,10 @@ status: in_progress
 priority: 2
 tags[2]: "gh:unbraind/pm-ops#284","gh:unbraind/pm-slack#206"
 created_at: "2026-11-16T14:42:01.458Z"
-updated_at: "2026-11-17T14:58:39.969Z"
+updated_at: "2026-11-17T15:44:05.897Z"
 author: pi-glm
 acceptance_criteria: The release workflow installs the pinned npm with --prefix into a job-local directory and prepends that prefix bin to the job path; The workflow keeps the exact-version assertion on the effective npm; A workflow-contract test fails if any workflow replaces the global npm
-comments[34]{created_at,author,text}:
+comments[37]{created_at,author,text}:
   "2026-11-16T14:45:44.306Z",pi-glm,"Root cause (fleet-wide, reported as unbraind/pm-ops#284): after setup-node, every deep and release job ran a global npm install of the pinned npm. On the shared local runners, all containers on one host share the toolcache Node installation mounted at the runner tool directory, so parallel jobs replaced the same npm and siblings failed with ENOTEMPTY (exit 217) or npm: command not found (exit 127). Fix: the release workflow installs the pinned npm into a job-local prefix and prepends that prefix bin to the job path, keeping the exact-version assertion on the effective npm. Contract updates: the pinned-bootstrap step assertions require the prefix form, only the install step itself may prepend to the job path, and a new workflow-wide audit fails if any workflow replaces the global npm. Gates: typecheck, the full quick tier (1028 tests) and changelog:check all pass on this branch."
   "2026-11-16T15:17:47.518Z",codex-sol,"Continuation: verified the existing worktree and remote branch state, preserved the earlier changes, and reused this item. Rerunning required gates to completion under the continuation author before committing results."
   "2026-11-16T15:30:07.206Z",codex-sol,"Continuation review adds a separate next-step exact-version assertion and explicit ignore-scripts/no-audit/no-fund flags. The workflow-wide regression now also rejects global npm replacement with flags between --global and npm@. This extends the existing pushed implementation without creating a duplicate pull request. The repository defines no lint script; its existing docstring gate is included alongside typecheck, quick tests, workflow contracts and changelog verification."
@@ -44,6 +44,9 @@ comments[34]{created_at,author,text}:
   "2026-11-17T14:51:16.440Z",codex-sol,"Round AW: verifying four shared guard findings before edits: continuation forms must scan separately, link/ln can have implicit global effects, --g denotes global mode, and multiline npmrc writes must be checked against all run contents. Keep the line-based guard identical across all five packages, preserve existing fixtures, and run workflow/reference gates. No new tracker items or closures."
   "2026-11-17T14:55:46.553Z",codex-sol,"Round AW: reproduced all four findings against the unchanged guard, including the two-step npmrc workflow. Addresses PRRT_kwDOUMUq1864eCYU, PRRT_kwDOUMUq1864eYv2, PRRT_kwDOVHTnEc64esLn, PRRT_kwDOVHTnEc64esLy. The line-based guard now unions physical lines and three independent joins, applies the registry operand allowlist to implicit link/ln effects (including bare links), accepts one-letter global option prefixes, and checks npmrc writes against the whole run. Preserved every existing fixture; added accepted non-npm registry links and npmrc writes with no global/location mention. Guard MD5 02f427a1776c5b99d68b1c10b03a3939. Verified: node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-changelog-contract.test.ts test/release-workflow.test.ts PASS (243/243/0/0/0 tests/pass/fail/cancelled/skipped); npm run typecheck PASS. All five PRs were open and mergeable; the pm-slack unresolved-thread read had no findings. Final changelog generation/check follows these tracker writes. Item remains in progress for orchestrator review."
   "2026-11-17T14:58:36.021Z",codex-sol,"Round AW mid-round review read: three new unresolved pm-slack threads arrived. PRRT_kwDOSYpJkM64fjRa requests stronger forced-global-env exemption assertions; read-only reproduction confirms existing production behavior already accepts the exact bootstrap and rejects latest/extra-prefix variants under forced env. PRRT_kwDOSYpJkM64fjRt requests a YAML dependency comment correction and parser replacement; verified yaml is a package devDependency, while the guard imports no parser. PRRT_kwDOSYpJkM64fjSJ concerns a block-list matrix.env false positive; reproduced unextractable step run for an npm-test-only workflow. These concern exemption test strength, YAML documentation/parser design, and metadata extraction, respectively, rather than continuation joining, implicit link effects, global option prefixes, or multiline npmrc writes. Left all three unimplemented within this round scope; retain the required line-based design and report them to the orchestrator without new items or review-thread writes."
+  "2026-11-17T15:37:26.229Z",codex-sol,"Round AW late review PRRT_kwDOTOTl1M64gC3N: reproduced empty findings for npm link --loglevel warn, npm ln --loglevel warn, and a command-looking option value before link. Option values must not masquerade as package operands for implicit links. Keep the scanner line-based: accept inline option values and known boolean global flags, but reject ambiguous unbound link options conservatively, including shell punctuation hidden in an option token. Existing accepted link -g some-tool remains accepted; added accepted inline-option registry links and rejected bare/options/punctuation regressions. Recheck the affected AN/reference suites and quality gates, then finalize tracker/changelog/source and regenerate the final self-host archive where required."
+  "2026-11-17T15:38:14.786Z",codex-sol,"Round AW PRRT_kwDOTOTl1M64gC3N verified: every existing fixture remains, new link-option and punctuation regressions reject, and known boolean global/inline-value registry links remain accepted. Full line-based guard MD5 23618780bdf981d6734941c1d5accb2e. Final affected gates: node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts test/release-changelog-contract.test.ts PASS (253/253/0/0/0 tests/pass/fail/cancelled/skipped); npm run typecheck PASS. Production package source and manifests did not change in this follow-up; prior expanded reference and real npm/Bun acceptance results remain applicable. Final tracker writes precede changelog regeneration/check. Leave this item in progress for orchestrator verification."
+  "2026-11-17T15:44:03.281Z",codex-sol,"Round AW PRRT_kwDOTOTl1M64gC3N final refinement: read-only npm config queries confirmed that -g false and --g false consume a boolean option value. Empty inline values also fail closed. Verified: every existing fixture remains, new link-option and punctuation regressions reject, and known boolean global/inline-value registry links remain accepted. Full line-based guard MD5 0055f72ef4fb208809848324cb902d9a. Final affected gates: node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts test/release-changelog-contract.test.ts PASS (258/258/0/0/0 tests/pass/fail/cancelled/skipped); npm run typecheck PASS. Production package source and manifests did not change in this follow-up; prior expanded reference and real npm/Bun acceptance results remain applicable. Final tracker writes precede changelog regeneration/check. Leave this item in progress for orchestrator verification."
 files[8]{path,scope}:
   .github/workflows/release.yml,project
   CHANGELOG.md,project
@@ -53,7 +56,7 @@ files[8]{path,scope}:
   test/release-workflow.test.ts,project
   test/verify-release-changelog-date.test.ts,project
   test/verify-release-publish-attestation.test.ts,project
-tests[16]:
+tests[17]:
   - command: node --test --test-concurrency=2 test/release-workflow.test.ts
     scope: project
     provenance:
@@ -172,6 +175,13 @@ tests[16]:
     provenance:
       author: codex-sol
       created_at: "2026-11-17T13:54:12.902Z"
+      source_kind: local_mutation
+      source_ref: fix/job-local-npm
+  - command: node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts test/release-changelog-contract.test.ts
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-17T15:38:10.679Z"
       source_kind: local_mutation
       source_ref: fix/job-local-npm
 docs[2]{path,scope}:
