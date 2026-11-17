@@ -1,0 +1,14 @@
+id: pm-slack-global-update-operands
+title: Global npm update guard mistakes option values and redirect targets for packages
+description: "Follow-up to PR #206 thread PRRT_kwDOSYpJkM64Vsdx: npm update -g --loglevel warn and npm update -g >output currently return no findings. Round AN only changes continuation splitting. A separate line-based operand policy must handle option values and redirections while preserving approved fixtures."
+type: Issue
+status: open
+priority: 2
+tags[2]: follow-up,"gh:unbraind/pm-slack#206"
+created_at: "2026-11-17T08:44:27.402Z"
+updated_at: "2026-11-17T08:44:27.402Z"
+author: codex-sol
+files[2]{path,scope}:
+  test/global-npm-guard.ts,project
+  test/global-npm-guard.test.ts,project
+body: ""
