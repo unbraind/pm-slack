@@ -2,13 +2,18 @@ id: pm-slack-k8yl
 title: Gate CI on strict tracked pm project health
 description: Run pm health --strict-exit in CI to reject durable tracker-health failures without claiming lossless merge attestation. pm-cli#921 covers history-repair erasing a durable drift signal; pm-cli#922 covers a lossy merge shape whose fresh clone is already green because receipts are local and tracked history resembles sequential edits.
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[2]: ci,performance
 created_at: "2026-08-06T20:46:46.358Z"
-updated_at: "2026-11-15T15:16:06.818Z"
+updated_at: "2026-11-17T01:58:51.435Z"
+closed_at: "2026-11-16T20:38:30.895Z"
+completed_at: "2026-11-16T20:38:30.895Z"
 author: pi-agent
 acceptance_criteria: "CI runs pm health --strict-exit immediately after dependency installation; clean durable repository state exits 0; tracked history, attribution, cache, extension, or available merge-evidence failures block CI; documentation does not claim fresh CI can inspect clone-local receipts"
+resolution: "Implemented and merged in #53 (5f29ba4). Fleet CI v2 scope delivered in #204 (36836e3, merged 2026-11-15)."
+expected_result: The change described by this item is on main.
+actual_result: "Merged in #53 as 5f29ba4; checks successful at head 9072f98: . Fleet CI v2 scope merged in #204 as 36836e3; checks successful at head 967c51f: CodeQL, CodeRabbit, Greptile Review, Hound, codeql, test (22), test (26); cubic, Sourcery review and enable-auto-merge skipped."
 comments[4]{created_at,author,text}:
   "2026-11-15T15:09:24.604Z",codex-sol,"Reusing the CI health item for Fleet CI v2; companion pm-cli-website-dyhg. Preserve required test (22)/test (26), committed dist verification and native Bun outbox acceptance. Node 26 runs one quick npm gate; five-host packed payload acceptance moves intact to deep along with full npm/Bun gates. Docs retain identity/home-path audit, executable outbox docs, package file lists and changelog. CodeQL is optional and gets the requested path filters. Release workflows and verifier scripts stay unchanged."
   "2026-11-15T15:11:51.721Z",codex-sol,"Baseline main run 43600606377: test (22) wall 23m42s/execution 7m44s; test (26) wall 52m35s/execution 6m52s. Full send/resolve corpora 37.85-66.70s, migration 44.29-62.70s; journal crash controls 52.00-64.83s stay exhaustive. Typecheck and test typecheck passed. No lint script or ESLint installation exists. Strict YAML parse passed (actionlint unavailable). Quick coverage is running directly to avoid pm schema context contamination. Generated prefix controls retain all error phases and status roles."
@@ -59,4 +64,5 @@ docs[3]:
     note: direct fresh-clone receipt and sequential-looking history shape
   - path: docs/ci-tiers.md
     scope: project
+close_reason: "Delivered by #53 \"Gate CI on durable PM tracker health with pm 2026.8.6\" (merged as 5f29ba4). Checks successful at the PR head 9072f98: . Also delivered the Fleet CI v2 scope by #204 \"Split quick PR CI from exhaustive nightly validation\" (merged 2026-11-15 as 36836e3). Checks successful at the #204 head 967c51f: CodeQL, CodeRabbit, Greptile Review, Hound, codeql, test (22), test (26); cubic, Sourcery review and enable-auto-merge skipped."
 body: ""
