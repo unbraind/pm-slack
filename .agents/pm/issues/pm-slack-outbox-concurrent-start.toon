@@ -1,0 +1,16 @@
+id: pm-slack-outbox-concurrent-start
+title: Diagnose intermittent storage_unavailable when two Slack outbox drains start
+description: "The Node 26.13.1 test (26) job on round BH head 38353ee failed the existing concurrent drain test. A child constructing SlackOutbox raised storage_unavailable before acknowledgements. The outbox code and test are identical to the incoming PR head. The focused test passed locally on Node 26.13.0, so the failure condition still needs isolation. Public CI evidence: https://github.com/unbraind/pm-slack/actions/runs/44172004990/job/134353302697."
+type: Issue
+status: open
+priority: 2
+tags[3]: ci,outbox,reliability
+created_at: "2026-11-17T20:50:03.774Z"
+updated_at: "2026-11-17T20:50:08.076Z"
+author: codex-sol
+files[2]{path,scope}:
+  outbox.ts,project
+  test/outbox.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "node --test --test-name-pattern=concurrent\\ process\\ drains\\ acknowledge\\ one\\ local\\ HTTP\\ send test/outbox.test.ts",project,codex-sol,"2026-11-17T20:50:07.823Z",local_mutation,fix/job-local-npm
+body: ""
