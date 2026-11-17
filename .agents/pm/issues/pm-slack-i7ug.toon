@@ -6,10 +6,10 @@ status: in_progress
 priority: 2
 tags[2]: "gh:unbraind/pm-ops#284","gh:unbraind/pm-slack#206"
 created_at: "2026-11-16T14:42:01.458Z"
-updated_at: "2026-11-17T08:47:02.584Z"
+updated_at: "2026-11-17T09:03:07.448Z"
 author: pi-glm
 acceptance_criteria: The release workflow installs the pinned npm with --prefix into a job-local directory and prepends that prefix bin to the job path; The workflow keeps the exact-version assertion on the effective npm; A workflow-contract test fails if any workflow replaces the global npm
-comments[23]{created_at,author,text}:
+comments[25]{created_at,author,text}:
   "2026-11-16T14:45:44.306Z",pi-glm,"Root cause (fleet-wide, reported as unbraind/pm-ops#284): after setup-node, every deep and release job ran a global npm install of the pinned npm. On the shared local runners, all containers on one host share the toolcache Node installation mounted at the runner tool directory, so parallel jobs replaced the same npm and siblings failed with ENOTEMPTY (exit 217) or npm: command not found (exit 127). Fix: the release workflow installs the pinned npm into a job-local prefix and prepends that prefix bin to the job path, keeping the exact-version assertion on the effective npm. Contract updates: the pinned-bootstrap step assertions require the prefix form, only the install step itself may prepend to the job path, and a new workflow-wide audit fails if any workflow replaces the global npm. Gates: typecheck, the full quick tier (1028 tests) and changelog:check all pass on this branch."
   "2026-11-16T15:17:47.518Z",codex-sol,"Continuation: verified the existing worktree and remote branch state, preserved the earlier changes, and reused this item. Rerunning required gates to completion under the continuation author before committing results."
   "2026-11-16T15:30:07.206Z",codex-sol,"Continuation review adds a separate next-step exact-version assertion and explicit ignore-scripts/no-audit/no-fund flags. The workflow-wide regression now also rejects global npm replacement with flags between --global and npm@. This extends the existing pushed implementation without creating a duplicate pull request. The repository defines no lint script; its existing docstring gate is included alongside typecheck, quick tests, workflow contracts and changelog verification."
@@ -33,6 +33,8 @@ comments[23]{created_at,author,text}:
   "2026-11-17T08:42:18.643Z",codex-sol,"Round AN: inspect unresolved review threads; scan joined and physical lines independently and union findings, with exact bootstrap exemptions local to each form. Preserve all fixtures and add quoted-hash regressions. Run the requested package gates directly; do not execute linked PM tests."
   "2026-11-17T08:44:29.999Z",codex-sol,"Unimplemented outside Round AN: PRRT_kwDOSYpJkM64Vsdx, option values and redirect filenames hide operandless global updates. Both examples still reproduce after the continuation union; tracked separately in pm-slack-global-update-operands because changing operand classification needs a distinct policy and fixtures."
   "2026-11-17T08:46:59.635Z",codex-sol,"Round AN verified: PRRT_kwDOSYpJkM64Vsdp. Joined and physical scans union findings; exact bootstrap exemptions apply per form. All old fixtures retained; four quoted-hash cases plus LF/CRLF union/exemption/dedup checks added. node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts: 165/165 pass, zero skipped. npm run typecheck and npm run changelog:check: pass. No lint or duplicate npm script exists. Guard md5: 9472ab1dff99c26c27085f766054f46d. Review threads were read only; lifecycle timestamps preserved."
+  "2026-11-17T09:01:55.966Z",codex-sol,"Round AP: reject every global update/up/upgrade/udpate line regardless of operands; option values, redirect targets and comment words cannot hide an update. Install-family operand handling stays unchanged. Preserve all prior fixtures, add the five requested rejections and alias/global-environment coverage, then run the Round AN gates directly. All five PRs remain open. No review-thread mutations."
+  "2026-11-17T09:03:04.669Z",codex-sol,"Round AP verification: node --test --test-concurrency=2 test/global-npm-guard.test.ts test/release-workflow.test.ts => PASS; npm run typecheck => PASS; npm run changelog:check => PASS; git diff --check => PASS. Focused suite: ℹ tests 171, ℹ pass 171, ℹ fail 0, ℹ cancelled 0, ℹ skipped 0, ℹ todo 0. Every real workflow still passes; all prior fixtures retained. Guard md5 e882f7b9396d4a810ccf85250dc05a04. No configured lint, duplicates script."
 files[8]{path,scope}:
   .github/workflows/release.yml,project
   CHANGELOG.md,project
@@ -42,7 +44,7 @@ files[8]{path,scope}:
   test/release-workflow.test.ts,project
   test/verify-release-changelog-date.test.ts,project
   test/verify-release-publish-attestation.test.ts,project
-tests[13]:
+tests[14]:
   - command: node --test --test-concurrency=2 test/release-workflow.test.ts
     scope: project
     provenance:
@@ -139,6 +141,13 @@ tests[13]:
     provenance:
       author: codex-sol
       created_at: "2026-11-17T08:26:01.486Z"
+      source_kind: local_mutation
+      source_ref: fix/job-local-npm
+  - command: node --test test/global-npm-guard.test.ts
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-17T09:02:02.155Z"
       source_kind: local_mutation
       source_ref: fix/job-local-npm
 docs[2]{path,scope}:
