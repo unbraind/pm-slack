@@ -1,0 +1,24 @@
+id: pm-slack-global-update-operands
+title: Global npm update guard mistakes option values and redirect targets for packages
+description: "Follow-up to PR #206 thread PRRT_kwDOSYpJkM64Vsdx: npm update -g --loglevel warn and npm update -g >output currently return no findings. Round AN only changes continuation splitting. A separate line-based operand policy must handle option values and redirections while preserving approved fixtures."
+type: Issue
+status: closed
+priority: 2
+tags[2]: follow-up,"gh:unbraind/pm-slack#206"
+created_at: "2026-11-17T08:44:27.402Z"
+updated_at: "2026-11-17T09:09:57.078Z"
+closed_at: "2026-11-17T09:09:57.044Z"
+completed_at: "2026-11-17T09:09:57.044Z"
+author: codex-sol
+repro_steps: "Run globalNpmInstalls on 'npm update -g --cache /tmp/x' or 'npm update -g > update.log': the option value or redirect target reads as an operand, so the operandless rule does not apply and the line passes."
+resolution: "Fixed in 1172f90: any update-family line (update, up, upgrade, udpate) with a global marker, or in a global-configured run, is a violation regardless of operands. Rejected fixtures cover --cache, a redirect, a comment, a named package and NPM_CONFIG_GLOBAL=true."
+expected_result: "Every global update-family line is rejected, whatever its operands."
+comments[1]{created_at,author,text}:
+  "2026-11-17T09:03:14.949Z",codex-sol,"Round AP fixing commit 1172f9023dfe7410ebfd7d8ee02dd592189beae0: every global update/up/upgrade/udpate is rejected without operand classification. New rejected fixtures: npm update -g --cache /tmp/x; npm update -g > update.log; npm update -g # nightly; npm up -g some-package; NPM_CONFIG_GLOBAL=true npm update. Added alias matrix across global markers and effective global/location environment scopes. Required package gates passed; all prior fixtures and real workflows pass. Left for orchestrator verification."
+files[2]{path,scope}:
+  test/global-npm-guard.test.ts,project
+  test/global-npm-guard.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/global-npm-guard.test.ts,project,codex-sol,"2026-11-17T09:03:25.800Z",local_mutation,fix/job-local-npm
+close_reason: "Verified by the orchestrator: 1172f90 makes every global update-family line a violation regardless of operands. The guard md5 e882f7b9 is identical in all five fix/job-local-npm PRs, the rejected fixtures for --cache/redirect/comment/named-package/env forms pass, and the focused gate passes."
+body: ""

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Global npm update guard mistakes option values and redirect targets for packages ([pm-slack-global-update-operands](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-global-update-operands.toon))
+
 ## 2026.11.17 - 2026-11-17
 
 ### Other

@@ -1,7 +1,8 @@
 /** Contracts owned by callers while the released workflow owns release execution. */
+import { workflowGlobalNpmInstalls } from './global-npm-guard.ts';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { isScalar, parseDocument } from 'yaml';
 
@@ -61,4 +62,14 @@ test('package-owned approval and preparation inputs are preserved', () => {
   "retire-unpublished": "${{ github.event_name == 'workflow_dispatch' && inputs.retire-unpublished == true }}",
   "release-enabled": "${{ github.ref == 'refs/heads/main' }}"
 });
+});
+
+test('no workflow replaces the shared global npm installation (unbraind/pm-ops#284)', () => {
+  // Local runners on one host share the Node installation in the toolcache volume. A global npm install replaces that
+  // shared npm while sibling jobs use it (ENOTEMPTY exit 217, `npm: command not found` exit 127), so any pinned npm
+  // must go into a job-local prefix instead.
+  const directory = resolve('.github/workflows');
+  for (const name of readdirSync(directory).filter(file => /\.ya?ml$/u.test(file)).sort()) {
+    assert.deepEqual(workflowGlobalNpmInstalls(readFileSync(join(directory, name), 'utf8')), [], `${name} must install a pinned npm into a job-local prefix`);
+  }
 });
