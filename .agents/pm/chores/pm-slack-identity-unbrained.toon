@@ -1,0 +1,20 @@
+id: pm-slack-identity-unbrained
+title: Use the unbrained commit identity
+description: "Apply the 2026-11-19 owner decision to tracked fixtures, documentation, and PM history. Verify identity mapping and package gates."
+type: Chore
+status: open
+priority: 2
+tags: []
+created_at: "2026-11-19T11:34:28.927Z"
+updated_at: "2026-11-19T12:00:41.965Z"
+author: codex-sol
+comments[2]{created_at,author,text}:
+  "2026-11-19T11:34:39.490Z",codex-sol,The owner selected unbrained as the fleet commit name and retained the existing noreply address. Verify package checks and reseal affected PM histories.
+  "2026-11-19T12:00:37.514Z",codex-sol,"Local tests, typecheck, tracker health, and changelog checks completed. History redaction verified for 0 items with zero hash mismatches. Historical Git attribution matched per commit after mapping 8 approved-address records to the fleet name."
+files[2]{path,scope}:
+  .mailmap,project
+  test/release-changelog-contract.test.ts,project
+tests[2]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  npm run typecheck,project,600,codex-sol,"2026-11-19T11:57:33.133Z",local_mutation,chore/commit-identity-unbrained
+  node --test --test-concurrency=2 test/identity-audit.test.ts test/release-changelog-contract.test.ts,project,600,codex-sol,"2026-11-19T11:57:58.688Z",local_mutation,chore/commit-identity-unbrained
+body: ""
