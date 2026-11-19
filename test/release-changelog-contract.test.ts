@@ -21,7 +21,7 @@ test("committed release changelog equals the same check after the release tag ex
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "synthetic-release", version: "2026.11.11", type: "module" }));
     writeFileSync(join(root, ".gitignore"), "node_modules\n.agents/pm/runtime\n.agents/pm/search\n.agents/pm/locks\n");
     run("git", ["init", "-q"]);
-    run("git", ["config", "user.name", "SteveBot"]); run("git", ["config", "user.email", "1153461+unbraind@users.noreply.github.com"]);
+    run("git", ["config", "user.name", "unbrained"]); run("git", ["config", "user.email", "1153461+unbraind@users.noreply.github.com"]);
     run(process.execPath, [resolve("node_modules/@unbrained/pm-cli/dist/cli.js"), "--pm-path", join(root, ".agents/pm"), "workspace", "init", "--prefix", "fixture", "--defaults", "--agent-guidance", "skip", "--no-merge-fence"]);
     run("git", ["add", "package.json", ".gitignore", ".agents/pm"]); run("git", ["commit", "-qm", "Synthetic baseline"]);
     run("git", ["tag", "v2026.11.10"]);
