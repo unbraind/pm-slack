@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "repository": "unbraind/pm-slack",
-  "baseSha": "ef548ec61279aa4c36b2c693ec52eba2738e404b",
-  "version": "2026.11.20",
-  "runId": 44731646422,
+  "baseSha": "b561d7410c6c516b453721c97a7d425cb85d67ac",
+  "version": "2026.11.22",
+  "runId": 45018696110,
   "runAttempt": 1,
   "configDigest": "19f861084767fcd1b42ece3bc60c873d40cadd652aba909211d2aaf4f1e1ede6"
 }
