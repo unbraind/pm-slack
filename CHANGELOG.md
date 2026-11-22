@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.11.22 - 2026-11-22
+
+### Dependencies
+
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#217](https://github.com/unbraind/pm-slack/pull/217))
+- Bump unbraind/pm-ops/.github/workflows/daily-release.yml ([#216](https://github.com/unbraind/pm-slack/pull/216))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#215](https://github.com/unbraind/pm-slack/pull/215))
+
 ## 2026.11.20 - 2026-11-20
 
 No changes.
