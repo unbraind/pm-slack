@@ -18,6 +18,10 @@ No changes.
 
 - Global npm update guard mistakes option values and redirect targets for packages ([pm-slack-global-update-operands](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-global-update-operands.toon))
 
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#209](https://github.com/unbraind/pm-slack/pull/209))
+
 ## 2026.11.17 - 2026-11-17
 
 ### Other
@@ -44,17 +48,35 @@ No changes.
 
 - Daily release fails its own release:check: the release regenerates CHANGELOG.md without --include-empty ([pm-slack-7fwr](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-7fwr.toon))
 
+### Dependencies
+
+- Bump @unbrained/pm-cli ([#193](https://github.com/unbraind/pm-slack/pull/193))
+- Bump @unbrained/pm-cli ([#190](https://github.com/unbraind/pm-slack/pull/190))
+- Bump the pm-toolchain group with 2 updates ([#189](https://github.com/unbraind/pm-slack/pull/189))
+- Bump the pm-toolchain group with 3 updates ([#187](https://github.com/unbraind/pm-slack/pull/187))
+- Bump the codeql-action group across 1 directory with 2 updates ([#183](https://github.com/unbraind/pm-slack/pull/183))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#185](https://github.com/unbraind/pm-slack/pull/185))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#184](https://github.com/unbraind/pm-slack/pull/184))
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#180](https://github.com/unbraind/pm-slack/pull/180))
+
 ## 2026.11.3 - 2026-11-03
 
-No changes.
+### Dependencies
+
+- Bump @types/node ([#181](https://github.com/unbraind/pm-slack/pull/181))
 
 ## 2026.11.1 - 2026-11-01
 
-No changes.
+### Dependencies
+
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#177](https://github.com/unbraind/pm-slack/pull/177))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#178](https://github.com/unbraind/pm-slack/pull/178))
 
 ## 2026.10.31 - 2026-10-31
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#175](https://github.com/unbraind/pm-slack/pull/175))
 
 ## 2026.10.30 - 2026-10-30
 
@@ -63,11 +85,21 @@ No changes.
 - Compile bounded Slack payloads with exact loss receipts ([pm-slack-loss-aware-payloads](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-loss-aware-payloads.toon))
 - Preview and review destination changes for pending Slack events ([pm-slack-destination-migration-plans](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-destination-migration-plans.toon))
 
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#172](https://github.com/unbraind/pm-slack/pull/172))
+- Bump the pm-toolchain group with 3 updates ([#170](https://github.com/unbraind/pm-slack/pull/170))
+
 ## 2026.10.28 - 2026-10-28
 
 ### Added
 
 - Explain notification routing decisions offline ([pm-slack-slyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/features/pm-slack-slyv.toon))
+
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#167](https://github.com/unbraind/pm-slack/pull/167))
+- Bump the pm-toolchain group with 3 updates ([#164](https://github.com/unbraind/pm-slack/pull/164))
 
 ## 2026.10.27 - 2026-10-27
 
@@ -92,9 +124,17 @@ No changes.
 
 - Keep outbox opt-in and recovery policy atomic across crashes ([pm-slack-s53m](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-s53m.toon))
 
+### Dependencies
+
+- Bump the codeql-action group across 1 directory with 2 updates ([#154](https://github.com/unbraind/pm-slack/pull/154))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#156](https://github.com/unbraind/pm-slack/pull/156))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#155](https://github.com/unbraind/pm-slack/pull/155))
+
 ## 2026.10.24 - 2026-10-24
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#145](https://github.com/unbraind/pm-slack/pull/145))
 
 ## 2026.10.23 - 2026-10-23
 
@@ -118,17 +158,28 @@ No changes.
 - Closed: Fix release publish ordering before protected main push ([pm-slack-1aeu](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-1aeu.toon))
 - Closed: Shell scalar assignments are read from raw text, so a comment can flag an unattested publish ([pm-slack-cxyv](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-cxyv.toon))
 
+### Dependencies
+
+- Bump @toon-format/toon ([#148](https://github.com/unbraind/pm-slack/pull/148))
+
 ## 2026.10.20 - 2026-10-20
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#142](https://github.com/unbraind/pm-slack/pull/142))
 
 ## 2026.10.18 - 2026-10-18
 
-No changes.
+### Dependencies
+
+- Bump the codeql-action group with 2 updates ([#140](https://github.com/unbraind/pm-slack/pull/140))
 
 ## 2026.10.17 - 2026-10-17
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#138](https://github.com/unbraind/pm-slack/pull/138))
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#135](https://github.com/unbraind/pm-slack/pull/135))
 
 ## 2026.10.16 - 2026-10-16
 
@@ -136,15 +187,22 @@ No changes.
 
 ## 2026.10.14 - 2026-10-14
 
-No changes.
+### Dependencies
+
+- Bump @types/node ([#132](https://github.com/unbraind/pm-slack/pull/132))
+- Bump @unbrained/pm-cli ([#131](https://github.com/unbraind/pm-slack/pull/131))
 
 ## 2026.10.10 - 2026-10-10
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#129](https://github.com/unbraind/pm-slack/pull/129))
 
 ## 2026.10.9 - 2026-10-09
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#127](https://github.com/unbraind/pm-slack/pull/127))
 
 ## 2026.10.5 - 2026-10-05
 
@@ -172,12 +230,22 @@ No changes.
 
 - Certify pm CLI 2026.9.21 and install merge drivers through the canonical pm-ops launcher ([pm-slack-h3ba](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-h3ba.toon))
 
+### Dependencies
+
+- Bump @types/node from 26.5.1 to 26.6.2 ([#114](https://github.com/unbraind/pm-slack/pull/114))
+
 ## 2026.9.18 - 2026-09-18
 
 ### Other
 
 - Cover every pm-slack code path with behavioural tests and raise the coverage gate to 100 ([pm-slack-hn3n](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/tasks/pm-slack-hn3n.toon))
 - Certify pm CLI 2026.9.17 ([pm-slack-eoqy](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-eoqy.toon))
+
+### Dependencies
+
+- Bump @types/node from 26.4.1 to 26.5.1 ([#107](https://github.com/unbraind/pm-slack/pull/107))
+- Bump pm-changelog from 2026.9.6 to 2026.9.13 ([#108](https://github.com/unbraind/pm-slack/pull/108))
+- Bump the codeql-action group across 1 directory with 2 updates ([#109](https://github.com/unbraind/pm-slack/pull/109))
 
 ## 2026.9.13 - 2026-09-13
 
@@ -205,9 +273,16 @@ No changes.
 
 - Harden the attestation consumer suite to match the rest of the converged fleet ([pm-slack-z1pl](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-z1pl.toon))
 
+### Dependencies
+
+- Bump pm-ops from 2026.8.17 to 2026.9.2 ([#95](https://github.com/unbraind/pm-slack/pull/95))
+- Bump pm-changelog from 2026.8.22 to 2026.9.2 ([#97](https://github.com/unbraind/pm-slack/pull/97))
+
 ## 2026.9.6 - 2026-09-06
 
-No changes.
+### Dependencies
+
+- Bump @types/node from 26.4.0 to 26.4.1 ([#94](https://github.com/unbraind/pm-slack/pull/94))
 
 ## 2026.9.4 - 2026-09-04
 
@@ -223,11 +298,20 @@ No changes.
 - This repository has never produced a static analysis, because it runs no CodeQL workflow ([pm-slack-ziy6](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-ziy6.toon))
 - Group codeql-action bumps into one pull request to end the split-PR deadlock ([pm-slack-0o62](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-0o62.toon))
 
+### Dependencies
+
+- Bump pm-changelog from 2026.8.17 to 2026.8.22 ([#89](https://github.com/unbraind/pm-slack/pull/89))
+
 ## 2026.8.31 - 2026-08-31
 
 ### Closed
 
 - Closed: The release changelog remained Unreleased after the release tag was created ([pm-slack-53pp](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-53pp.toon))
+
+### Dependencies
+
+- Bump @unbrained/pm-cli from 2026.8.22 to 2026.8.27 ([#85](https://github.com/unbraind/pm-slack/pull/85))
+- Bump @types/node from 26.2.0 to 26.4.0 ([#84](https://github.com/unbraind/pm-slack/pull/84))
 
 ## 2026.8.29 - 2026-08-29
 
@@ -252,6 +336,14 @@ No changes.
 ### Closed
 
 - Closed: The identity gate deadlocks the one remediation its own failure message prescribes ([pm-slack-fopw](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/issues/pm-slack-fopw.toon))
+
+### Dependencies
+
+- Bump pm-changelog from 2026.8.12 to 2026.8.17 ([#72](https://github.com/unbraind/pm-slack/pull/72))
+- Bump pm-ops from 2026.8.10 to 2026.8.17 ([#71](https://github.com/unbraind/pm-slack/pull/71))
+- Bump @types/node from 26.1.2 to 26.2.0 ([#63](https://github.com/unbraind/pm-slack/pull/63))
+- Bump pm-changelog from 2026.8.6 to 2026.8.12 ([#62](https://github.com/unbraind/pm-slack/pull/62))
+- Bump pm-ops from 2026.8.8 to 2026.8.10 ([#61](https://github.com/unbraind/pm-slack/pull/61))
 
 ## 2026.8.17 - 2026-08-17
 
@@ -295,7 +387,10 @@ No changes.
 
 ## 2026.8.3 - 2026-08-03
 
-No changes.
+### Dependencies
+
+- Bump pm-changelog from 2026.7.25 to 2026.7.29 ([#50](https://github.com/unbraind/pm-slack/pull/50))
+- Bump @types/node from 26.1.1 to 26.1.2 ([#51](https://github.com/unbraind/pm-slack/pull/51))
 
 ## 2026.8.1 - 2026-08-01
 
@@ -340,6 +435,10 @@ No changes.
 
 - Enable governance duplicate-detection advisory mode and adopt pm-cli 2026.7.25 ([pm-slack-lnly](https://github.com/unbraind/pm-slack/blob/main/.agents/pm/chores/pm-slack-lnly.toon))
 
+### Dependencies
+
+- Bump pm-changelog from 2026.7.24 to 2026.7.25 ([#36](https://github.com/unbraind/pm-slack/pull/36))
+
 ## 2026.7.25 - 2026-07-25
 
 ### Fixed
@@ -366,7 +465,11 @@ No changes.
 
 ## 2026.7.20 - 2026-07-20
 
-No changes.
+### Dependencies
+
+- Bump actions/setup-node from 6 to 7 ([#28](https://github.com/unbraind/pm-slack/pull/28))
+- Bump pm-changelog from 2026.7.11 to 2026.7.18 ([#29](https://github.com/unbraind/pm-slack/pull/29))
+- Bump @unbrained/pm-cli from 2026.7.11 to 2026.7.18 ([#30](https://github.com/unbraind/pm-slack/pull/30))
 
 ## 2026.7.19 - 2026-07-19
 
@@ -381,11 +484,20 @@ No changes.
 
 ## 2026.7.13 - 2026-07-13
 
-No changes.
+### Dependencies
+
+- Bump pm-changelog from 2026.7.10 to 2026.7.11 ([#26](https://github.com/unbraind/pm-slack/pull/26))
+- Bump @unbrained/pm-cli from 2026.7.10 to 2026.7.11 ([#27](https://github.com/unbraind/pm-slack/pull/27))
 
 ## 2026.7.11 - 2026-07-11
 
-No changes.
+### Dependencies
+
+- Bump typescript from 6.0.3 to 7.0.2
+- Bump @types/node from 25.9.2 to 26.1.1
+- Bump pm-changelog from 2026.6.30 to 2026.7.10
+- Bump @unbrained/pm-cli from 2026.7.5 to 2026.7.10
+- Bump actions/checkout from 6 to 7
 
 ## 2026.7.10 - 2026-07-10
 
