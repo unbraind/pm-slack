@@ -416,28 +416,38 @@ function causeCode(error: unknown): string | undefined {
   return typeof error.cause.code === "string" ? error.cause.code : undefined;
 }
 
-/** Accept both permanent and temporary resolver failures without permitting uncertain sends to retry. */
-function retryableLookupFailure(error: unknown): boolean {
-  assert.ok(["ENOTFOUND", "EAI_AGAIN"].includes(causeCode(error) ?? ""), String(causeCode(error)));
+const missingHostname = "pm-slack-outbox.invalid";
+const missingWebhook = `http://${missingHostname}/webhook`;
+type DnsFailureCode = "ENOTFOUND" | "EAI_AGAIN";
+
+/** Check that the transport retained the DNS cause and that the outbox can retry it. */
+function retryableLookupFailure(error: unknown, code: DnsFailureCode): boolean {
+  assert.equal(causeCode(error), code);
   assert.equal(__test__.classifyOutboxSendError(error), "retry");
   return true;
 }
 
-test("DNS lookup assertions accept transient resolver failures", async () => {
+/** Keep the real HTTP client and inject a deterministic failure at its DNS boundary. */
+function useLookupFailure(t: TestContext, code: DnsFailureCode): string[] {
   const previousAgent = http.globalAgent;
-  let lookups = 0;
-  const agent = new http.Agent({ lookup(_hostname, _options, callback) {
-    lookups += 1;
-    callback(Object.assign(new Error("Temporary resolver failure"), { code: "EAI_AGAIN" }), "", 4);
+  const lookups: string[] = [];
+  const agent = new http.Agent({ lookup(hostname, _options, callback) {
+    lookups.push(hostname);
+    callback(Object.assign(new Error("Synthetic resolver failure"), { code }), "", 4);
   } });
   http.globalAgent = agent;
-  try {
-    await assert.rejects(__test__.postToSlackOnce("http://pm-slack-outbox.invalid/webhook", { text: "DNS fixture" }), retryableLookupFailure);
-    assert.equal(lookups, 1, "the real HTTP client must exercise the temporary DNS failure fixture");
-  } finally {
+  t.after(() => {
     http.globalAgent = previousAgent;
     agent.destroy();
-  }
+  });
+  return lookups;
+}
+
+test("a transient DNS failure remains retryable through the real HTTP client", async (t) => {
+  const lookups = useLookupFailure(t, "EAI_AGAIN");
+  await assert.rejects(__test__.postToSlackOnce(missingWebhook, { text: "DNS fixture" }),
+    (error: unknown) => retryableLookupFailure(error, "EAI_AGAIN"));
+  assert.deepEqual(lookups, [missingHostname]);
 });
 
 /** Open a localhost sink and return its webhook URL. */
@@ -486,17 +496,19 @@ test("pre-request transport codes stay pending and response text cannot force a 
   await new Promise<void>((done) => refused.listen(0, "127.0.0.1", done));
   const refusedUrl = `http://127.0.0.1:${(refused.address() as { port: number }).port}/webhook`;
   await new Promise<void>((done) => refused.close(() => done()));
-  const missingUrl = "http://pm-slack-outbox.invalid/webhook";
   await assert.rejects(postToSlackOnce(refusedUrl, { text: "probe" }), (error: unknown) => {
     assert.equal(causeCode(error), "ECONNREFUSED");
     return true;
   });
-  await assert.rejects(postToSlackOnce(missingUrl, { text: "probe" }), retryableLookupFailure);
+  const lookups = useLookupFailure(t, "ENOTFOUND");
+  await assert.rejects(postToSlackOnce(missingWebhook, { text: "probe" }),
+    (error: unknown) => retryableLookupFailure(error, "ENOTFOUND"));
+  assert.deepEqual(lookups, [missingHostname]);
 
   environment(t, healthyUrl);
   process.env.PM_SLACK_ROUTES = JSON.stringify([
     { match: "close", webhook: refusedUrl },
-    { match: "block", webhook: missingUrl },
+    { match: "block", webhook: missingWebhook },
     { match: "cancel", webhook: failureUrl },
     { match: "start", webhook: partialUrl },
   ]);
@@ -513,8 +525,9 @@ test("pre-request transport codes stay pending and response text cannot force a 
   const refusedKey = box.enqueue({ ...intent("refused"), destination: slackDestination(refusedUrl) });
   assert.equal((await drain("1")).rows.find((row) => row.key === refusedKey)?.state, "pending");
   assert.equal(box.status().rows.find((row) => row.key === refusedKey)?.attempts, 1);
-  const missingKey = box.enqueue({ ...intent("missing"), destination: slackDestination(missingUrl) });
+  const missingKey = box.enqueue({ ...intent("missing"), destination: slackDestination(missingWebhook) });
   await drain("1");
+  assert.deepEqual(lookups, [missingHostname, missingHostname], "the probe and drain each used the resolver fixture");
   assert.equal(box.status().rows.find((row) => row.key === missingKey)?.state, "pending");
   assert.equal(box.status().rows.find((row) => row.key === missingKey)?.attempts, 1);
   const failureKey = box.enqueue({ ...intent("failure"), destination: slackDestination(failureUrl) });
