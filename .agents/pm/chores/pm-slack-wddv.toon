@@ -1,0 +1,21 @@
+id: pm-slack-wddv
+title: Keep published dependency updates in the generated changelog
+description: "Regenerating the changelog without --dependency-updates drops Dependabot bullets from release windows that already have tracked items. Every package changelog entry point must pass the flag so generation, checks and release notes keep those published notes."
+type: Chore
+status: in_progress
+priority: 2
+tags[2]: changelog,release-hygiene
+created_at: "2026-11-24T00:21:36.912Z"
+updated_at: "2026-11-24T00:24:24.976Z"
+author: codex-agent
+acceptance_criteria: "changelog, changelog:full, changelog:check and release:notes pass --dependency-updates; A regression fails when any changelog entry point drops the flag; changelog:check passes after regeneration with fetched tags"
+comments[2]{created_at,author,text}:
+  "2026-11-24T00:21:59.569Z",codex-agent,Package changelog entry points omit --dependency-updates. Compare the published ledger with unflagged and flagged generation after tags are fetched.
+  "2026-11-24T00:24:16.468Z",codex-agent,"With fetched tags, the unflagged generator matches the published ledger and omits 58 dependency bullets from release windows that already have tracked items. Passing --dependency-updates restores all 58. Removing only the flag from the package scripts fails the changelog entry-point regression. Restoring the flag makes that test pass, 1/1. Typecheck passed. This package has no lint script. Focused Node tests that read the package scripts, changelog contract and identity controls passed 43/43."
+files[3]{path,scope}:
+  CHANGELOG.md,project
+  package.json,project
+  test/release-workflow.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "node --test --test-concurrency=2 --test-name-pattern=\"package changelog entry points retain dependency updates\" test/release-workflow.test.ts",project,codex-agent,"2026-11-24T00:24:12.816Z",local_mutation,fix/changelog-keep-dependency-updates
+body: ""
