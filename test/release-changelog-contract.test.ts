@@ -45,6 +45,14 @@ test("committed release changelog equals the same check after the release tag ex
     run(process.execPath, [resolve("node_modules/pm-changelog/dist/cli.js"), ...check]);
     assert.equal(readFileSync(join(root, "CHANGELOG.md"), "utf8"), generated);
     assert.equal(run("git", ["show", "HEAD:CHANGELOG.md"]), generated);
+
+    childEnv.GIT_AUTHOR_DATE = "2026-11-12T12:00:00Z"; childEnv.GIT_COMMITTER_DATE = "2026-11-12T12:00:00Z";
+    run("git", ["commit", "--allow-empty", "-qm", "Synthetic later release"]);
+    run("git", ["tag", "v2026.11.12"]);
+    run("git", ["checkout", "--detach", "v2026.11.11"]);
+    assert.equal(releaseChangelog(check, root), 0, "a fetched descendant release tag cannot change the older checkout's changelog");
+    assert.equal(readFileSync(join(root, "CHANGELOG.md"), "utf8"), generated);
+
     writeFileSync(join(root, "CHANGELOG.md"), "stale\n");
     assert.equal(releaseChangelog(check, root), 1, "check must still reject stale contents");
   } finally { rmSync(root, { recursive: true, force: true }); }

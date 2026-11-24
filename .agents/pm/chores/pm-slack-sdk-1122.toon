@@ -6,9 +6,21 @@ status: in_progress
 priority: 2
 tags[2]: sdk-migration,toolchain
 created_at: "2026-11-24T18:24:01.432Z"
-updated_at: "2026-11-24T18:24:08.322Z"
-assignee: codex-agent
-claim_principal: codex-agent
+updated_at: "2026-11-24T18:33:07.212Z"
 author: codex-agent
 acceptance_criteria: "Pin the current npm toolchain and refresh both lockfiles.; Verify native option refusal and supported Slack coalescing preview in a real tracker.; Classify the CI Deep failures and regress any package defect.; Regenerate and check the changelog with published dependency bullets retained, pass scoped gates, and hand off full gates to CI."
+comments[1]{created_at,author,text}:
+  "2026-11-24T18:33:05.869Z",codex-agent,"Pinned pm-cli 2026.11.24, pm-changelog 2026.11.20 and pm-ops 2026.11.22 in both locks. Dependabot PR 213 and the full baseline both stopped at “inspection of absent storage retains empty status and disabled preview without creating runtime files”. The old harness forwarded undeclared migration options to coalescing. The host-aligned harness returns unknown_option with exit 2 before dispatch. The fixture now uses each command’s own preview options, checks both former coalescing options are refused and keeps the read-only assertions. The new refusal assertion fails under pm-cli 2026.11.14.\n\nCI Deep run 45011212158 exposed a reproducible release-toolchain defect. pm-changelog 2026.11.14 lets a fetched descendant release tag into the older checkout’s changelog. The original checkout passes with the later tag absent or with pm-changelog 2026.11.20 and the same tags. The new contract test fails at its descendant-tag assertion on 2026.11.14. CI Deep run 45304177020 exposed a resolver-dependent flake in “pre-request transport codes stay pending and response text cannot force a retry”. The DNS lookup now returns typed fixture errors through the real HTTP client, preserving the retry and uncertainty assertions. A synthetic unclassified resolver error reproduces the old test failure while the fixed test passes.\n\nAll four changelog entry points inherited the dependency-updates option and its regression test. Omitting each option individually failed the test, and the regenerated ledger retains all 63 published dependency bullets.\n\nLocal baseline 1,311/1,312 with the coalescing failure above. Fixed focused suite 126/126, linked pm test 67/67, identity and storage privacy tests 10/10. Build, source and test typechecks, docstring gate at 126 declarations, and Bun frozen lock validation passed. Full-depth coverage and the full npm and Bun release gates are CI Deep checks on main. The PR CI workflow runs Node 22 quick tests, the Node 26 quick npm release gate, and native Bun outbox acceptance."
+files[6]{path,scope}:
+  bun.lock,project
+  package-lock.json,project
+  package.json,project
+  test/observational-outbox.test.ts,project
+  test/outbox.test.ts,project
+  test/release-changelog-contract.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/observational-outbox.test.ts test/outbox.test.ts test/release-changelog-contract.test.ts,project,codex-agent,"2026-11-24T18:29:57.990Z",local_mutation,deps/adopt-pm-cli-host-alignment-1122
+docs[2]{path,scope}:
+  CHANGELOG.md,project
+  docs/coalescing-validation.md,project
 body: ""

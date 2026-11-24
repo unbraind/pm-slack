@@ -92,9 +92,19 @@ test("inspection of absent storage retains empty status and disabled preview wit
     const { result } = await harness.runCommand({ command: "slack outbox", pmRoot, options });
     assert.equal((result as { enabled_since: unknown }).enabled_since, null);
   }
-  for (const command of ["slack coalesce", "slack migrate"]) {
-    const { result } = await harness.runCommand({ command, pmRoot, options: { from: "old", to: "new" } });
+  const previews = [
+    { command: "slack coalesce", options: { action: "preview" } },
+    { command: "slack migrate", options: { from: "old", to: "new" } },
+  ];
+  for (const preview of previews) {
+    const { result } = await harness.runCommand({ ...preview, pmRoot });
     assert.equal((result as { code: string }).code, "disabled");
+  }
+  for (const [option, alias] of [["from", "old"], ["to", "new"]] as const) {
+    await assert.rejects(
+      harness.runCommand({ command: "slack coalesce", pmRoot, options: { [option]: alias } }),
+      { code: "unknown_option", exitCode: 2 },
+    );
   }
   assert.equal(existsSync(join(pmRoot, "runtime", "slack-outbox")), false);
   const box = new SlackOutbox(pmRoot, { readOnly: true }); assert.equal(box.status().rows.length, 0); box.close();
