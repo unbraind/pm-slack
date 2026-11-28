@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.11.28 - 2026-11-28
+
+### Dependencies
+
+- Bump @types/node ([#228](https://github.com/unbraind/pm-slack/pull/228))
+
 ## 2026.11.26 - 2026-11-26
 
 No changes.
