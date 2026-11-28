@@ -61,7 +61,7 @@
     "@toon-format/toon": "4.4.0",
     "@types/node": "26.6.6",
     "@unbrained/pm-cli": "2026.11.24",
-    "pm-changelog": "2026.11.20",
+    "pm-changelog": "2026.11.27",
     "pm-ops": "2026.11.22",
     "typescript": "7.0.2",
     "yaml": "2.9.1"

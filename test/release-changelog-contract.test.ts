@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { releaseChangelog } from "../scripts/pm-changelog.ts";
 
-test("committed release changelog equals the same check after the release tag exists", () => {
+test("committed release changelog equals the same check after the release tag exists", async t => {
   const root = mkdtempSync(join(tmpdir(), "slack-release-changelog-"));
   const childEnv: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_DATE: "2026-11-10T12:00:00Z", GIT_COMMITTER_DATE: "2026-11-10T12:00:00Z" };
   for (const key of Object.keys(childEnv)) if (/TOKEN|SECRET|PASSWORD|CREDENTIAL|NPM_MEDIA_SERVER|^PM_PATH$/i.test(key)) delete childEnv[key];
@@ -52,6 +52,28 @@ test("committed release changelog equals the same check after the release tag ex
     run("git", ["checkout", "--detach", "v2026.11.11"]);
     assert.equal(releaseChangelog(check, root), 0, "a fetched descendant release tag cannot change the older checkout's changelog");
     assert.equal(readFileSync(join(root, "CHANGELOG.md"), "utf8"), generated);
+
+    await t.test("pending-only drift passes read-only, but strict and versioned checks fail", () => {
+      const target = join(root, "CHANGELOG.md");
+      const pending = generated.replace(/^(# [^\n]+\n\n)/, "$1## Unreleased\n\n- A pending change.\n\n");
+      const versioned = pending.replace(/^## (\d[^\n]+)$/m, "## $1 (edited)");
+      assert.match(pending, /^## Unreleased$/m);
+      assert.notEqual(versioned, pending);
+      for (const { content, flags, status, diagnostic } of [
+        { content: pending, flags: check, status: 0, diagnostic: /pending_only/ },
+        { content: pending, flags: [...args, "--check-pending"], status: 1, diagnostic: /out of date/ },
+        { content: versioned, flags: check, status: 1, diagnostic: /out of date/ },
+      ]) {
+        writeFileSync(target, content);
+        const result = spawnSync(process.execPath, [resolve("scripts/pm-changelog.ts"), ...flags],
+          { cwd: root, env: childEnv, encoding: "utf8", timeout: 120000 });
+        assert.ifError(result.error);
+        assert.equal(result.status, status, result.stderr);
+        assert.match(result.stderr, diagnostic);
+        assert.equal(result.stdout, "");
+        assert.equal(readFileSync(target, "utf8"), content);
+      }
+    });
 
     writeFileSync(join(root, "CHANGELOG.md"), "stale\n");
     assert.equal(releaseChangelog(check, root), 1, "check must still reject stale contents");
